@@ -16,7 +16,7 @@ your own disc.
 ## How it works (the short version)
 
 1. You give the app a copy of your game disc (an `.iso` file).
-2. You pick a difficulty mode (see below).
+2. The app applies the base Very Hard Plus mode.
 3. The app writes out a **new, separate file** — your original is never touched.
 
 You end up with something like `Digimon World 4 [VeryHardPlus].iso`, which you can play
@@ -28,28 +28,17 @@ in an emulator or burn/load like any other copy.
   region or a different version, the app tells you it won't work — it doesn't guess.
 - Windows or Linux. Nothing else to install.
 
-## The modes
+## The mode
 
-| Mode | In plain words |
-| --- | --- |
-| **Very Hard Plus** *(default)* | Every enemy gets big boosts to health, attack, and other stats, and wears the "yellow crown" — the badge the game gives the strongest enemy variants. This is the mode that's been checked byte-for-byte against real discs. |
-| **Very Hard Plus — Extreme** | Same as above, **plus** the game starts you on Very Hard difficulty right away, instead of making you unlock or pick it. |
-| **Very Hard Plus — Brutal** | Same as Extreme, but taken further: every enemy of a given type becomes *the strongest version of that type*. No more weaklings — every Digimon you meet is the elite of its kind (extra experience included). |
-| **Custom** | The do-it-yourself mode. It appears automatically the moment you change any setting. You get every dial: one slider per stat, how strong the "crown" enemies are, whether the difficulty-boost and start-on-Very-Hard changes are on, and more. |
+**Very Hard Plus** boosts enemy health, attack, and other stats and adds the
+"yellow crown" worn by the strongest enemy variants. This base mode has been
+checked byte-for-byte against real discs. It is the only mode available for now;
+there are no difficulty presets or custom settings to choose.
+If the output already exists, pressing **Patch ISO** asks before replacing it.
 
-A few honest notes about the modes:
-
-- The **default** mode is the only one that's been verified against real discs, byte for byte.
-- **Extreme's** "start on Very Hard" change is the same single-line change the original mod
-  author made, but nobody has actually sat down and played it — so it should work, but it's
-  not confirmed in play.
-- **Brutal's** grouping (which enemies belong to which type) was recovered from a memory
-  snapshot of the running game, because the disc doesn't record it. It's never been played
-  either.
-- **Attack values are already near the game's maximum**, so on Very Hard most enemies hit
-  just as hard as each other no matter what — the extra difficulty really comes from the
-  health and stat boosts. The app shows you when this happens, and the Custom mode lets you
-  turn the attack boost down if you'd rather.
+Attack values are already near the game's maximum, so on Very Hard most enemies
+hit just as hard as each other. Much of the extra difficulty comes from health
+and other stat boosts.
 
 ## Is my disc safe?
 
@@ -101,13 +90,46 @@ The rest of the details live here:
   variables (`DW4_GOLDEN_SHIPPED_ISO`, `DW4_GOLDEN_BLOCKS_BIN`, `DW4_GOLDEN_BLOCKS_JSON`)
   and takes ~7 minutes; it skips cleanly (rather than failing) when those aren't set.
   There's also a row-group test (`tests/rowgroup.rs`, plus `tests/rowgroup_snapshot.rs`
-  with `DW4_ROWGROUP_SNAPSHOT`) that checks the Brutal mode's enemy grouping.
+  with `DW4_ROWGROUP_SNAPSHOT`) that checks the engine's enemy grouping utilities.
 - **One rule of this repository:** no game data is ever committed here — no disc images,
   no extracted files, no memory dumps. Everything the app needs as a constant is an
   offset or instruction; the actual "before" values come from the player's own disc.
 - Release builds (Windows zip/MSI, Linux AppImage/deb/tarball) are produced automatically
   by CI for tagged releases. The Linux ones are launch-tested; the Windows ones are built
   but never run here, and like all release assets, they're unsigned.
+
+## Driving the desktop app with an agent
+
+The optional `agent-control` build exposes the real webview through a token-protected
+loopback endpoint. Ordinary builds do not include it. This drives the rendered UI and
+native patch engine; it does not use the browser mock backend.
+
+```sh
+npm run build
+cargo build --manifest-path crates/dw4vhp-tauri/Cargo.toml --features agent-control,tauri/custom-protocol
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json start --binary crates/dw4vhp-tauri/target/debug/dw4-veryhard-plus
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json snapshot
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "disc path" "/path/to/clean.iso"
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "output path" "/tmp/patched.iso"
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json click "Patch ISO"
+```
+
+`eval` accepts a JavaScript expression and returns its JSON result. `screenshot /tmp/app.png`
+uses `xdotool` and ImageMagick on an X11/XWayland window (launch with `GDK_BACKEND=x11`).
+The session file contains private credentials and the app's PID. Use a fresh session
+path for each launch. Close the test app and remove the session file afterward.
+
+Run the full UI test on a freshly launched app:
+
+```sh
+python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 df426b9ff17c9e8218779f8ff1ecf524
+```
+
+The test checks invalid and already-modded inputs, patching, overwrite cancellation
+and confirmation, and refusal to overwrite the input. It checks the output checksum
+and verifies that the original is unchanged. Reports, screenshots and test ISOs go to
+a new directory under `/tmp`; game data is never added to the repository. The UI
+requires a working desktop display. Screenshots require the X11 tools above.
 
 ## Licence
 

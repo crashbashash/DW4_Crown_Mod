@@ -1,4 +1,4 @@
-import type { DiscStatus, PatchOutcome, PatchPlan, PlanSummary, ProgressEvent } from "../bindings";
+import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 
 /**
  * Everything the UI can ask of the shell, through one interface. Components
@@ -11,8 +11,9 @@ export interface Backend {
   chooseOutput(defaultName: string): Promise<string | null>;
   analyze(path: string): Promise<DiscStatus>;
   defaultOutput(input: string): Promise<string>;
-  planSummary(plan: PatchPlan): Promise<PlanSummary | null>;
-  startPatch(plan: PatchPlan, output: string, overwrite: boolean): Promise<void>;
+  outputExists(output: string): Promise<boolean>;
+  planSummary(): Promise<PlanSummary | null>;
+  startPatch(output: string, overwrite: boolean): Promise<void>;
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;

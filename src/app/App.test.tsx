@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { MockBackend } from "../ipc/mock";
 import { App } from "./App";
-import { mockBackend } from "../ipc/mock";
 
 let media: Record<string, boolean> = {};
 
@@ -26,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("App layout", () => {
@@ -48,24 +49,12 @@ describe("App layout", () => {
 });
 
 describe("App wiring", () => {
-  test("preset click updates the advanced panel through the store", async () => {
+  test("offers only the base mode without editable difficulty settings", () => {
     render(<App />);
-    await user_clickExtreme();
-    expect(screen.getByText(/leave training-stage enemies vanilla/)).toBeTruthy();
-    const checkbox = screen.getByLabelText(/leave training-stage enemies vanilla/i) as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
-  });
-
-  test("editing a multiplier flips the preset to Custom", async () => {
-    render(<App />);
-    await user_clickExtreme();
-    const hp = screen.getByLabelText("hp", { selector: "input" }) as HTMLInputElement;
-    // The Extreme preset's hp multiplier is 1; typing 1.5 at the end makes 11.5 —
-    // clear first to replace the value.
-    const user = (await import("@testing-library/user-event")).default;
-    await user.clear(hp);
-    await user.type(hp, "1.5");
-    expect(screen.getByText("Custom")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Very Hard Plus" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText(/Extreme|Brutal|Custom|Advanced/)).toBeNull();
+    expect(screen.queryByLabelText("hp")).toBeNull();
   });
 
   test("patch button starts disabled until a disc is analysed", async () => {
@@ -75,13 +64,7 @@ describe("App wiring", () => {
     expect(screen.getByText(/choose a disc/i)).toBeTruthy();
   });
 
-  void mockBackend;
 });
-
-async function user_clickExtreme() {
-  const user = (await import("@testing-library/user-event")).default;
-  await user.click(screen.getByText("Very Hard Plus — Extreme"));
-}
 
 describe("App disc wiring", () => {
   test("typing an ISO path into the disc field starts analysis", async () => {
@@ -104,5 +87,24 @@ describe("App disc wiring", () => {
         (screen.getByLabelText("output path") as HTMLInputElement).value,
       ).toBe("/mock/mygame [VeryHardPlus].iso"),
     );
+  });
+});
+
+describe("overwrite confirmation", () => {
+  test.each([false, true])("existing output asks before patching; confirm=%s", async (confirm) => {
+    vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(true);
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    await waitFor(() => expect(screen.getByText(/clean mock disc/)).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: confirm ? "Overwrite and patch" : "Cancel" }));
+    if (confirm) expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [VeryHardPlus].iso", true);
+    else expect(patch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

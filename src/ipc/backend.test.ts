@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PatchOutcome, ProgressEvent } from "../bindings";
-import { presetPlan } from "../features/presets/presetData";
 import { mockBackend, type MockBackend } from "./mock";
 
 describe("mock backend — patch lifecycle", () => {
@@ -22,7 +21,7 @@ describe("mock backend — patch lifecycle", () => {
     await backend.onPatchDone((o) => {
       done = o;
     });
-    await backend.startPatch(presetPlan("VeryHardPlus"), "out.iso", false);
+    await backend.startPatch("out.iso", false);
     expect(progress.length).toBeGreaterThan(0);
     expect(done).not.toBeNull();
     expect(done!.md5).toMatch(/^[0-9a-f]{32}$/);
@@ -35,7 +34,7 @@ describe("mock backend — patch lifecycle", () => {
     backend.nextFailure = message;
     const failed = vi.fn();
     await backend.onPatchFailed(failed);
-    await backend.startPatch(presetPlan("VeryHardPlus"), "out.iso", false);
+    await backend.startPatch("out.iso", false);
     expect(failed).toHaveBeenCalledWith(message);
   });
 
@@ -44,7 +43,7 @@ describe("mock backend — patch lifecycle", () => {
     const handler = vi.fn();
     const unlisten = await backend2.onPatchProgress(handler);
     await unlisten();
-    await backend2.startPatch(presetPlan("VeryHardPlus"), "out.iso", false);
+    await backend2.startPatch("out.iso", false);
     expect(handler).not.toHaveBeenCalled();
   });
 

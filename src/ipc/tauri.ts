@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { DiscStatus, PatchOutcome, PatchPlan, PlanSummary, ProgressEvent } from "../bindings";
+import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 import type { Backend } from "./backend";
 
 /** The real backend: Tauri invoke + event listen. */
@@ -22,12 +22,16 @@ export class TauriBackend implements Backend {
     return invoke<string>("default_output", { input });
   }
 
-  async planSummary(plan: PatchPlan): Promise<PlanSummary | null> {
-    return invoke<PlanSummary | null>("plan_summary", { plan });
+  async outputExists(output: string): Promise<boolean> {
+    return invoke<boolean>("output_exists", { output });
   }
 
-  async startPatch(plan: PatchPlan, output: string, overwrite: boolean): Promise<void> {
-    await invoke("start_patch", { plan, output, overwrite });
+  async planSummary(): Promise<PlanSummary | null> {
+    return invoke<PlanSummary | null>("plan_summary");
+  }
+
+  async startPatch(output: string, overwrite: boolean): Promise<void> {
+    await invoke("start_patch", { output, overwrite });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

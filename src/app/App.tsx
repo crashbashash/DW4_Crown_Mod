@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
-import type { PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
-import { AdvancedPanel } from "../features/advanced/AdvancedPanel";
+import type { PatchOutcome, ProgressEvent } from "../bindings";
 import { DiscPicker } from "../features/disc/DiscPicker";
 import { useDisc } from "../features/disc/useDisc";
+import { OverwriteDialog } from "../features/output/OverwriteDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
-import { PresetCards } from "../features/presets/PresetCards";
-import { presetPlan } from "../features/presets/presetData";
-import { usePlan } from "../features/presets/usePlan";
 import { BackendProvider, useBackend } from "../ipc/context";
 import "./theme.css";
 import "./layout.css";
@@ -22,12 +19,7 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-/**
- * The app shell: disc picking and presets on one side, the Advanced dials and
- * output on the other (two columns in a wide window, one column otherwise).
- * The plan lives in one store, so the preset cards and Advanced panel can
- * never disagree — that was the egui bug.
- */
+/** Disc selection and output for the base Very Hard Plus mode. */
 export function App() {
   return (
     <BackendProvider>
@@ -38,32 +30,14 @@ export function App() {
 
 function AppInner() {
   const backend = useBackend();
-  const plan = usePlan();
   const disc = useDisc(backend);
   const wide = useMediaQuery("(min-width: 900px)");
 
-  const [overwrite, setOverwrite] = useState(false);
+  const [overwritePath, setOverwritePath] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [summary, setSummary] = useState<PlanSummary | null>(null);
   const [lastOutcome, setLastOutcome] = useState<PatchOutcome | null>(null);
-
-  // Live plan summary: recomputed on every plan change once a disc is analysed.
-  useEffect(() => {
-    let stale = false;
-    backend
-      .planSummary(plan.state.plan)
-      .then((s) => {
-        if (!stale) setSummary(s);
-      })
-      .catch(() => {
-        if (!stale) setSummary(null);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [backend, plan.state.plan, disc.status]);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
@@ -81,7 +55,7 @@ function AppInner() {
         setBusy(false);
         setLog((lines) => [
           ...lines,
-          `patched ${o.bytes.toLocaleString()} bytes, md5 ${o.md5}`,
+          `Patched ${(o.bytes / 1_000_000_000).toFixed(2)} GB, md5 ${o.md5}`,
         ]);
       }),
     );
@@ -114,15 +88,28 @@ function AppInner() {
   const analyzed = disc.status?.kind === "ok";
   const canPatch = analyzed && disc.outputPath !== null;
 
-  const startPatch = async () => {
-    if (disc.outputPath === null) return;
+  const runPatch = async (output: string, overwrite: boolean) => {
     setBusy(true);
-    setLog((lines) => [
-      ...lines,
-      `patching ${disc.inputPath} -> ${disc.outputPath}`,
-    ]);
+    setLog((lines) => [...lines, `patching ${disc.inputPath} -> ${output}`]);
     try {
-      await backend.startPatch(plan.state.plan, disc.outputPath, overwrite);
+      await backend.startPatch(output, overwrite);
+    } catch (error) {
+      setBusy(false);
+      setLog((lines) => [...lines, `patch refused: ${String(error)}`]);
+    }
+  };
+
+  const startPatch = async () => {
+    const output = disc.outputPath;
+    if (output === null || busy) return;
+    setBusy(true);
+    try {
+      if (await backend.outputExists(output)) {
+        setOverwritePath(output);
+        setBusy(false);
+      } else {
+        await runPatch(output, false);
+      }
     } catch (error) {
       setBusy(false);
       setLog((lines) => [...lines, `patch refused: ${String(error)}`]);
@@ -166,36 +153,33 @@ function AppInner() {
             onPick={() => void disc.pickDisc()}
             onCommitDiscPath={setDiscPath}
           />
-          <PresetCards preset={plan.state.preset} onPick={plan.applyPreset} />
         </div>
         <div className="col">
-          <AdvancedPanel
-            state={plan.state}
-            onEditField={plan.editField}
-            onSetSerialEnabled={plan.setSerialEnabled}
-            onSetSerialText={plan.setSerialText}
-          />
           <OutputPanel
             outputPath={disc.outputPath}
-            overwrite={overwrite}
             busy={busy || disc.analyzing}
             canPatch={canPatch}
             progress={progress}
             log={log}
             status={disc.status}
-            summary={summary}
             lastOutcome={lastOutcome}
             onPatch={() => void startPatch()}
             onChooseOutput={() => void chooseOutput()}
             onSetOutput={setOutput}
-            onSetOverwrite={setOverwrite}
           />
         </div>
       </main>
+      {overwritePath !== null && (
+        <OverwriteDialog
+          path={overwritePath}
+          onCancel={() => setOverwritePath(null)}
+          onConfirm={() => {
+            const output = overwritePath;
+            setOverwritePath(null);
+            void runPatch(output, true);
+          }}
+        />
+      )}
     </>
   );
 }
-
-// presetPlan is referenced so the preset table ships with the bundle even
-// before the first interaction (tree-shaking keeps it either way).
-void presetPlan;

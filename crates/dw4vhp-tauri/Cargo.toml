@@ -1,6 +1,6 @@
 [package]
 name = "dw4vhp-tauri"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Desktop shell for the Digimon World 4 Very Hard Plus ISO patcher"
@@ -11,6 +11,10 @@ path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[features]
+default = []
+agent-control = []
 
 [dependencies]
 dw4vhp-core = { path = "../dw4vhp-core" }

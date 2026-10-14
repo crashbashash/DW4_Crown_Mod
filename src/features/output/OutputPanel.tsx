@@ -1,52 +1,30 @@
-import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../../bindings";
+import type { DiscStatus, PatchOutcome, ProgressEvent } from "../../bindings";
 
 export interface OutputPanelProps {
   outputPath: string | null;
-  overwrite: boolean;
   busy: boolean;
   canPatch: boolean;
   progress: ProgressEvent | null;
   log: string[];
   status: DiscStatus | null;
-  summary: PlanSummary | null;
   lastOutcome: PatchOutcome | null;
   onPatch: () => void;
   onChooseOutput: () => void;
   onSetOutput: (path: string) => void;
-  onSetOverwrite: (overwrite: boolean) => void;
 }
 
-/** The attack column's i16 ceiling, as the note states it. */
-const ATTACK_CEILING = 32767;
-
-/** The old form.rs notes, ported verbatim. */
-function attackPinNote(summary: PlanSummary): string | null {
-  return summary.attackPinned > 0
-    ? `attack: ${summary.attackPinned} of ${summary.liveRows} live rows pinned at ${ATTACK_CEILING}`
-    : null;
-}
-
-function collapseNote(summary: PlanSummary): string | null {
-  return summary.collapsedRows > 0
-    ? `collapse: ${summary.collapsedRows} rows now carry their type's strongest row — every enemy of a type is identical, EXP included`
-    : null;
-}
-
-/** Output path, overwrite, the one Patch button, progress and the log. */
+/** Output path, the one Patch button, progress and the log. */
 export function OutputPanel({
   outputPath,
-  overwrite,
   busy,
   canPatch,
   progress,
   log,
   status,
-  summary,
   lastOutcome,
   onPatch,
   onChooseOutput,
   onSetOutput,
-  onSetOverwrite,
 }: OutputPanelProps) {
   const fraction =
     progress === null || progress.total === 0
@@ -69,29 +47,14 @@ export function OutputPanel({
           Save as…
         </button>
       </div>
-      <label>
-        <input
-          type="checkbox"
-          checked={overwrite}
-          onChange={(e) => onSetOverwrite(e.target.checked)}
-        />
-        overwrite existing file
-      </label>
       {status !== null && (
         <p className="hint">
-          free-space note: the output copy needs {status.size.toLocaleString()} bytes free in the
-          destination folder
+          The output copy needs {(status.size / 1_000_000_000).toFixed(2)} GB of free space.
         </p>
-      )}
-      {summary !== null && attackPinNote(summary) !== null && (
-        <p className="note-warn">{attackPinNote(summary)}</p>
-      )}
-      {summary !== null && collapseNote(summary) !== null && (
-        <p className="note-warn">{collapseNote(summary)}</p>
       )}
       {lastOutcome !== null && (
         <p className="note-ok">
-          patched {lastOutcome.bytes.toLocaleString()} bytes, md5 {lastOutcome.md5}
+          Patched {(lastOutcome.bytes / 1_000_000_000).toFixed(2)} GB, md5 {lastOutcome.md5}
         </p>
       )}
       <div className="row">
@@ -103,7 +66,7 @@ export function OutputPanel({
             <span>{progress.phase}</span>
             <progress value={fraction} />
             <span>
-              {progress.done.toLocaleString()}/{progress.total.toLocaleString()}
+              {Math.round(fraction * 100)}%
             </span>
           </span>
         )}

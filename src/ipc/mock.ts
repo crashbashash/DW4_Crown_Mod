@@ -1,4 +1,4 @@
-import type { DiscStatus, PatchOutcome, PatchPlan, PlanSummary, ProgressEvent } from "../bindings";
+import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 import type { Backend } from "./backend";
 
 /**
@@ -47,7 +47,11 @@ export class MockBackend implements Backend {
     return input.replace(/\.iso$/i, " [VeryHardPlus].iso");
   }
 
-  async planSummary(plan: PatchPlan): Promise<PlanSummary | null> {
+  async outputExists(_output: string): Promise<boolean> {
+    return false;
+  }
+
+  async planSummary(): Promise<PlanSummary | null> {
     const seeded = this.seedSummary;
     this.seedSummary = null;
     // A tiny deterministic stand-in so the panel has data in the browser.
@@ -55,19 +59,18 @@ export class MockBackend implements Backend {
       seeded ?? {
         rowsChanged: 580,
         liveRows: 580,
-        attackPinned: (plan.statMult[0] ?? 1) > 1 ? 120 : 0,
-        hpCapped: plan.hpMult > 1 ? 40 : 0,
+        attackPinned: 0,
+        hpCapped: 0,
         critPinned: 0,
         practiceRows: 0,
-        collapsedRows: plan.collapseToTop ? 120 : 0,
-        elfStep: plan.forceVeryHard,
-        serialStep: plan.serial !== null,
+        collapsedRows: 0,
+        elfStep: false,
+        serialStep: false,
       }
     );
   }
 
   async startPatch(
-    _plan: PatchPlan,
     _output: string,
     _overwrite: boolean,
   ): Promise<void> {

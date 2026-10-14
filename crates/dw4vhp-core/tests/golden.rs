@@ -14,7 +14,7 @@
 
 use dw4vhp_core::layout::Layout;
 use dw4vhp_core::patch::{patch_file, PatchOptions};
-use dw4vhp_core::plan::{PatchPlan, Preset, DESTRUCTIBLE_ROWS, PRACTICE_ROWS, TRIPWIRE_ROWS};
+use dw4vhp_core::plan::{PatchPlan, DESTRUCTIBLE_ROWS, PRACTICE_ROWS, TRIPWIRE_ROWS};
 use dw4vhp_core::rowgroup::ROW_GROUPS;
 use dw4vhp_core::serial::DEFAULT_SERIAL;
 use dw4vhp_core::table::EnemyTable;
@@ -278,14 +278,19 @@ fn golden_chain_reproduces_the_shipped_builds() {
         "the difficulty patch must change exactly four bytes"
     );
 
-    // Step 6: the Brutal preset collapses every type onto its top row, leaves
+    // Step 6: the low-level collapse option copies every type onto its top row, leaves
     // the destructibles, the 644/645 tripwire and the training-stage lesson
     // rows exactly as authored, and still carries the force-Very-Hard ELF word.
     let brutal = tmp.path().join("brutal.iso");
     patch_file(
         &pristine,
         &brutal,
-        &Preset::Brutal.plan(),
+        &PatchPlan {
+            exclude_practice: true,
+            collapse_to_top: true,
+            force_very_hard: true,
+            ..PatchPlan::default()
+        },
         &PatchOptions { overwrite: false },
         &mut |_| {},
     )

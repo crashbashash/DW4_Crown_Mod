@@ -1,6 +1,4 @@
-use dw4vhp_core::plan::{
-    transform, PatchPlan, Preset, DESTRUCTIBLE_ROWS, PRACTICE_MAP, PRACTICE_ROWS, TRIPWIRE_ROWS,
-};
+use dw4vhp_core::plan::{transform, PatchPlan, DESTRUCTIBLE_ROWS, PRACTICE_MAP, TRIPWIRE_ROWS};
 use dw4vhp_core::ratio::RatioVector;
 use dw4vhp_core::rowgroup::{COLLAPSE_SKIP_ROWS, ROW_GROUPS};
 use dw4vhp_core::table::EnemyTable;
@@ -16,45 +14,10 @@ fn blank() -> EnemyTable {
 }
 
 #[test]
-fn default_plan_is_the_very_hard_plus_preset() {
+fn default_plan_is_the_base_very_hard_plus_mode() {
     let p = PatchPlan::default();
-    assert_eq!(Preset::detect(&p), Preset::VeryHardPlus);
     assert!(p.practice_buff && p.exclude_destructibles && p.exclude_tripwire);
     assert!(!p.exclude_practice && !p.force_very_hard && p.serial.is_none() && p.crown_rank == 5);
-    let extreme = Preset::Extreme.plan();
-    assert!(extreme.force_very_hard && extreme.exclude_practice);
-    assert_eq!(Preset::detect(&extreme), Preset::Extreme);
-}
-
-#[test]
-fn the_extreme_and_brutal_presets_leave_the_training_stage_vanilla() {
-    let t = blank();
-    for preset in [Preset::Extreme, Preset::Brutal] {
-        let (out, s) = transform(
-            &t,
-            &preset.plan(),
-            &RatioVector {
-                hp: 13.0,
-                stat: [2.0; 12],
-                crit_delta: 19.5,
-                para_delta: 19.5,
-            },
-        );
-        for r in PRACTICE_ROWS {
-            assert_eq!(
-                (
-                    out.hp[r],
-                    out.stat[r],
-                    out.crit[r],
-                    out.para[r],
-                    out.rarity[r]
-                ),
-                (100, [10; 12], 2, 2, 0),
-                "{preset:?} row {r} must stay exactly as authored"
-            );
-        }
-        assert_eq!(s.practice_rows, 0);
-    }
 }
 
 #[test]
@@ -340,31 +303,11 @@ fn collapse_then_practice_buff_puts_the_lesson_rows_on_their_type_top() {
     let (out, s) = transform(&t, &plan, &identity_ratio());
 
     // The buff copies from rows 0/1/33/34/12/13 *after* the collapse, so the
-    // lesson rows end up carrying their type's top row — intended for a preset
-    // called Brutal, and pinned here so it stays a decision.
+    // lesson rows end up carrying their type's top row.
     assert_eq!(out.hp[638], out.hp[393]);
     assert_eq!(out.hp[640], out.hp[41]);
     assert_eq!(out.hp[642], out.hp[637]);
     assert_eq!(out.hp[644], 644); // still the authored tripwire row
     assert_eq!(s.practice_rows, 6);
     assert_eq!(s.collapsed_rows, 524);
-}
-
-#[test]
-fn brutal_is_extreme_plus_the_collapse_and_round_trips() {
-    let plan = Preset::Brutal.plan();
-    assert!(plan.force_very_hard && plan.collapse_to_top && plan.practice_buff);
-    assert!(
-        plan.exclude_destructibles && plan.exclude_tripwire && plan.exclude_practice,
-        "Brutal leaves the training stage vanilla like Extreme"
-    );
-    assert_eq!(Preset::detect(&plan), Preset::Brutal);
-    assert_eq!(Preset::Brutal.label(), "Very Hard Plus — Brutal");
-
-    let edited = PatchPlan {
-        collapse_to_top: false,
-        ..plan
-    };
-    assert_eq!(Preset::detect(&edited), Preset::Extreme);
-    assert_eq!(Preset::detect(&PatchPlan::default()), Preset::VeryHardPlus);
 }

@@ -15,58 +15,11 @@ use dw4vhp_core::layout::Layout;
 use dw4vhp_core::patch::{patch_file_with_layout, PatchOptions};
 use dw4vhp_core::plan::{transform, PatchPlan, PlanSummary};
 use dw4vhp_core::ratio::RatioVector;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
 const OUTPUT_SUFFIX: &str = " [VeryHardPlus].iso";
-
-/// The wire form of a patch plan: camelCase over the engine's `PatchPlan`.
-/// A dedicated payload type because the engine type carries no `Deserialize`
-/// (and the engine crate stays serde-free by design).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanPayload {
-    hp_mult: f64,
-    stat_mult: Vec<f64>,
-    crit_mult: f64,
-    para_mult: f64,
-    crown_rank: u8,
-    exclude_destructibles: bool,
-    exclude_tripwire: bool,
-    exclude_practice: bool,
-    practice_buff: bool,
-    collapse_to_top: bool,
-    force_very_hard: bool,
-    serial: Option<String>,
-}
-
-impl PlanPayload {
-    fn into_plan(self) -> Result<PatchPlan, String> {
-        Ok(PatchPlan {
-            hp_mult: self.hp_mult,
-            stat_mult: {
-                let mut stat_mult = [0.0; 12];
-                let values: [f64; 12] = self
-                    .stat_mult
-                    .try_into()
-                    .map_err(|_| "stat_mult must carry exactly 12 values".to_string())?;
-                stat_mult.copy_from_slice(&values);
-                stat_mult
-            },
-            crit_mult: self.crit_mult,
-            para_mult: self.para_mult,
-            crown_rank: self.crown_rank,
-            exclude_destructibles: self.exclude_destructibles,
-            exclude_tripwire: self.exclude_tripwire,
-            exclude_practice: self.exclude_practice,
-            practice_buff: self.practice_buff,
-            collapse_to_top: self.collapse_to_top,
-            force_very_hard: self.force_very_hard,
-            serial: self.serial,
-        })
-    }
-}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +113,14 @@ pub fn default_output(input: String) -> String {
     input.with_file_name(name).display().to_string()
 }
 
+/// Checks whether patching needs the user's overwrite confirmation.
+#[tauri::command]
+pub fn output_exists(output: String) -> Result<bool, String> {
+    std::path::Path::new(&output)
+        .try_exists()
+        .map_err(|e| e.to_string())
+}
+
 /// The verdict for one inspection result: a clean disc and its authored copy
 /// counts, or a refusal that reuses the engine's own fix-naming message. The
 /// kind mapping is the old `form::status_for` transcription.
@@ -177,8 +138,9 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
         },
         Err(error) => DiscStatusPayload {
             kind: match error {
-                Error::AlreadyModded { .. } | Error::WrongRevision { .. }
-                | Error::NotThisDisc => "refused",
+                Error::AlreadyModded { .. } | Error::WrongRevision { .. } | Error::NotThisDisc => {
+                    "refused"
+                }
                 _ => "unknown",
             },
             text: error.to_string(),
@@ -191,18 +153,14 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
 /// Inspects the disc off the main thread, stores a clean report for later
 /// [`plan_summary`] and [`start_patch`] calls, and returns the verdict.
 #[tauri::command]
-pub async fn analyze(
-    path: String,
-    app: AppHandle,
-) -> Result<DiscStatusPayload, String> {
+pub async fn analyze(path: String, app: AppHandle) -> Result<DiscStatusPayload, String> {
     // The path is needed both inside the worker (inspect) and after it (the
     // input stored for the patch), so the worker gets a clone.
     let inspect_path = std::path::PathBuf::from(&path);
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        inspect(&inspect_path, &Layout::retail())
-    })
-    .await
-    .map_err(|e| format!("analyze worker failed: {e}"))?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || inspect(&inspect_path, &Layout::retail()))
+            .await
+            .map_err(|e| format!("analyze worker failed: {e}"))?;
 
     let payload = verdict(&result);
     if let Ok(report) = result {
@@ -213,14 +171,10 @@ pub async fn analyze(
     Ok(payload)
 }
 
-/// The pure `transform` summary for the live plan panel. The frontend calls
-/// this on every plan edit; it reads the disc table stored by [`analyze`].
+/// The base-mode summary, using the disc table stored by [`analyze`].
 #[tauri::command]
-pub async fn plan_summary(
-    plan: PlanPayload,
-    app: AppHandle,
-) -> Result<PlanSummaryPayload, String> {
-    let plan = plan.into_plan()?;
+pub async fn plan_summary(app: AppHandle) -> Result<PlanSummaryPayload, String> {
+    let plan = PatchPlan::default();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let report = state.report.lock().expect("report lock");
@@ -242,13 +196,8 @@ pub async fn plan_summary(
 ///
 /// Returns `Err` synchronously only when no disc has been analysed yet.
 #[tauri::command]
-pub async fn start_patch(
-    plan: PlanPayload,
-    output: String,
-    overwrite: bool,
-    app: AppHandle,
-) -> Result<(), String> {
-    let plan = plan.into_plan()?;
+pub async fn start_patch(output: String, overwrite: bool, app: AppHandle) -> Result<(), String> {
+    let plan = PatchPlan::default();
     let input = {
         let state = app.state::<AppState>();
         let stored = state.input.lock().expect("input lock");
@@ -272,8 +221,14 @@ pub async fn start_patch(
                 },
             );
         };
-        let outcome =
-            patch_file_with_layout(&input, &output, &plan, &opts, &Layout::retail(), &mut progress);
+        let outcome = patch_file_with_layout(
+            &input,
+            &output,
+            &plan,
+            &opts,
+            &Layout::retail(),
+            &mut progress,
+        );
         match outcome {
             Ok(outcome) => {
                 let _ = app.emit(

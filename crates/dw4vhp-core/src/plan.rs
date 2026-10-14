@@ -37,7 +37,7 @@ const STAT_MAX: f64 = 32767.0;
 const CHARGEN_FLOOR: f64 = 0.0;
 const CHARGEN_CAP: f64 = 60.0;
 
-/// The whole surface the GUI edits: the multipliers applied on top of the
+/// Low-level patch configuration: the multipliers applied on top of the
 /// derived [`RatioVector`], the crown rank, and the exclusions/toggles that
 /// define a build (spec §7).
 #[derive(PartialEq, Debug, Clone)]
@@ -50,10 +50,8 @@ pub struct PatchPlan {
     pub exclude_destructibles: bool,
     pub exclude_tripwire: bool,
     /// Leaves the practice stage's lesson rows ([`PRACTICE_ROWS`]) byte-
-    /// identical, so the training enemies are the vanilla ones. The Extreme
-    /// and Brutal presets turn this on: a training-stage enemy carrying the
-    /// buff (or, under Brutal, a collapsed top row) is unscratchable with
-    /// starting gear. When set, the practice buff never fires.
+    /// identical, so the training enemies are the vanilla ones. When set,
+    /// the practice buff never fires.
     pub exclude_practice: bool,
     pub practice_buff: bool,
     pub collapse_to_top: bool,
@@ -62,7 +60,7 @@ pub struct PatchPlan {
 }
 
 impl Default for PatchPlan {
-    /// The Very Hard Plus preset: derived factors unchanged, crown rank 5, both
+    /// The base Very Hard Plus mode: derived factors unchanged, crown rank 5, both
     /// exclusions and the practice buff on, no ELF patch and no serial edit.
     fn default() -> Self {
         Self {
@@ -78,66 +76,6 @@ impl Default for PatchPlan {
             collapse_to_top: false,
             force_very_hard: false,
             serial: None,
-        }
-    }
-}
-
-/// The named build presets. `Custom` is what the GUI shows once any field is
-/// edited away from a named preset (spec §8).
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub enum Preset {
-    VeryHardPlus,
-    Extreme,
-    Brutal,
-    Custom,
-}
-
-impl Preset {
-    /// The plan this preset stands for.
-    ///
-    /// `Custom` has no canonical plan — it is a label the GUI applies to an
-    /// edited plan — so it yields the default plan as an editing baseline.
-    pub fn plan(self) -> PatchPlan {
-        match self {
-            // Both leave the training-stage lesson rows exactly as authored:
-            // the practice buff (and, under Brutal, the collapse feeding it)
-            // otherwise equips the tutorial enemies with stats a starting
-            // character cannot damage.
-            Preset::Extreme => PatchPlan {
-                exclude_practice: true,
-                force_very_hard: true,
-                ..PatchPlan::default()
-            },
-            Preset::Brutal => PatchPlan {
-                exclude_practice: true,
-                collapse_to_top: true,
-                force_very_hard: true,
-                ..PatchPlan::default()
-            },
-            Preset::VeryHardPlus | Preset::Custom => PatchPlan::default(),
-        }
-    }
-
-    /// The preset a plan is exactly equal to, or `Custom` for any other plan.
-    pub fn detect(p: &PatchPlan) -> Preset {
-        if *p == Preset::VeryHardPlus.plan() {
-            Preset::VeryHardPlus
-        } else if *p == Preset::Extreme.plan() {
-            Preset::Extreme
-        } else if *p == Preset::Brutal.plan() {
-            Preset::Brutal
-        } else {
-            Preset::Custom
-        }
-    }
-
-    /// The GUI-facing name, pinned so the window and the reports agree.
-    pub fn label(self) -> &'static str {
-        match self {
-            Preset::VeryHardPlus => "Very Hard Plus",
-            Preset::Extreme => "Very Hard Plus — Extreme",
-            Preset::Brutal => "Very Hard Plus — Brutal",
-            Preset::Custom => "Custom",
         }
     }
 }
@@ -218,7 +156,7 @@ pub fn transform(
         out.rarity[r] = plan.crown_rank;
     }
 
-    // Brutal: copy each type's strongest row over that type's other rows, so
+    // Copy each type's strongest row over that type's other rows, so
     // the variant a stage happens to pick stops mattering (spec §12.2). The
     // cap counters above are deliberately not recounted: they measure the
     // scaling step, and the collapse copies values that are already clamped.
