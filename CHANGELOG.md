@@ -26,6 +26,9 @@ unchanged, source images are unchanged, and already-patched inputs are refused.
 
 The default USA output is unchanged from v0.6.0. The optional low-level
 `force_very_hard` ELF edit remains USA-only and is refused for Europe/Japan;
-the desktop application's base mode does not use it. This release's regional
-validation covers disc bytes, without a new emulator gameplay or native UI
-end-to-end run.
+the desktop application's base mode does not use it.
+
+Follow-up verification on 2026-10-15 passed native application disc creation and
+PCSX2 cold boot, World 1 gate entry, Goblin Pass loading, and complete live-table
+equality for all three regions. See [the runtime validation report](docs/testing/regional-v0.7.0.md)
+for evidence, test-save corrections and scope.

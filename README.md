@@ -136,7 +136,8 @@ testing those releases.
 
 ## Regional verification
 
-See [v0.7.0 release notes and output checksums](CHANGELOG.md).
+See [v0.7.0 release notes and output checksums](CHANGELOG.md) and
+[verified native application and PCSX2 runtime checks](docs/testing/regional-v0.7.0.md).
 
 The three releases contain the same 649-row enemy tables, repeated 665 times.
 The app uses each release's own offsets and patches all copies, preserving the
