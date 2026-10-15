@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
 use crate::iso9660::{self, IsoFile};
 use crate::layout::Layout;
+use crate::release::{self, Release};
 use crate::table::EnemyTable;
+use md5::{Digest, Md5};
 use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
@@ -39,6 +41,8 @@ const ALREADY_MODDED_ROWS: usize = 100;
 #[derive(PartialEq, Debug, Clone)]
 pub struct DiscReport {
     pub size: u64,
+    /// Present for auto-detected retail discs; explicit-layout fixtures use None.
+    pub release: Option<Release>,
     pub copies: [usize; 3],
     pub rarity_nonzero: usize,
     pub already_modded: bool,
@@ -99,6 +103,7 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
 
     Ok(DiscReport {
         size: iso.len() as u64,
+        release: None,
         copies,
         rarity_nonzero,
         already_modded,
@@ -106,4 +111,35 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
         boot_elf: iso9660::find_file(iso, BOOT_ELF_NAME).ok(),
         cnf: iso9660::find_file(iso, CNF_NAME).ok(),
     })
+}
+
+/// Inspect any supported retail PS2 release, using its own table anchors.
+pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
+    let file = File::open(path)?;
+    if file.metadata()?.len() == 0 {
+        return Err(Error::NotThisDisc);
+    }
+    // Safety: input is opened read-only and is never modified by the patcher.
+    let mmap = unsafe { Mmap::map(&file)? };
+    inspect_retail_bytes(&mmap)
+}
+
+pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
+    let release = release::detect(iso)?;
+    let mut report = inspect_bytes(iso, &release.layout())?;
+    // All three retail releases carry identical tables. Copy counts alone do
+    // not prove that an arbitrary/repacked table is safe to scale by row index.
+    let fingerprints = [
+        "99d6f13977284dff4b19f90dc46ea78e",
+        "7d8043fa225ccf25d2d83736d6c0fcc9",
+        "de9b8db0994cbb43cb67baf71bf1e998",
+    ];
+    for (block, expected) in report.authored.blocks().iter().zip(fingerprints) {
+        if format!("{:x}", Md5::digest(block)) != expected {
+            return Err(Error::NotThisDisc);
+        }
+    }
+    report.release = Some(release);
+    report.boot_elf = Some(iso9660::find_file(iso, release.serial())?);
+    Ok(report)
 }

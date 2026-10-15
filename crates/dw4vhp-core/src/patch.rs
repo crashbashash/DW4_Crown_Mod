@@ -7,7 +7,7 @@
 //! ISO is never loaded into memory, and it is never written: every edit lands
 //! on the output copy, in place, at exactly the length it replaces.
 
-use crate::disc::{count_copies, inspect_bytes, DiscReport};
+use crate::disc::{count_copies, inspect_bytes, inspect_retail_bytes, DiscReport};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -88,6 +88,12 @@ pub fn plan_regions(
     }
 
     if plan.force_very_hard {
+        if matches!(
+            report.release,
+            Some(crate::release::Release::Europe | crate::release::Release::Japan)
+        ) {
+            return Err(Error::UnsupportedDifficulty);
+        }
         let boot_elf = report.boot_elf.as_ref().ok_or(Error::ElfNotFound)?;
         let elf = ElfInfo::read(iso, boot_elf)?;
         regions.push(difficulty_region(iso, &elf)?);
@@ -95,7 +101,7 @@ pub fn plan_regions(
 
     if let Some(serial) = &plan.serial {
         let boot_elf = report.boot_elf.as_ref().ok_or(Error::FileNotFound {
-            name: "SLUS_208.36".to_string(),
+            name: "boot ELF".to_string(),
         })?;
         regions.extend(serial_regions(iso, boot_elf, serial)?);
     }
@@ -104,7 +110,7 @@ pub fn plan_regions(
 }
 
 /// The app's entry point: patches `input` into `output` against the retail
-/// [`Layout::retail`] layout.
+/// layout detected from its boot configuration.
 pub fn patch_file(
     input: &Path,
     output: &Path,
@@ -112,10 +118,10 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
-    patch_file_with_layout(input, output, plan, opts, &Layout::retail(), progress)
+    patch_file_internal(input, output, plan, opts, None, progress)
 }
 
-/// The layout-parameterised seam the GUI worker and the tests use. `patch_file`
+/// The explicit-layout seam used by generated tests and low-level callers. `patch_file`
 /// delegates here so every caller takes the same inspect → plan → write →
 /// verify path.
 pub fn patch_file_with_layout(
@@ -126,11 +132,32 @@ pub fn patch_file_with_layout(
     layout: &Layout,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
+    patch_file_internal(input, output, plan, opts, Some(layout), progress)
+}
+
+fn patch_file_internal(
+    input: &Path,
+    output: &Path,
+    plan: &PatchPlan,
+    opts: &PatchOptions,
+    layout: Option<&Layout>,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<PatchOutcome> {
     let file = File::open(input)?;
+    if file.metadata()?.len() == 0 {
+        return Err(Error::NotThisDisc);
+    }
     // Safety: the mapping is read-only and `input` is never written.
     let mmap = unsafe { Mmap::map(&file)? };
 
-    let report = inspect_bytes(&mmap[..], layout)?;
+    let report = match layout {
+        Some(layout) => inspect_bytes(&mmap[..], layout)?,
+        None => inspect_retail_bytes(&mmap[..])?,
+    };
+    let detected_layout = report.release.map(|release| release.layout());
+    let layout = layout
+        .or(detected_layout.as_ref())
+        .ok_or(Error::NotThisDisc)?;
     let (new_table, _) = derive_patch(&report, plan);
     let blocks = new_table.blocks();
     let (regions, summary) = plan_regions(&mmap[..], &report, plan, layout)?;

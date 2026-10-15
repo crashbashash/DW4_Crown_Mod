@@ -4,12 +4,15 @@ use thiserror::Error;
 /// not just the fault, as required by spec §6.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("this is not a Digimon World 4 (USA) disc — use the NTSC-U release, SLUS_208.36")]
+    #[error("this is not a supported clean PS2 disc — use Digimon World 4 (USA/Europe) or Digimon World X (Japan)")]
     NotThisDisc,
 
+    #[error("forcing Very Hard difficulty is only verified for the USA ELF; use the base mode for Europe/Japan")]
+    UnsupportedDifficulty,
+
     #[error(
-        "unrecognised revision of SLUS_208.36: found {found} copies of the {block} block, expected \
-         {expected} — use your original NTSC-U ISO"
+        "unrecognised disc revision: found {found} copies of the {block} block, expected \
+         {expected} — use your original PS2 ISO"
     )]
     WrongRevision {
         block: &'static str,
@@ -24,7 +27,7 @@ pub enum Error {
 
     #[error(
         "the file {name} was not found in the disc image — this is not the supported Digimon \
-         World 4 (USA) SLUS_208.36 release, or the image is incomplete"
+         World 4 / World X PS2 release, or the image is incomplete"
     )]
     FileNotFound { name: String },
 
@@ -34,12 +37,12 @@ pub enum Error {
     )]
     NameLengthMismatch { found: usize, expected: usize },
 
-    #[error("SLUS_208.36 was not found in this disc image — use the NTSC-U release, SLUS_208.36")]
+    #[error("the boot ELF was not found in this disc image — use your original PS2 ISO")]
     ElfNotFound,
 
     #[error(
         "unexpected instruction {word:#010X} at {offset:#X} (expected a daddu) — the Very Hard \
-         step was skipped, so use your original NTSC-U ISO"
+         step was skipped, so use your original PS2 ISO"
     )]
     UnexpectedInstruction { offset: u64, word: u32 },
 

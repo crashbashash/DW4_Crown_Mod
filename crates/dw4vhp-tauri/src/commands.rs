@@ -9,10 +9,9 @@
 //! `form.rs` so the refusals and default output keep their exact wording.
 
 use crate::state::AppState;
-use dw4vhp_core::disc::{inspect, DiscReport};
+use dw4vhp_core::disc::{inspect_retail, DiscReport};
 use dw4vhp_core::error::Error;
-use dw4vhp_core::layout::Layout;
-use dw4vhp_core::patch::{patch_file_with_layout, PatchOptions};
+use dw4vhp_core::patch::{patch_file, PatchOptions};
 use dw4vhp_core::plan::{transform, PatchPlan, PlanSummary};
 use dw4vhp_core::ratio::RatioVector;
 use serde::Serialize;
@@ -129,9 +128,12 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
         Ok(report) => DiscStatusPayload {
             kind: "ok",
             text: format!(
-                "clean Digimon World 4 (USA) SLUS_208.36: {} HPMAX, {} stats and {} chargen \
-                 copies",
-                report.copies[0], report.copies[1], report.copies[2]
+                "clean {} {}: {} HPMAX, {} stats and {} chargen copies",
+                report.release.expect("retail report").label(),
+                report.release.expect("retail report").serial(),
+                report.copies[0],
+                report.copies[1],
+                report.copies[2]
             ),
             size: report.size,
             copies: Some(report.copies),
@@ -157,16 +159,23 @@ pub async fn analyze(path: String, app: AppHandle) -> Result<DiscStatusPayload, 
     // The path is needed both inside the worker (inspect) and after it (the
     // input stored for the patch), so the worker gets a clone.
     let inspect_path = std::path::PathBuf::from(&path);
-    let result =
-        tauri::async_runtime::spawn_blocking(move || inspect(&inspect_path, &Layout::retail()))
-            .await
-            .map_err(|e| format!("analyze worker failed: {e}"))?;
+    let result = tauri::async_runtime::spawn_blocking(move || inspect_retail(&inspect_path))
+        .await
+        .map_err(|e| format!("analyze worker failed: {e}"))?;
 
     let payload = verdict(&result);
-    if let Ok(report) = result {
-        let state = app.state::<AppState>();
-        *state.input.lock().expect("input lock") = Some(std::path::PathBuf::from(&path));
-        *state.report.lock().expect("report lock") = Some(report);
+    let state = app.state::<AppState>();
+    let mut input = state.input.lock().expect("input lock");
+    let mut report = state.report.lock().expect("report lock");
+    match result {
+        Ok(clean) => {
+            *input = Some(std::path::PathBuf::from(&path));
+            *report = Some(clean);
+        }
+        Err(_) => {
+            *input = None;
+            *report = None;
+        }
     }
     Ok(payload)
 }
@@ -221,14 +230,7 @@ pub async fn start_patch(output: String, overwrite: bool, app: AppHandle) -> Res
                 },
             );
         };
-        let outcome = patch_file_with_layout(
-            &input,
-            &output,
-            &plan,
-            &opts,
-            &Layout::retail(),
-            &mut progress,
-        );
+        let outcome = patch_file(&input, &output, &plan, &opts, &mut progress);
         match outcome {
             Ok(outcome) => {
                 let _ = app.emit(

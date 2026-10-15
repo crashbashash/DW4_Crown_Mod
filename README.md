@@ -24,15 +24,17 @@ in an emulator or burn/load like any other copy.
 
 ## What you need
 
-- A **US release** of Digimon World 4 (`SLUS_208.36`). If you give it a disc from another
-  region or a different version, the app tells you it won't work — it doesn't guess.
+- A clean **PS2 release**: USA (`SLUS_208.36`), Europe (`SLES_534.05`,
+  English/German/Spanish/Italian), or Japan (**Digimon World X**, `SLPS_254.53`).
+  The app detects the region automatically and checks the original enemy tables.
+  Unknown or modified tables are refused.
 - Windows or Linux. Nothing else to install.
 
 ## The mode
 
 **Very Hard Plus** boosts enemy health, attack, and other stats and adds the
 "yellow crown" worn by the strongest enemy variants. This base mode has been
-checked byte-for-byte against real discs. It is the only mode available for now;
+checked against real USA, European and Japanese PS2 discs. It is the only mode available for now;
 there are no difficulty presets or custom settings to choose.
 If the output already exists, pressing **Patch ISO** asks before replacing it.
 
@@ -92,8 +94,7 @@ The rest of the details live here:
   There's also a row-group test (`tests/rowgroup.rs`, plus `tests/rowgroup_snapshot.rs`
   with `DW4_ROWGROUP_SNAPSHOT`) that checks the engine's enemy grouping utilities.
 - **One rule of this repository:** no game data is ever committed here — no disc images,
-  no extracted files, no memory dumps. Everything the app needs as a constant is an
-  offset or instruction; the actual "before" values come from the player's own disc.
+  no extracted files, no memory dumps. The app stores only metadata such as offsets, instructions and verification fingerprints; the actual "before" values come from the player's own disc.
 - Release builds (Windows zip/MSI, Linux AppImage/deb/tarball) are produced automatically
   by CI for tagged releases. The Linux ones are launch-tested; the Windows ones are built
   but never run here, and like all release assets, they're unsigned.
@@ -130,6 +131,31 @@ and confirmation, and refusal to overwrite the input. It checks the output check
 and verifies that the original is unchanged. Reports, screenshots and test ISOs go to
 a new directory under `/tmp`; game data is never added to the repository. The UI
 requires a working desktop display. Screenshots require the X11 tools above.
+Pass `--region europe` or `--region japan` and the matching output checksum when
+testing those releases.
+
+## Regional verification
+
+See [v0.7.0 release notes and output checksums](CHANGELOG.md).
+
+The three releases contain the same 649-row enemy tables, repeated 665 times.
+The app uses each release's own offsets and patches all copies, preserving the
+original boot serial, language, video mode and save identity. The default USA
+output remains byte-identical to the v0.6.0 build.
+
+Run the optional retail integration test with `DW4_RETAIL_USA_ISO`,
+`DW4_RETAIL_EUROPE_ISO`, and `DW4_RETAIL_JAPAN_ISO` pointing to clean local images:
+
+```sh
+cargo test -p dw4vhp-core --test retail -- --nocapture
+```
+
+Each configured image is patched to a temporary output, checked against the shipped
+mod's table fingerprints and independently computed full-disc checksums, checked
+for changes outside the intended table ranges, and refused when submitted for patching a second time. Unconfigured
+images skip; CI still runs the generated regional detection fixtures.
+The low-level `force_very_hard` ELF option remains USA-only and is explicitly
+refused for Europe/Japan; the desktop app uses the base mode without this option.
 
 ## Licence
 

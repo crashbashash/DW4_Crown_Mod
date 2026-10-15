@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--session", required=True)
     parser.add_argument("--iso", required=True, type=Path)
     parser.add_argument("--expected-md5", required=True)
+    parser.add_argument("--region", choices=("usa", "europe", "japan"), default="usa")
     parser.add_argument("--timeout", type=float, default=300)
     args = parser.parse_args()
     iso = args.iso.resolve()
@@ -64,14 +65,16 @@ def main():
         record("base mode only; patch disabled without a disc")
 
         drive("fill", "disc path", str(failures))
-        text_is("this is not a Digimon World 4")
+        text_is("this is not a supported clean PS2 disc")
         assert not enabled(drive("snapshot"))
         record("invalid disc refused")
 
         drive("fill", "disc path", str(iso))
-        text_is("clean Digimon World 4 (USA)")
+        text_is({"usa": "clean Digimon World 4 (USA)",
+                 "europe": "clean Digimon World 4 (Europe)",
+                 "japan": "clean Digimon World X (Japan)"}[args.region])
         wait(enabled)
-        assert "1.45 GB of free space" in drive("snapshot")["text"]
+        assert f"{iso.stat().st_size / 1e9:.2f} GB of free space" in drive("snapshot")["text"]
         assert "pinned" not in drive("snapshot")["text"]
         drive("fill", "output path", str(output))
         drive("click", "Patch ISO")

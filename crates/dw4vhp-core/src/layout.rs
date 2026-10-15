@@ -19,13 +19,7 @@ const MINI_BASE: u64 = 0x20000;
 impl Layout {
     /// The retail NTSC-U disc's block offsets, row count and copy count.
     pub fn retail() -> Self {
-        Self {
-            hp_off: 0x78D64C5,
-            stat_off: 0x78DACB9,
-            byte_off: 0x78DA51D,
-            rows: 649,
-            expected_copies: 665,
-        }
+        crate::release::Release::Usa.layout()
     }
 
     /// A compact layout with the same encodings, used by generated test

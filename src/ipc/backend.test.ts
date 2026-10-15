@@ -55,9 +55,9 @@ describe("mock backend — patch lifecycle", () => {
       size: 1440,
       copies: [1, 1, 1],
     });
-    backend.nextAnalyzeError = "this is not a Digimon World 4 (USA) disc — use the NTSC-U release, SLUS_208.36";
+    backend.nextAnalyzeError = "this is not a supported clean PS2 disc — use Digimon World 4 (USA/Europe) or Digimon World X (Japan)";
     const status = await backend.analyze("bad.iso");
     expect(status.kind).toBe("refused");
-    expect(status.text).toContain("NTSC-U");
+    expect(status.text).toContain("PS2");
   });
 });

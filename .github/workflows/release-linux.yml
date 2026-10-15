@@ -69,7 +69,7 @@ jobs:
           [Desktop Entry]
           Type=Application
           Name=DW4 Very Hard Plus
-          Comment=Patch a Digimon World 4 (USA) ISO to Very Hard Plus
+          Comment=Patch a PS2 Digimon World 4 / World X ISO to Very Hard Plus
           Exec=dw4-veryhard-plus
           Icon=dw4-veryhard-plus
           Categories=Utility;
@@ -109,9 +109,9 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: ${MAINT}
-          Description: Patch a Digimon World 4 (USA) ISO to Very Hard Plus
+          Description: Patch a PS2 Digimon World 4 / World X ISO to Very Hard Plus
            A desktop app that turns a player's own clean Digimon World 4
-           (USA, SLUS_208.36) disc into a much harder one.
+           (USA/Europe) or World X (Japan) PS2 disc into a much harder one.
           EOF
           dpkg-deb --build --root-owner-group "${PKGROOT}" "${PREFIX}.deb"
 
@@ -146,8 +146,8 @@ jobs:
             this environment.
 
             No game data is bundled: every byte the app writes is
-            derived from your own clean Digimon World 4 (USA,
-            `SLUS_208.36`) disc at runtime.
+            derived from your own clean PS2 Digimon World 4 (USA/Europe)
+            or Digimon World X (Japan) disc at runtime.
           files: |
             dw4-veryhard-plus-*-linux-x86_64.tar.gz
             dw4-veryhard-plus-*-linux-x86_64.AppImage
