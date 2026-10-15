@@ -41,6 +41,8 @@ const ALREADY_MODDED_ROWS: usize = 100;
 #[derive(PartialEq, Debug, Clone)]
 pub struct DiscReport {
     pub size: u64,
+    /// Exact expanded output size for retail reports; fixture reports retain size.
+    pub output_size: u64,
     /// Present for auto-detected retail discs; explicit-layout fixtures use None.
     pub release: Option<Release>,
     pub copies: [usize; 3],
@@ -103,6 +105,7 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
 
     Ok(DiscReport {
         size: iso.len() as u64,
+        output_size: iso.len() as u64,
         release: None,
         copies,
         rarity_nonzero,
@@ -113,7 +116,8 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
     })
 }
 
-/// Inspect any supported retail PS2 release, using its own table anchors.
+/// Inspect any supported retail PS2 release, checking its tables and crown
+/// resources and calculating the expanded output size without writing anything.
 pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
     let file = File::open(path)?;
     if file.metadata()?.len() == 0 {
@@ -125,6 +129,11 @@ pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
 }
 
 pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
+    inspect_retail_planned(iso).map(|(report, _)| report)
+}
+
+/// Retain the validated rebuild plan when inspection is immediately followed by a write.
+pub(crate) fn inspect_retail_planned(iso: &[u8]) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
     let mut report = inspect_bytes(iso, &release.layout())?;
     // All three retail releases carry identical tables. Copy counts alone do
@@ -139,7 +148,9 @@ pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
             return Err(Error::NotThisDisc);
         }
     }
+    let crowns = crate::crown::CrownPlan::build(iso)?;
+    report.output_size = crowns.output_size;
     report.release = Some(release);
     report.boot_elf = Some(iso9660::find_file(iso, release.serial())?);
-    Ok(report)
+    Ok((report, crowns))
 }

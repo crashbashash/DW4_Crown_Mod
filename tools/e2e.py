@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--session", required=True)
     parser.add_argument("--iso", required=True, type=Path)
     parser.add_argument("--expected-md5", required=True)
+    parser.add_argument("--expected-size", required=True, type=int)
     parser.add_argument("--region", choices=("usa", "europe", "japan"), default="usa")
     parser.add_argument("--timeout", type=float, default=300)
     args = parser.parse_args()
@@ -74,13 +75,13 @@ def main():
                  "europe": "clean Digimon World 4 (Europe)",
                  "japan": "clean Digimon World X (Japan)"}[args.region])
         wait(enabled)
-        assert f"{iso.stat().st_size / 1e9:.2f} GB of free space" in drive("snapshot")["text"]
+        assert f"{args.expected_size / 1e9:.2f} GB of free space" in drive("snapshot")["text"]
         assert "pinned" not in drive("snapshot")["text"]
         drive("fill", "output path", str(output))
         drive("click", "Patch ISO")
         done = text_is("GB, md5 " + args.expected_md5.lower())
         wait(enabled)
-        assert output.stat().st_size == iso.stat().st_size
+        assert output.stat().st_size == args.expected_size
         assert md5(output) == args.expected_md5.lower()
         assert md5(iso) == before
         assert not Path(str(output) + ".part").exists()

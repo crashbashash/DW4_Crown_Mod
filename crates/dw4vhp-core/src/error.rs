@@ -4,6 +4,9 @@ use thiserror::Error;
 /// not just the fault, as required by spec §6.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("unrecognised crown resources: {0} — use your original supported PS2 ISO")]
+    CrownData(String),
+
     #[error("this is not a supported clean PS2 disc — use Digimon World 4 (USA/Europe) or Digimon World X (Japan)")]
     NotThisDisc,
 

@@ -1,3 +1,4 @@
+pub mod crown;
 pub mod disc;
 pub mod elf;
 pub mod error;

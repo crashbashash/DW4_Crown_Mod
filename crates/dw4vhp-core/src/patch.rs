@@ -1,13 +1,8 @@
-//! The composition entry point the GUI calls: inspect the disc, derive the
-//! factors from it, compute the new table, turn that — plus the optional ELF
-//! and serial steps — into same-length write regions, write them onto a copy
-//! and verify the result before it is renamed into place.
-//!
-//! The input image is opened read-only and memory-mapped so a 1.4 GB retail
-//! ISO is never loaded into memory, and it is never written: every edit lands
-//! on the output copy, in place, at exactly the length it replaces.
+//! The application entry point: inspect the regional disc, transform the enemy
+//! tables, rebuild the linked crown resources, stream a separate ISO and verify
+//! it before the final rename. Input is always read-only and mmap-backed.
 
-use crate::disc::{count_copies, inspect_bytes, inspect_retail_bytes, DiscReport};
+use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned, DiscReport};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -16,7 +11,7 @@ use crate::ratio::RatioVector;
 use crate::region::WriteRegion;
 use crate::serial::serial_regions;
 use crate::table::EnemyTable;
-use crate::writer::{write_output, Progress, WriteOptions};
+use crate::writer::{write_output_extended, Extension, Phase, Progress, WriteOptions};
 use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
@@ -122,8 +117,8 @@ pub fn patch_file(
 }
 
 /// The explicit-layout seam used by generated tests and low-level callers. `patch_file`
-/// delegates here so every caller takes the same inspect → plan → write →
-/// verify path.
+/// uses the same table/writer checks. This seam deliberately omits archive
+/// expansion for generated fixtures; retail/application callers use `patch_file`.
 pub fn patch_file_with_layout(
     input: &Path,
     output: &Path,
@@ -150,9 +145,12 @@ fn patch_file_internal(
     // Safety: the mapping is read-only and `input` is never written.
     let mmap = unsafe { Mmap::map(&file)? };
 
-    let report = match layout {
-        Some(layout) => inspect_bytes(&mmap[..], layout)?,
-        None => inspect_retail_bytes(&mmap[..])?,
+    let (report, crowns) = match layout {
+        Some(layout) => (inspect_bytes(&mmap[..], layout)?, None),
+        None => {
+            let (report, crowns) = inspect_retail_planned(&mmap)?;
+            (report, Some(crowns))
+        }
     };
     let detected_layout = report.release.map(|release| release.layout());
     let layout = layout
@@ -160,14 +158,49 @@ fn patch_file_internal(
         .ok_or(Error::NotThisDisc)?;
     let (new_table, _) = derive_patch(&report, plan);
     let blocks = new_table.blocks();
-    let (regions, summary) = plan_regions(&mmap[..], &report, plan, layout)?;
+    let (mut regions, summary) = plan_regions(&mmap[..], &report, plan, layout)?;
 
+    if let Some(crowns) = &crowns {
+        regions.extend(crowns.regions.clone());
+    }
     let write_opts = WriteOptions {
         overwrite: opts.overwrite,
     };
-    let verify = |path: &Path| verify_output(path, &blocks, layout);
-
-    let outcome = write_output(input, output, &regions, &write_opts, progress, &verify)?;
+    let verify = |path: &Path| {
+        verify_output(path, &blocks, layout)?;
+        if let Some(crowns) = &crowns {
+            let file = File::open(path)?;
+            // Safety: the completed private output is read-only during verification.
+            let out = unsafe { Mmap::map(&file)? };
+            crowns.verify(&mmap, &out)?;
+        }
+        Ok(())
+    };
+    let append = |file: &mut File, progress: &mut dyn FnMut(Progress)| {
+        crowns
+            .as_ref()
+            .expect("extension present")
+            .append(&mmap, file, &mut |done, total| {
+                progress(Progress {
+                    phase: Phase::Writing,
+                    done,
+                    total,
+                })
+            })
+    };
+    let extension = crowns.as_ref().map(|c| Extension {
+        output_size: c.output_size,
+        append: &append as _,
+    });
+    let outcome = write_output_extended(
+        input,
+        output,
+        &regions,
+        &write_opts,
+        progress,
+        &verify,
+        extension,
+    )?;
     Ok(PatchOutcome {
         md5: outcome.md5,
         bytes: outcome.bytes,

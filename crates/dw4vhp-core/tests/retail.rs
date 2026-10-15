@@ -34,10 +34,11 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         &mut |_| {},
     )
     .unwrap();
-    // These checksums were independently computed by replacing the source
-    // blocks with the known shipped practice-buff mod's blocks in Python.
+    // Independent Python prototype outputs, preserving the ISO terminator
+    // reserved bytes (the prototype wrote its size into all descriptors).
     assert_eq!(outcome.md5, output_md5);
-    assert_eq!(outcome.bytes, original.len() as u64);
+    assert_eq!(outcome.bytes, report.output_size);
+    assert!(outcome.bytes > original.len() as u64);
     let out_file = File::open(&output).unwrap();
     // Safety: completed output is read-only and no longer being patched.
     let patched = unsafe { Mmap::map(&out_file).unwrap() };
@@ -69,6 +70,14 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         }
         assert_eq!(count, 665);
     }
+    let crowns = dw4vhp_core::crown::CrownPlan::build(&original).unwrap();
+    crowns.verify(&original, &patched).unwrap();
+    ranges.extend(
+        crowns
+            .regions
+            .iter()
+            .map(|r| (r.offset as usize, r.offset as usize + r.bytes.len())),
+    );
     ranges.sort_unstable();
     let mut cursor = 0;
     for (start, end) in ranges {
@@ -79,7 +88,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         );
         cursor = end;
     }
-    assert!(original[cursor..] == patched[cursor..]);
+    assert!(original[cursor..] == patched[cursor..original.len()]);
     assert!(matches!(
         inspect_retail(&output),
         Err(Error::AlreadyModded { .. })
@@ -102,7 +111,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         "original must be unchanged"
     );
     eprintln!(
-        "PASS: {} {} → {output_md5}; all 1995 table blocks checked; other bytes unchanged",
+        "PASS: {} {} → {output_md5}; all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive verified",
         release.label(),
         release.serial()
     );
@@ -114,7 +123,7 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "df426b9ff17c9e8218779f8ff1ecf524",
+        "9ba8432d2237330a687d4ac1a0203d68",
     );
 }
 #[test]
@@ -123,7 +132,7 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "f7f04d92915e7dc8b650d3d9faa1e55f",
+        "0dfd365ae96ef0ab30e326b5096e0f46",
     );
 }
 #[test]
@@ -132,6 +141,6 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "5352edd1f061be9c94c9eeb07807023a",
+        "4a6815c3c7e5e4ee7f793b04b82eda52",
     );
 }

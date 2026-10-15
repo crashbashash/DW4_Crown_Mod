@@ -16,7 +16,7 @@ your own disc.
 ## How it works (the short version)
 
 1. You give the app a copy of your game disc (an `.iso` file).
-2. The app applies the base Very Hard Plus mode.
+2. The app applies Very Hard Plus and expands crown display capacity from 4 to 64.
 3. The app writes out a **new, separate file** — your original is never touched.
 
 You end up with something like `Digimon World 4 [VeryHardPlus].iso`, which you can play
@@ -36,6 +36,14 @@ in an emulator or burn/load like any other copy.
 "yellow crown" worn by the strongest enemy variants. This base mode has been
 checked against real USA, European and Japanese PS2 discs. It is the only mode available for now;
 there are no difficulty presets or custom settings to choose.
+All 85 crown-bearing model packs receive matching model, animation and visibility
+resources. The 64 slots cover the authored enemy pools plus four players; enemy
+spawn counts stay unchanged. The output needs about **2.18 GB** of free space
+(**2.17 GB** for Europe), as shown in the app.
+
+Restart the game with the new disc and load a **memory-card save**. An older
+emulator savestate can retain the original four-slot resources.
+
 If the output already exists, pressing **Patch ISO** asks before replacing it.
 
 Attack values are already near the game's maximum, so on Very Hard most enemies
@@ -87,8 +95,10 @@ The rest of the details live here:
 
 - The code has two parts: `dw4vhp-core` (the engine that actually edits the disc, fully
   testable on its own) and `dw4vhp-tauri` (the window you see: a Tauri shell plus the React app in `src/`).
-- **Testing against real discs:** the "golden test" proves the app reproduces known,
-  shipped discs byte-for-byte. It needs real disc images supplied through environment
+- **Testing against real discs:** `cargo test --release --test retail` checks the
+  current complete outputs when `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO` and
+  `DW4_RETAIL_JAPAN_ISO` point to clean discs. The legacy table-only golden test
+  still verifies the original shipped stat transform. It needs inputs through environment
   variables (`DW4_GOLDEN_SHIPPED_ISO`, `DW4_GOLDEN_BLOCKS_BIN`, `DW4_GOLDEN_BLOCKS_JSON`)
   and takes ~7 minutes; it skips cleanly (rather than failing) when those aren't set.
   There's also a row-group test (`tests/rowgroup.rs`, plus `tests/rowgroup_snapshot.rs`
@@ -123,7 +133,7 @@ path for each launch. Close the test app and remove the session file afterward.
 Run the full UI test on a freshly launched app:
 
 ```sh
-python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 df426b9ff17c9e8218779f8ff1ecf524
+python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 9ba8432d2237330a687d4ac1a0203d68 --expected-size 2179143680
 ```
 
 The test checks invalid and already-modded inputs, patching, overwrite cancellation
@@ -136,8 +146,8 @@ testing those releases.
 
 ## Regional verification
 
-See [v0.7.0 release notes and output checksums](CHANGELOG.md) and
-[verified native application and PCSX2 runtime checks](docs/testing/regional-v0.7.0.md).
+See [v0.8.0 release notes and output checksums](CHANGELOG.md) and
+[crown expansion validation](docs/testing/crowns-v0.8.0.md).
 
 The three releases contain the same 649-row enemy tables, repeated 665 times.
 The app uses each release's own offsets and patches all copies, preserving the

@@ -180,3 +180,79 @@ fn reports_the_copy_and_write_phases() {
     assert!(phases.contains(&Phase::Writing));
     assert!(phases.contains(&Phase::Verifying));
 }
+
+#[test]
+fn streamed_extension_is_verified_before_replacing_existing_output() {
+    use dw4vhp_core::writer::{write_output_extended, Extension};
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let input = fixture(&dir, b"original");
+    let out = dir.path().join("out.iso");
+    std::fs::write(&out, b"previous output").unwrap();
+    let append = |file: &mut std::fs::File, _: &mut dyn FnMut(dw4vhp_core::writer::Progress)| {
+        file.write_all(b"archive")?;
+        Ok(())
+    };
+    let bad = |path: &std::path::Path| {
+        assert_eq!(std::fs::read(path).unwrap(), b"originalarchive");
+        Err(Error::VerificationFailed(
+            "injected verification failure".into(),
+        ))
+    };
+    assert!(write_output_extended(
+        &input,
+        &out,
+        &[],
+        &WriteOptions { overwrite: true },
+        &mut noop,
+        &bad,
+        Some(Extension {
+            output_size: 15,
+            append: &append
+        })
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&out).unwrap(), b"previous output");
+    assert_eq!(std::fs::read(&input).unwrap(), b"original");
+    assert!(!dir.path().join("out.iso.part").exists());
+    let good = |path: &std::path::Path| {
+        assert_eq!(std::fs::read(path).unwrap(), b"originalarchive");
+        Ok(())
+    };
+    let result = write_output_extended(
+        &input,
+        &out,
+        &[],
+        &WriteOptions { overwrite: true },
+        &mut noop,
+        &good,
+        Some(Extension {
+            output_size: 15,
+            append: &append,
+        }),
+    )
+    .unwrap();
+    assert_eq!(result.bytes, 15);
+    assert_eq!(std::fs::read(&out).unwrap(), b"originalarchive");
+    // An interrupted archive write must also preserve the previous output.
+    let interrupted = |file: &mut std::fs::File,
+                       _: &mut dyn FnMut(dw4vhp_core::writer::Progress)| {
+        file.write_all(b"partial")?;
+        Err(Error::VerificationFailed("injected append failure".into()))
+    };
+    assert!(write_output_extended(
+        &input,
+        &out,
+        &[],
+        &WriteOptions { overwrite: true },
+        &mut noop,
+        &ok,
+        Some(Extension {
+            output_size: 15,
+            append: &interrupted
+        })
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&out).unwrap(), b"originalarchive");
+    assert!(!dir.path().join("out.iso.part").exists());
+}

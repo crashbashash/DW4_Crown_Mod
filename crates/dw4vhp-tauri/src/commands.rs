@@ -26,6 +26,7 @@ pub struct DiscStatusPayload {
     kind: &'static str,
     text: String,
     size: u64,
+    output_size: u64,
     copies: Option<[usize; 3]>,
 }
 
@@ -136,17 +137,20 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 report.copies[2]
             ),
             size: report.size,
+            output_size: report.output_size,
             copies: Some(report.copies),
         },
         Err(error) => DiscStatusPayload {
             kind: match error {
-                Error::AlreadyModded { .. } | Error::WrongRevision { .. } | Error::NotThisDisc => {
-                    "refused"
-                }
+                Error::AlreadyModded { .. }
+                | Error::WrongRevision { .. }
+                | Error::NotThisDisc
+                | Error::CrownData(_) => "refused",
                 _ => "unknown",
             },
             text: error.to_string(),
             size: 0,
+            output_size: 0,
             copies: None,
         },
     }

@@ -139,7 +139,7 @@ function AppInner() {
       <header className="app-header">
         <h1>DW4 Very Hard Plus</h1>
         <p className="app-subtitle">
-          Turn your own clean PS2 Digimon World 4 / World X disc into a much harder one.
+          Turn your own clean PS2 Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
         </p>
       </header>
       <main className={`app-main ${wide ? "layout-two-col" : "layout-one-col"}`}>

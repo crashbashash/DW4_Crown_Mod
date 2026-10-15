@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.8.0
+
+- Expand simultaneous crown capacity from four to 64 in all 85 crown-bearing
+  model packs on USA, European and Japanese PS2 discs. Model/animation RAM,
+  private mutable scene nodes and the visibility mask are rebuilt together.
+- Integrate the rebuild into the native application without Python or external
+  game metadata. Enemy stats retain the v0.7.0 transform; spawn counts are unchanged.
+- Stream the rebuilt archive onto the output copy, update its ISO extent, and
+  verify the complete archive and enemy tables before replacing the destination.
+- Show the exact larger output size in the free-space hint.
+- Add expanded-output regression tests and interrupted-write coverage.
+
+| PS2 release | Output bytes | Very Hard Plus ISO MD5 |
+| --- | ---: | --- |
+| USA | 2,179,143,680 | `9ba8432d2237330a687d4ac1a0203d68` |
+| Europe | 2,170,652,672 | `0dfd365ae96ef0ab30e326b5096e0f46` |
+| Japan | 2,179,084,288 | `4a6815c3c7e5e4ee7f793b04b82eda52` |
+
+All three regions passed native application disc creation, PCSX2 cold boot,
+World 1 gate entry, and ten simultaneous crowns persisting after movement.
+
+Start the new disc from a cold boot and load a memory-card save: old emulator
+savestates can restore the previous four-slot resources. See
+[validation details](docs/testing/crowns-v0.8.0.md).
+
 ## v0.7.0
 
 - Support the USA (`SLUS_208.36`), European (`SLES_534.05`) and Japanese

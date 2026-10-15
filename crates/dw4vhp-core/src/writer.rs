@@ -1,5 +1,5 @@
-//! Copies the original ISO to a new file, applies the same-length rewrites in
-//! place, verifies the result and then atomically renames it onto the output.
+//! Copies the original ISO to a new file, streams an optional archive extension,
+//! applies in-place rewrites, verifies, and atomically renames onto the output.
 //!
 //! This is the only module in the engine that writes a file the player cares
 //! about, so its order of operations is deliberate: the input is always opened
@@ -72,6 +72,26 @@ pub fn write_output(
     progress: &mut dyn FnMut(Progress),
     verify: &dyn Fn(&Path) -> Result<()>,
 ) -> Result<WriteOutcome> {
+    write_output_extended(input, output, regions, opts, progress, verify, None)
+}
+
+/// Optional streamed extension, written to the private part file before verification.
+pub type Append<'a> = dyn Fn(&mut File, &mut dyn FnMut(Progress)) -> Result<()> + 'a;
+
+pub struct Extension<'a> {
+    pub output_size: u64,
+    pub append: &'a Append<'a>,
+}
+
+pub fn write_output_extended(
+    input: &Path,
+    output: &Path,
+    regions: &[WriteRegion],
+    opts: &WriteOptions,
+    progress: &mut dyn FnMut(Progress),
+    verify: &dyn Fn(&Path) -> Result<()>,
+    extension: Option<Extension<'_>>,
+) -> Result<WriteOutcome> {
     // Every refusal that would matter to the player runs first, before anything
     // is created or truncated.
     let input_canon = fs::canonicalize(input)?;
@@ -82,7 +102,8 @@ pub fn write_output(
 
     let input_len = fs::metadata(&input_canon)?.len();
     let parent = output_canon.parent().unwrap_or_else(|| Path::new("."));
-    ensure_space(input_len, available_space(parent)?)?;
+    let output_len = extension.as_ref().map_or(input_len, |e| e.output_size);
+    ensure_space(output_len, available_space(parent)?)?;
 
     if !opts.overwrite && output.try_exists()? {
         return Err(Error::OutputExists);
@@ -95,7 +116,27 @@ pub fn write_output(
         total: input_len,
     });
 
-    copy_to_part(input, &part_path, input_len, progress)?;
+    if let Err(e) = copy_to_part(input, &part_path, input_len, progress) {
+        let _ = fs::remove_file(&part_path);
+        return Err(e);
+    }
+    if let Some(extension) = extension {
+        let appended = (|| {
+            let mut part = OpenOptions::new().append(true).open(&part_path)?;
+            (extension.append)(&mut part, progress)?;
+            part.sync_all()?;
+            if part.metadata()?.len() != output_len {
+                return Err(Error::VerificationFailed(
+                    "expanded output size mismatch".into(),
+                ));
+            }
+            Ok(())
+        })();
+        if let Err(e) = appended {
+            let _ = fs::remove_file(&part_path);
+            return Err(e);
+        }
+    }
 
     let written = apply_regions(&part_path, regions, input_len, progress);
     if let Err(e) = written {
@@ -117,7 +158,7 @@ pub fn write_output(
 
     Ok(WriteOutcome {
         md5: md5_hex(output)?,
-        bytes: input_len,
+        bytes: output_len,
     })
 }
 

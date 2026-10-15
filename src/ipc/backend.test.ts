@@ -48,11 +48,11 @@ describe("mock backend — patch lifecycle", () => {
   });
 
   test("analyze returns the seeded status and clears on new failure", async () => {
-    backend.seedStatus = { kind: "ok", text: "clean disc", size: 1440, copies: [1, 1, 1] };
+    backend.seedStatus = { kind: "ok", text: "clean disc", size: 1440, outputSize: 1440, copies: [1, 1, 1] };
     expect(await backend.analyze("game.iso")).toEqual({
       kind: "ok",
       text: "clean disc",
-      size: 1440,
+      size: 1440, outputSize: 1440,
       copies: [1, 1, 1],
     });
     backend.nextAnalyzeError = "this is not a supported clean PS2 disc — use Digimon World 4 (USA/Europe) or Digimon World X (Japan)";

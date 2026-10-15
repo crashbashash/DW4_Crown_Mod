@@ -37,9 +37,9 @@ describe("OutputPanel", () => {
     expect(onPatch).toHaveBeenCalled();
   });
 
-  test("free-space note shows the analysed size", () => {
-    setup({ status: { kind: "ok", text: "", size: 4600000000, copies: [1, 1, 1] } });
-    expect(screen.getByText(/4.60 GB of free space/)).toBeTruthy();
+  test("free-space note uses the expanded output size", () => {
+    setup({ status: { kind: "ok", text: "", size: 1448902656, outputSize: 2179143680, copies: [1, 1, 1] } });
+    expect(screen.getByText(/2.18 GB of free space/)).toBeTruthy();
   });
 
   test("completed patch size uses GB", () => {

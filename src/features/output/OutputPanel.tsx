@@ -49,7 +49,7 @@ export function OutputPanel({
       </div>
       {status !== null && (
         <p className="hint">
-          The output copy needs {(status.size / 1_000_000_000).toFixed(2)} GB of free space.
+          The output copy needs {(status.outputSize / 1_000_000_000).toFixed(2)} GB of free space.
         </p>
       )}
       {lastOutcome !== null && (

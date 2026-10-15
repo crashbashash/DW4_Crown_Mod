@@ -29,7 +29,7 @@ export class MockBackend implements Backend {
     const error = this.nextAnalyzeError;
     this.nextAnalyzeError = null;
     if (error !== null) {
-      return { kind: "refused", text: error, size: 0, copies: null };
+      return { kind: "refused", text: error, size: 0, outputSize: 0, copies: null };
     }
     const seeded = this.seedStatus;
     this.seedStatus = null;
@@ -37,7 +37,7 @@ export class MockBackend implements Backend {
       seeded ?? {
         kind: "ok",
         text: `clean mock disc from ${path}`,
-        size: 4_600_000_000,
+        size: 4_600_000_000, outputSize: 4_600_000_000,
         copies: [10, 580, 5],
       }
     );

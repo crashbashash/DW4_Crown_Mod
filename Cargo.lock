@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "dw4vhp-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "fs4",
  "md-5",
