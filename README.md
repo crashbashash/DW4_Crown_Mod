@@ -29,7 +29,6 @@ Your original file is never changed.
   normally shows crowns on only 4 characters at once. This mod raises that to 64, so
   every crowned enemy shows its crown, not just the first few. Enemy spawn counts are
   unchanged.
-- **One mode.** There are no difficulty presets or settings to pick from.
 
 ## What you need
 
@@ -54,14 +53,6 @@ Get the latest version from the **Releases** page of this project:
 - **Linux:** `.AppImage`, `.deb`, or a plain download
 
 The downloads are unsigned, so Windows may show a warning the first time you run it.
-
-## Playing the patched game
-
-Start the game from a cold boot with the new disc and load a **memory-card save**.
-Emulator savestates made with an older disc can bring back the original four-crown
-limit.
-
-If the output file already exists, the app asks before replacing it.
 
 ## Is my disc safe?
 
