@@ -54,16 +54,6 @@ Get the latest version from the **Releases** page of this project:
 
 The downloads are unsigned, so Windows may show a warning the first time you run it.
 
-## Is my disc safe?
-
-Yes. The app opens your disc image read-only, does its work on a temporary copy,
-checks the result, and only then gives it the final name. If something goes wrong or
-you cancel partway, you are left with an unfinished extra file and your original is
-untouched.
-
-Before writing anything, the app also checks that the disc is the right one, isn't
-already modded, and that you have enough free space.
-
 ## Contributing and building from source
 
 See the [development guide](docs/DEVELOPMENT.md) for build steps, tests and project
