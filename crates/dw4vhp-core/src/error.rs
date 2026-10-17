@@ -4,13 +4,19 @@ use thiserror::Error;
 /// not just the fault, as required by spec §6.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(
+        "this disc container could not be read: {0} — use an unmodified GameCube .iso, .ciso or \
+         .rvz of the original game"
+    )]
+    Container(String),
+
     #[error("unrecognised crown resources: {0} — use your original supported PS2 ISO")]
     CrownData(String),
 
     #[error("this is not a supported clean PS2 disc — use Digimon World 4 (USA/Europe) or Digimon World X (Japan)")]
     NotThisDisc,
 
-    #[error("forcing Very Hard difficulty is only verified for the USA ELF; use the base mode for Europe/Japan")]
+    #[error("forcing Very Hard difficulty and changing the serial are only verified for PS2 USA/Europe/Japan; use the base mode")]
     UnsupportedDifficulty,
 
     #[error(

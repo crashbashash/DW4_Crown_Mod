@@ -2,6 +2,7 @@
 //! tables, rebuild the linked crown resources, stream a separate ISO and verify
 //! it before the final rename. Input is always read-only and mmap-backed.
 
+use crate::container::{self, Format};
 use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned, DiscReport};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
@@ -11,7 +12,10 @@ use crate::ratio::RatioVector;
 use crate::region::WriteRegion;
 use crate::serial::serial_regions;
 use crate::table::EnemyTable;
-use crate::writer::{write_output_extended, Extension, Phase, Progress, WriteOptions};
+use crate::writer::{
+    canonical_output, md5_hex, part_path, write_output_extended, Extension, Phase, Progress,
+    WriteOptions,
+};
 use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
@@ -82,6 +86,10 @@ pub fn plan_regions(
         }
     }
 
+    let gamecube = report.release.is_some_and(|release| release.is_gamecube());
+    if (plan.force_very_hard || plan.serial.is_some()) && gamecube {
+        return Err(Error::UnsupportedDifficulty);
+    }
     if plan.force_very_hard {
         if matches!(
             report.release,
@@ -113,7 +121,71 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
-    patch_file_internal(input, output, plan, opts, None, progress)
+    match container::detect(input)? {
+        Format::Raw => patch_file_internal(input, output, plan, opts, None, progress),
+        format => patch_container(format, input, output, plan, opts, progress),
+    }
+}
+
+/// Patches a CISO or RVZ: unpack to a plain image next to the output, run the
+/// normal pipeline on it, pack the result in the same format and prove the
+/// packed file unpacks to exactly the patched image before it is renamed.
+fn patch_container(
+    format: Format,
+    input: &Path,
+    output: &Path,
+    plan: &PatchPlan,
+    opts: &PatchOptions,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<PatchOutcome> {
+    let input_canon = std::fs::canonicalize(input)?;
+    let output_canon = canonical_output(output)?;
+    if input_canon == output_canon {
+        return Err(Error::OutputIsInput);
+    }
+    if !opts.overwrite && output.try_exists()? {
+        return Err(Error::OutputExists);
+    }
+    let parent = output_canon.parent().unwrap_or_else(|| Path::new("."));
+    let work = tempfile::Builder::new()
+        .prefix(".dw4vhp-")
+        .tempdir_in(parent)?;
+    let (plain_in, plain_out) = (work.path().join("in.iso"), work.path().join("out.iso"));
+    let part = part_path(output);
+    let result = (|| {
+        let step = |phase| move |done: u64, total: u64| Progress { phase, done, total };
+        let unpacking = step(Phase::Copying);
+        container::unpack(format, input, &plain_in, &mut |d, t| {
+            progress(unpacking(d, t))
+        })?;
+        let inner = PatchOptions { overwrite: true };
+        let outcome = patch_file_internal(&plain_in, &plain_out, plan, &inner, None, progress)?;
+        std::fs::remove_file(&plain_in)?;
+        let packing = step(Phase::Writing);
+        container::pack(format, &plain_out, &part, &mut |d, t| {
+            progress(packing(d, t))
+        })?;
+
+        // Round trip: the packed file must expand to the image that was patched.
+        let check = work.path().join("check.iso");
+        let verifying = step(Phase::Verifying);
+        container::unpack(format, &part, &check, &mut |d, t| progress(verifying(d, t)))?;
+        if !same_image(&plain_out, &check)? {
+            return Err(Error::VerificationFailed(
+                "the packed disc does not match the patched image".into(),
+            ));
+        }
+        std::fs::rename(&part, output)?;
+        Ok(PatchOutcome {
+            md5: md5_hex(output)?,
+            bytes: std::fs::metadata(output)?.len(),
+            summary: outcome.summary,
+        })
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    result
 }
 
 /// The explicit-layout seam used by generated tests and low-level callers. `patch_file`
@@ -152,7 +224,10 @@ fn patch_file_internal(
             (report, Some(crowns))
         }
     };
-    let detected_layout = report.release.map(|release| release.layout());
+    let detected_layout = report
+        .release
+        .map(|release| release.layout_in(&mmap[..]))
+        .transpose()?;
     let layout = layout
         .or(detected_layout.as_ref())
         .ok_or(Error::NotThisDisc)?;
@@ -255,4 +330,34 @@ fn verify_blocks(iso: &[u8], blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<(
     }
 
     Ok(())
+}
+
+/// True when `unpacked` holds exactly the bytes of `patched`, followed by
+/// nothing but zeros (CISO pads its last block).
+fn same_image(patched: &Path, unpacked: &Path) -> Result<bool> {
+    use std::io::Read;
+    let (mut a, mut b) = (File::open(patched)?, File::open(unpacked)?);
+    if b.metadata()?.len() < a.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut left, mut right) = (vec![0u8; 8 << 20], vec![0u8; 8 << 20]);
+    loop {
+        let n = a.read(&mut left)?;
+        if n == 0 {
+            break;
+        }
+        b.read_exact(&mut right[..n])?;
+        if left[..n] != right[..n] {
+            return Ok(false);
+        }
+    }
+    loop {
+        let n = b.read(&mut right)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        if right[..n].iter().any(|&byte| byte != 0) {
+            return Ok(false);
+        }
+    }
 }

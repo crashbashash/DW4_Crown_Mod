@@ -49,7 +49,7 @@ export class TauriBackend implements Backend {
   async onFileDropped(handler: (path: string) => void): Promise<() => void> {
     const unlisten = await getCurrentWindow().onDragDropEvent((event) => {
       if (event.payload.type === "drop" && event.payload.paths.length > 0) {
-        const iso = event.payload.paths.find((p) => p.toLowerCase().endsWith(".iso"));
+        const iso = event.payload.paths.find((p) => /\.(iso|gcm|ciso|rvz)$/i.test(p));
         if (iso !== undefined) handler(iso);
       }
     });

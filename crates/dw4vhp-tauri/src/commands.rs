@@ -18,7 +18,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
-const OUTPUT_SUFFIX: &str = " [VeryHardPlus].iso";
+const OUTPUT_MARKER: &str = " [VeryHardPlus]";
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +82,7 @@ pub fn choose_iso(app: AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     app.dialog()
         .file()
-        .add_filter("PS2 disc image", &["iso"])
+        .add_filter("PS2 or GameCube disc image", &["iso", "gcm", "ciso", "rvz"])
         .blocking_pick_file()
         .and_then(|p| p.into_path().ok())
         .map(|p| p.display().to_string())
@@ -109,7 +109,13 @@ pub fn default_output(input: String) -> String {
         .file_stem()
         .map(|s| s.to_os_string())
         .unwrap_or_default();
-    name.push(OUTPUT_SUFFIX);
+    name.push(OUTPUT_MARKER);
+    // CISO and RVZ inputs stay in their own format; everything else is a plain .iso.
+    let extension = match dw4vhp_core::container::detect(input) {
+        Ok(format) => format.extension(),
+        Err(_) => "iso",
+    };
+    name.push(format!(".{extension}"));
     input.with_file_name(name).display().to_string()
 }
 

@@ -1,3 +1,4 @@
+use crate::container::{self, Format};
 use crate::error::{Error, Result};
 use crate::iso9660::{self, IsoFile};
 use crate::layout::Layout;
@@ -119,6 +120,20 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
 /// Inspect any supported retail PS2 release, checking its tables and crown
 /// resources and calculating the expanded output size without writing anything.
 pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
+    let format = container::detect(path)?;
+    if format != Format::Raw {
+        // Inspection needs the plain image, so expand into a throwaway folder.
+        // Next to the input first: it holds the original, so it has the room.
+        let beside = path.parent().filter(|p| !p.as_os_str().is_empty());
+        let work =
+            match beside.map(|dir| tempfile::Builder::new().prefix(".dw4vhp-").tempdir_in(dir)) {
+                Some(Ok(dir)) => dir,
+                _ => tempfile::tempdir()?,
+            };
+        let plain = work.path().join("disc.iso");
+        container::unpack(format, path, &plain, &mut |_, _| {})?;
+        return inspect_retail(&plain);
+    }
     let file = File::open(path)?;
     if file.metadata()?.len() == 0 {
         return Err(Error::NotThisDisc);
@@ -135,7 +150,7 @@ pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
 /// Retain the validated rebuild plan when inspection is immediately followed by a write.
 pub(crate) fn inspect_retail_planned(iso: &[u8]) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
-    let mut report = inspect_bytes(iso, &release.layout())?;
+    let mut report = inspect_bytes(iso, &release.layout_in(iso)?)?;
     // All three retail releases carry identical tables. Copy counts alone do
     // not prove that an arbitrary/repacked table is safe to scale by row index.
     let fingerprints = [
@@ -148,9 +163,17 @@ pub(crate) fn inspect_retail_planned(iso: &[u8]) -> Result<(DiscReport, crate::c
             return Err(Error::NotThisDisc);
         }
     }
-    let crowns = crate::crown::CrownPlan::build(iso)?;
+    let crowns = if release.is_gamecube() {
+        crate::crown::CrownPlan::build_gcm(iso)?
+    } else {
+        crate::crown::CrownPlan::build(iso)?
+    };
     report.output_size = crowns.output_size;
     report.release = Some(release);
-    report.boot_elf = Some(iso9660::find_file(iso, release.serial())?);
+    report.boot_elf = if release.is_gamecube() {
+        None
+    } else {
+        Some(iso9660::find_file(iso, release.serial())?)
+    };
     Ok((report, crowns))
 }

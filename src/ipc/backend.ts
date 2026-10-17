@@ -17,6 +17,6 @@ export interface Backend {
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;
-  /** An ISO dropped onto the window (desktop only; mock never fires it). */
+  /** A disc image (.iso, .gcm, .ciso or .rvz) dropped onto the window (desktop only; mock never fires it). */
   onFileDropped(handler: (path: string) => void): Promise<() => void>;
 }

@@ -1,7 +1,9 @@
+pub mod container;
 pub mod crown;
 pub mod disc;
 pub mod elf;
 pub mod error;
+pub mod gcm;
 pub mod iso9660;
 pub mod layout;
 pub mod patch;

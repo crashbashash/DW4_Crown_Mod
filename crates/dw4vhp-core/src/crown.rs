@@ -4,7 +4,7 @@
 //! original IDs and pool contents remain intact. Archive order is preserved.
 use crate::{
     error::{Error, Result},
-    iso9660,
+    gcm, iso9660,
     region::WriteRegion,
 };
 use std::{collections::BTreeMap, io::Write, ops::Range};
@@ -680,7 +680,7 @@ fn expand(b: &[u8]) -> Result<Vec<Edit>> {
 }
 
 #[derive(Debug)]
-enum Piece {
+pub(crate) enum Piece {
     Source(Range<usize>),
     Bytes(Vec<u8>),
 }
@@ -691,115 +691,123 @@ pub struct CrownPlan {
     pub output_size: u64,
     append_offset: usize,
 }
+/// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
+/// expanded. Returns the recipe for the new archive and its length. It knows
+/// nothing about the disc filesystem, so ISO9660 and GameCube images share it.
+pub(crate) fn rebuild_afs(iso: &[u8], base: usize, size: usize) -> Result<(Vec<Piece>, usize)> {
+    let afs = iso
+        .get(base..base + size)
+        .ok_or_else(|| bad("NDMW.AFS outside image"))?;
+    need(afs.get(..4) == Some(b"AFS\0"), "invalid archive signature")?;
+    let count = u32at(afs, 4)? as usize;
+    need(
+        count > 0 && count < 65536 && 8 + 8 * count <= size,
+        "invalid archive count",
+    )?;
+    let entries = (0..count)
+        .map(|i| {
+            Ok((
+                u32at(afs, 8 + 8 * i)? as usize,
+                u32at(afs, 12 + 8 * i)? as usize,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let first = entries[0].0;
+    need(
+        first >= 16 + 8 * count && first <= size,
+        "invalid archive prefix",
+    )?;
+    let mut prefix = afs[..first].to_vec();
+    let mut pieces = Vec::new();
+    let mut cursor = first;
+    let mut newentries = Vec::new();
+    let mut patched = Vec::new();
+    for (i, &(off, len)) in entries.iter().enumerate() {
+        let next = entries.get(i + 1).map_or(size, |e| e.0);
+        need(
+            off <= next && len <= next - off && next <= size && off % 2048 == 0,
+            "invalid archive entry extent/order",
+        )?;
+        newentries.push((cursor, len));
+        let data = &afs[off..off + len];
+        if memchr::memmem::find(data, b"i_rareicon").is_some() {
+            let edits = expand(data).map_err(|e| bad(&format!("archive entry {i}: {e}")))?;
+            let mut q = 0;
+            let mut newlen = len;
+            for e in edits {
+                need(e.range.start >= q, "overlapping archive edits")?;
+                if e.range.start > q {
+                    pieces.push(Piece::Source(base + off + q..base + off + e.range.start));
+                }
+                newlen = newlen + e.bytes.len() - e.range.len();
+                pieces.push(Piece::Bytes(e.bytes));
+                q = e.range.end;
+            }
+            if q < len {
+                pieces.push(Piece::Source(base + off + q..base + off + len));
+            }
+            newentries[i].1 = newlen;
+            cursor += newlen;
+            let aligned = a2048(cursor);
+            if aligned > cursor {
+                pieces.push(Piece::Bytes(vec![0; aligned - cursor]));
+            }
+            cursor = aligned;
+            let oldend = a2048(off + len);
+            if next > oldend {
+                pieces.push(Piece::Source(base + oldend..base + next));
+                cursor += next - oldend;
+            }
+            patched.push(i);
+        } else {
+            pieces.push(Piece::Source(base + off..base + next));
+            cursor += next - off;
+        }
+    }
+    need(patched.len() == 85, "expected 85 crown model packs")?;
+    for (i, &(off, len)) in newentries.iter().enumerate() {
+        need(
+            off <= u32::MAX as usize && len <= u32::MAX as usize,
+            "archive exceeds format limit",
+        )?;
+        put(&mut prefix, 8 + 8 * i, off as u32);
+        put(&mut prefix, 12 + 8 * i, len as u32);
+    }
+    for pos in [8 + 8 * count, first - 8] {
+        let footer = u32at(afs, pos)? as usize;
+        let len = u32at(afs, pos + 4)? as usize;
+        if footer == 0 && len == 0 {
+            continue;
+        }
+        need(
+            footer > 0 && len > 0 && footer <= size && len <= size - footer,
+            "invalid archive footer",
+        )?;
+        let owner = entries
+            .iter()
+            .rposition(|e| e.0 <= footer)
+            .ok_or_else(|| bad("footer has no owner"))?;
+        let (oldoff, oldlen) = entries[owner];
+        let (newoff, newlen) = newentries[owner];
+        let relocated = if patched.contains(&owner) {
+            let end = a2048(oldoff + oldlen);
+            need(footer >= end, "footer overlaps modified pack")?;
+            a2048(newoff + newlen) + footer - end
+        } else {
+            newoff + footer - oldoff
+        };
+        put(&mut prefix, pos, relocated as u32);
+    }
+    pieces.insert(0, Piece::Bytes(prefix));
+    Ok((pieces, cursor))
+}
+
 impl CrownPlan {
     pub fn build(iso: &[u8]) -> Result<Self> {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
-        let afs = iso
-            .get(base..base + size)
-            .ok_or_else(|| bad("NDMW.AFS outside image"))?;
-        need(afs.get(..4) == Some(b"AFS\0"), "invalid archive signature")?;
-        let count = u32at(afs, 4)? as usize;
-        need(
-            count > 0 && count < 65536 && 8 + 8 * count <= size,
-            "invalid archive count",
-        )?;
-        let entries = (0..count)
-            .map(|i| {
-                Ok((
-                    u32at(afs, 8 + 8 * i)? as usize,
-                    u32at(afs, 12 + 8 * i)? as usize,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let first = entries[0].0;
-        need(
-            first >= 16 + 8 * count && first <= size,
-            "invalid archive prefix",
-        )?;
-        let mut prefix = afs[..first].to_vec();
-        let mut pieces = Vec::new();
-        let mut cursor = first;
-        let mut newentries = Vec::new();
-        let mut patched = Vec::new();
-        for (i, &(off, len)) in entries.iter().enumerate() {
-            let next = entries.get(i + 1).map_or(size, |e| e.0);
-            need(
-                off <= next && len <= next - off && next <= size && off % 2048 == 0,
-                "invalid archive entry extent/order",
-            )?;
-            newentries.push((cursor, len));
-            let data = &afs[off..off + len];
-            if memchr::memmem::find(data, b"i_rareicon").is_some() {
-                let edits = expand(data).map_err(|e| bad(&format!("archive entry {i}: {e}")))?;
-                let mut q = 0;
-                let mut newlen = len;
-                for e in edits {
-                    need(e.range.start >= q, "overlapping archive edits")?;
-                    if e.range.start > q {
-                        pieces.push(Piece::Source(base + off + q..base + off + e.range.start));
-                    }
-                    newlen = newlen + e.bytes.len() - e.range.len();
-                    pieces.push(Piece::Bytes(e.bytes));
-                    q = e.range.end;
-                }
-                if q < len {
-                    pieces.push(Piece::Source(base + off + q..base + off + len));
-                }
-                newentries[i].1 = newlen;
-                cursor += newlen;
-                let aligned = a2048(cursor);
-                if aligned > cursor {
-                    pieces.push(Piece::Bytes(vec![0; aligned - cursor]));
-                }
-                cursor = aligned;
-                let oldend = a2048(off + len);
-                if next > oldend {
-                    pieces.push(Piece::Source(base + oldend..base + next));
-                    cursor += next - oldend;
-                }
-                patched.push(i);
-            } else {
-                pieces.push(Piece::Source(base + off..base + next));
-                cursor += next - off;
-            }
-        }
-        need(patched.len() == 85, "expected 85 crown model packs")?;
-        for (i, &(off, len)) in newentries.iter().enumerate() {
-            need(
-                off <= u32::MAX as usize && len <= u32::MAX as usize,
-                "archive exceeds format limit",
-            )?;
-            put(&mut prefix, 8 + 8 * i, off as u32);
-            put(&mut prefix, 12 + 8 * i, len as u32);
-        }
-        for pos in [8 + 8 * count, first - 8] {
-            let footer = u32at(afs, pos)? as usize;
-            let len = u32at(afs, pos + 4)? as usize;
-            if footer == 0 && len == 0 {
-                continue;
-            }
-            need(
-                footer > 0 && len > 0 && footer <= size && len <= size - footer,
-                "invalid archive footer",
-            )?;
-            let owner = entries
-                .iter()
-                .rposition(|e| e.0 <= footer)
-                .ok_or_else(|| bad("footer has no owner"))?;
-            let (oldoff, oldlen) = entries[owner];
-            let (newoff, newlen) = newentries[owner];
-            let relocated = if patched.contains(&owner) {
-                let end = a2048(oldoff + oldlen);
-                need(footer >= end, "footer overlaps modified pack")?;
-                a2048(newoff + newlen) + footer - end
-            } else {
-                newoff + footer - oldoff
-            };
-            put(&mut prefix, pos, relocated as u32);
-        }
-        pieces.insert(0, Piece::Bytes(prefix));
+        let (pieces, cursor) = rebuild_afs(iso, base, size)?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
         need(append_offset == iso.len(), "unexpected trailing ISO data")?;
@@ -844,6 +852,38 @@ impl CrownPlan {
             pieces,
             regions,
             output_size: output_size as u64,
+            append_offset,
+        })
+    }
+    /// GameCube twin of [`CrownPlan::build`]: the rebuilt archive is appended
+    /// after the last byte of the image and the FST entry repointed at it.
+    pub fn build_gcm(disc: &[u8]) -> Result<Self> {
+        let file = gcm::find_file(disc, "ndmw.afs")?;
+        let (base, size) = (file.offset as usize, file.size as usize);
+        let (pieces, cursor) = rebuild_afs(disc, base, size)?;
+        let append_offset = disc.len();
+        need(
+            append_offset.is_multiple_of(4),
+            "unaligned GameCube image length",
+        )?;
+        need(
+            (append_offset + cursor) as u64 <= u32::MAX as u64,
+            "expanded image exceeds format limit",
+        )?;
+        let regions = vec![
+            WriteRegion {
+                offset: file.offset_field,
+                bytes: (append_offset as u32).to_be_bytes().to_vec(),
+            },
+            WriteRegion {
+                offset: file.size_field,
+                bytes: (cursor as u32).to_be_bytes().to_vec(),
+            },
+        ];
+        Ok(Self {
+            pieces,
+            regions,
+            output_size: (append_offset + cursor) as u64,
             append_offset,
         })
     }

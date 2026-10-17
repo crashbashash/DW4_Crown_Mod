@@ -239,7 +239,7 @@ fn apply_regions(
 }
 
 /// The `.part` file the copy is built in: `<output>.part`.
-fn part_path(output: &Path) -> PathBuf {
+pub(crate) fn part_path(output: &Path) -> PathBuf {
     let mut name = output.as_os_str().to_os_string();
     name.push(".part");
     PathBuf::from(name)
@@ -248,7 +248,7 @@ fn part_path(output: &Path) -> PathBuf {
 /// Canonical form of the output path for the same-file check. The output may
 /// not exist yet, so its parent directory is canonicalised and the file name is
 /// joined back on rather than canonicalising the file itself.
-fn canonical_output(output: &Path) -> Result<PathBuf> {
+pub(crate) fn canonical_output(output: &Path) -> Result<PathBuf> {
     let file_name = output.file_name().ok_or_else(|| {
         Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -264,12 +264,12 @@ fn canonical_output(output: &Path) -> Result<PathBuf> {
 
 /// Free space in a directory, in bytes, so the space check stays a single
 /// query that is easy to swap or mock.
-fn available_space(dir: &Path) -> Result<u64> {
+pub(crate) fn available_space(dir: &Path) -> Result<u64> {
     Ok(fs4::available_space(dir)?)
 }
 
 /// Hex MD5 of a file, streamed so a 1.4 GB image is not loaded into memory.
-fn md5_hex(path: &Path) -> Result<String> {
+pub(crate) fn md5_hex(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;
     let mut hasher = Md5::new();
     let mut buf = vec![0u8; CHUNK];

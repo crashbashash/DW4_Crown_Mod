@@ -52,6 +52,8 @@ never run in CI. Like all release assets, they are unsigned.
 Point these environment variables at clean local images:
 `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`, `DW4_RETAIL_JAPAN_ISO`.
 
+GameCube images were checked by hand with `patch_file` on NKit `.iso`, `.ciso` and `.rvz` inputs, and the RVZ and CISO outputs were read back with Dolphin's `dolphin-tool`. The tables sit at a fixed distance from the start of `area.afs`, because NKit and RVZ conversions move files.
+
 ```sh
 cargo test -p dw4vhp-core --test retail -- --nocapture
 ```

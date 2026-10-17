@@ -5,7 +5,7 @@
 [![Release Linux](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/release-linux.yml?label=Release%20Linux)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/release-linux.yml)
 [![Release Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/release-windows.yml?label=Release%20Windows)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/release-windows.yml)
 
-A difficulty mod for **Digimon World 4** on PS2. Very Hard Plus makes enemies much
+A difficulty mod for **Digimon World 4** on PS2 and GameCube. Very Hard Plus makes enemies much
 tougher, and marks the strongest ones with a yellow crown so you can spot them.
 
 You don't need any modding knowledge. Open the app, pick your own copy of the game,
@@ -14,9 +14,9 @@ and click one button. It creates a new, modded copy of the game for you.
 ## Quick start
 
 1. [Download the app](#download) for Windows or Linux.
-2. Open it and choose your game disc image (an `.iso` file).
+2. Open it and choose your game disc image (`.iso`, or `.ciso` / `.rvz` for GameCube).
 3. Click **Patch ISO**.
-4. Play the new `Digimon World 4 [VeryHardPlus].iso` in your PS2 emulator.
+4. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
 
 Your original file is never changed.
 
@@ -32,18 +32,22 @@ Your original file is never changed.
 
 ## What you need
 
-- A clean copy of Digimon World 4 for PS2, as an `.iso` file. These releases work:
+- A clean copy of Digimon World 4, as an `.iso` file (PS2 or GameCube), or a GameCube `.ciso` or `.rvz`. These releases work:
 
   | Release | Game ID |
   | --- | --- |
   | USA | `SLUS_208.36` |
   | Europe (English, German, Spanish, Italian) | `SLES_534.05` |
   | Japan (*Digimon World X*) | `SLPS_254.53` |
+  | GameCube USA | `GDJE` |
+  | GameCube Japan (*Digimon World X*) | `GDJJ` |
+
+  GameCube images can be a plain `.iso`, an NKit `.iso`, a `.ciso` or an `.rvz` (uncompressed or zstd). The Europe GameCube release is not supported yet.
 
   The app detects your release automatically. It refuses discs that are unknown or
   already modified.
 - Windows or Linux. Nothing else to install.
-- About **2.2 GB** of free disk space for the new file. The app shows the exact amount.
+- About **2.2 GB** of free disk space for the new file (more for `.ciso` and `.rvz`, which are unpacked while patching). The app shows the exact amount.
 
 ## Download
 

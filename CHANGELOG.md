@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.0
+
+- Support Digimon World 4 (USA) and Digimon World X (Japan) on GameCube, with the same
+  enemy stats and 64 yellow crowns as PS2. Plain `.iso`, NKit `.iso`, `.ciso` and
+  `.rvz` (uncompressed or zstd) images are accepted, and `.ciso` and `.rvz` inputs
+  produce the same format. RVZ junk padding is written back as zeros.
+- The GameCube rebuilt crown archive is appended to the image and its file table
+  entry repointed. The Europe GameCube release is not supported yet.
+
 ## v0.8.0
 
 - Expand simultaneous crown capacity from four to 64 in all 85 crown-bearing
