@@ -21,4 +21,5 @@ dw4vhp-core = { path = "../dw4vhp-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+# xdg-portal makes Linux use the desktop's own file picker (KDE, GNOME) instead of GTK's.
+tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }

@@ -108,3 +108,33 @@ describe("overwrite confirmation", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+describe("patch finished popup", () => {
+  async function patchOnce() {
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    await waitFor(() => expect(screen.getByText(/clean mock disc/)).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    return user;
+  }
+
+  test("a successful patch opens a popup that OK closes", async () => {
+    const user = await patchOnce();
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Patching complete");
+    expect(dialog.textContent).toContain("/mock/game [VeryHardPlus].iso");
+    await user.click(screen.getByRole("button", { name: "OK" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("a refused patch does not open the popup", async () => {
+    vi.spyOn(MockBackend.prototype, "startPatch").mockImplementation(async function (this: MockBackend) {
+      (this as unknown as { emit: (n: string, p: string) => void }).emit("patch-failed", "nope");
+    });
+    await patchOnce();
+    await waitFor(() => expect(screen.getByText(/patch refused: nope/)).toBeTruthy());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});

@@ -8,6 +8,10 @@
   produce the same format. RVZ junk padding is written back as zeros.
 - The GameCube rebuilt crown archive is appended to the image and its file table
   entry repointed. The Europe GameCube release is not supported yet.
+- Fix the Browse and Save buttons freezing the window without showing a dialog on
+  Linux, and make Save as a real save dialog. Linux now uses the desktop's own file
+  picker through xdg-desktop-portal (KDE, GNOME).
+- Show a "Patching complete" popup when a patch is written and verified.
 
 ## v0.8.0
 

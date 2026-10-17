@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PatchOutcome, ProgressEvent } from "../bindings";
 import { DiscPicker } from "../features/disc/DiscPicker";
 import { useDisc } from "../features/disc/useDisc";
+import { DoneDialog } from "../features/output/DoneDialog";
 import { OverwriteDialog } from "../features/output/OverwriteDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
 import { BackendProvider, useBackend } from "../ipc/context";
@@ -38,6 +39,8 @@ function AppInner() {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [lastOutcome, setLastOutcome] = useState<PatchOutcome | null>(null);
+  const [donePopup, setDonePopup] = useState<PatchOutcome | null>(null);
+  const outputRef = useRef<string | null>(null);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
@@ -51,6 +54,7 @@ function AppInner() {
     ups.push(
       backend.onPatchDone((o) => {
         setLastOutcome(o);
+        setDonePopup(o);
         setProgress(null);
         setBusy(false);
         setLog((lines) => [
@@ -89,6 +93,7 @@ function AppInner() {
   const canPatch = analyzed && disc.outputPath !== null;
 
   const runPatch = async (output: string, overwrite: boolean) => {
+    outputRef.current = output;
     setBusy(true);
     setLog((lines) => [...lines, `patching ${disc.inputPath} -> ${output}`]);
     try {
@@ -139,7 +144,7 @@ function AppInner() {
       <header className="app-header">
         <h1>DW4 Very Hard Plus</h1>
         <p className="app-subtitle">
-          Turn your own clean PS2 Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
+          Turn your own clean PS2 or GameCube Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
         </p>
       </header>
       <main className={`app-main ${wide ? "layout-two-col" : "layout-one-col"}`}>
@@ -169,6 +174,13 @@ function AppInner() {
           />
         </div>
       </main>
+      {donePopup !== null && (
+        <DoneDialog
+          path={outputRef.current ?? ""}
+          outcome={donePopup}
+          onClose={() => setDonePopup(null)}
+        />
+      )}
       {overwritePath !== null && (
         <OverwriteDialog
           path={overwritePath}

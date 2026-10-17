@@ -76,28 +76,42 @@ pub struct ProgressPayload {
     total: u64,
 }
 
-/// The native open dialog for the player's ISO. `None` when cancelled.
+/// The native open dialog for the player's disc image. `None` when cancelled.
+///
+/// Async on purpose: a synchronous command runs on the main thread, and the
+/// blocking dialog calls wait for that same thread to draw the dialog, so the
+/// window froze and the dialog never appeared.
 #[tauri::command]
-pub fn choose_iso(app: AppHandle) -> Option<String> {
+pub async fn choose_iso(app: AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    app.dialog()
-        .file()
-        .add_filter("PS2 or GameCube disc image", &["iso", "gcm", "ciso", "rvz"])
-        .blocking_pick_file()
-        .and_then(|p| p.into_path().ok())
-        .map(|p| p.display().to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("PS2 or GameCube disc image", &["iso", "gcm", "ciso", "rvz"])
+            .blocking_pick_file()
+            .and_then(|p| p.into_path().ok())
+            .map(|p| p.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// The native save dialog for the patched output. `None` when cancelled.
 #[tauri::command]
-pub fn choose_output(app: AppHandle, default_name: String) -> Option<String> {
+pub async fn choose_output(app: AppHandle, default_name: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    app.dialog()
-        .file()
-        .set_file_name(&default_name)
-        .blocking_pick_file()
-        .and_then(|p| p.into_path().ok())
-        .map(|p| p.display().to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(&default_name)
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+            .map(|p| p.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// The output name an input suggests: same directory, stem plus the marker

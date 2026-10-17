@@ -39,7 +39,7 @@ export function OutputPanel({
           className="path-field"
           type="text"
           value={outputPath ?? ""}
-          placeholder="where to write the patched ISO"
+          placeholder="where to write the patched disc"
           aria-label="output path"
           onChange={(e) => onSetOutput(e.target.value)}
         />

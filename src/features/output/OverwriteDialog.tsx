@@ -12,7 +12,7 @@ export function OverwriteDialog({ path, onCancel, onConfirm }: {
           <Heading slot="title">Overwrite existing file?</Heading>
           <p>A file already exists at:</p>
           <p className="overwrite-path">{path}</p>
-          <p>Replace it with the patched ISO?</p>
+          <p>Replace it with the patched disc?</p>
           <div className="row">
             <Button autoFocus onPress={onCancel}>Cancel</Button>
             <Button onPress={onConfirm}>Overwrite and patch</Button>
