@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Rename the app and new downloads to **DW4 Crown Mod**, matching the community name.
-  The GitHub repository URL and existing installation identity are retained.
+  Rename the GitHub repository to `DW4_Crown_Mod`; existing repository links
+  redirect to the new name. The existing installation identity is retained.
 - New patched images use the `[CrownMod]` filename marker.
 - Match the DigiLab and DigiAtlas app style with dark panels, gold accents and
   a crown icon in the same badge layout.
