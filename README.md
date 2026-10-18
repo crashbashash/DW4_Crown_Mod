@@ -4,7 +4,7 @@
 [![CI Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-windows.yml?label=CI%20Windows&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-windows.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/release.yml?label=Release)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/release.yml)
 
-**Crown Mod**, formerly **DW4 Very Hard Plus**, is a difficulty mod for **Digimon World 4** on PS2 and GameCube. It makes enemies much
+**Crown Mod** is a difficulty mod for **Digimon World 4** on PS2 and GameCube. It makes enemies much
 tougher, and marks the strongest ones with a yellow crown so you can spot them.
 
 You don't need any modding knowledge. Open the app, pick your own copy of the game,
