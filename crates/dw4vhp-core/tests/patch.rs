@@ -22,16 +22,21 @@ fn patches_a_clean_disc_and_reports_the_work_it_did() {
     let (dir, input, layout) = testkit::full_disc_tempfile();
     let before = std::fs::read(&input).unwrap();
     let out = dir.path().join("out.iso");
+    let mut events = Vec::new();
     let o = patch_file_with_layout(
         &input,
         &out,
         &PatchPlan::default(),
         &PatchOptions { overwrite: false },
         &layout,
-        &mut |_| {},
+        &mut |p| events.push(p),
     )
     .unwrap();
-    assert_eq!(o.summary.rows_changed, 649 - 11);
+    assert_eq!(events.first().unwrap().done, 0);
+    assert_eq!(events.last().unwrap().done, 10000);
+    assert!(events.iter().all(|p| p.total == 10000));
+    assert!(events.windows(2).all(|p| p[0].done <= p[1].done));
+    assert_eq!(o.summary.rows_changed, 649 - 9);
     assert!(o.summary.practice_rows > 0);
     assert!(!o.summary.elf_step && !o.summary.serial_step);
     assert_eq!(
@@ -123,4 +128,34 @@ fn refuses_an_already_modded_disc_and_writes_nothing() {
     .unwrap_err();
     assert!(matches!(err, Error::AlreadyModded { .. }));
     assert!(!out.exists());
+}
+
+#[test]
+fn optional_resources_require_real_archives_and_never_silently_skip_the_setting() {
+    let (dir, input, layout) = testkit::full_disc_tempfile();
+    for (four_player_spawns, crown_drops, random_crown_colours) in [
+        (true, false, false),
+        (false, true, false),
+        (true, true, false),
+        (false, false, true),
+        (true, true, true),
+    ] {
+        let out = dir.path().join("unsupported.iso");
+        let plan = PatchPlan {
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            ..PatchPlan::default()
+        };
+        assert!(patch_file_with_layout(
+            &input,
+            &out,
+            &plan,
+            &PatchOptions { overwrite: false },
+            &layout,
+            &mut |_| {}
+        )
+        .is_err());
+        assert!(!out.exists());
+    }
 }

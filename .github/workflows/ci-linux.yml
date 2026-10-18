@@ -84,4 +84,5 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
       - run: cargo clippy --manifest-path crates/dw4vhp-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path crates/dw4vhp-tauri/Cargo.toml
       - run: cargo build --manifest-path crates/dw4vhp-tauri/Cargo.toml

@@ -4,17 +4,18 @@
 //! [`plan_summary`] and [`start_patch`] are `async` and hand their work to
 //! `spawn_blocking`. Progress and results come back through events.
 //!
-//! The only logic here beyond calling the engine is the status-kind mapping
-//! and the output-name rule, both transcribed from the old egui app's
-//! `form.rs` so the refusals and default output keep their exact wording.
+//! The shell maps inspection failures to actionable disc notices and preserves
+//! the output-name rule. A structured reason identifies already-modded discs
+//! without asking the frontend to interpret error-message text.
 
 use crate::state::AppState;
-use dw4vhp_core::disc::{inspect_retail, DiscReport};
+use dw4vhp_core::disc::{inspect_retail_with_options, DiscReport};
 use dw4vhp_core::error::Error;
 use dw4vhp_core::patch::{patch_file, PatchOptions};
 use dw4vhp_core::plan::{transform, PatchPlan, PlanSummary};
 use dw4vhp_core::ratio::RatioVector;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
@@ -25,6 +26,8 @@ const OUTPUT_MARKER: &str = " [CrownMod]";
 pub struct DiscStatusPayload {
     kind: &'static str,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
     size: u64,
     output_size: u64,
     copies: Option<[usize; 3]>,
@@ -145,9 +148,8 @@ pub fn output_exists(output: String) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The verdict for one inspection result: a clean disc and its authored copy
-/// counts, or a refusal that reuses the engine's own fix-naming message. The
-/// kind mapping is the old `form::status_for` transcription.
+/// One inspection verdict: successful disc metadata or an actionable refusal.
+/// The structured reason selects the already-modded popup title.
 fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
     match result {
         Ok(report) => DiscStatusPayload {
@@ -160,6 +162,7 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 report.copies[1],
                 report.copies[2]
             ),
+            reason: None,
             size: report.size,
             output_size: report.output_size,
             copies: Some(report.copies),
@@ -172,7 +175,13 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 | Error::CrownData(_) => "refused",
                 _ => "unknown",
             },
-            text: error.to_string(),
+            reason: matches!(error, Error::AlreadyModded { .. }).then_some("already-modded"),
+            text: match error {
+                Error::AlreadyModded { .. } => "This disc is already modded. Choose a clean, original disc image.".into(),
+                Error::NotThisDisc | Error::FileNotFound { .. } | Error::ElfNotFound => "This file is not a supported disc image, or it is incomplete. Choose a clean Digimon World 4 or Digimon World X disc from a supported release.".into(),
+                Error::WrongRevision { .. } | Error::CrownData(_) => "This disc image is not a supported original revision. Choose a clean, original copy of a supported release.".into(),
+                _ => error.to_string(),
+            },
             size: 0,
             output_size: 0,
             copies: None,
@@ -183,18 +192,39 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
 /// Inspects the disc off the main thread, stores a clean report for later
 /// [`plan_summary`] and [`start_patch`] calls, and returns the verdict.
 #[tauri::command]
-pub async fn analyze(path: String, app: AppHandle) -> Result<DiscStatusPayload, String> {
+pub async fn analyze(
+    path: String,
+    four_player_spawns: Option<bool>,
+    crown_drops: Option<bool>,
+    app: AppHandle,
+) -> Result<DiscStatusPayload, String> {
+    let epoch = app
+        .state::<AppState>()
+        .analysis_epoch
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
     // The path is needed both inside the worker (inspect) and after it (the
     // input stored for the patch), so the worker gets a clone.
     let inspect_path = std::path::PathBuf::from(&path);
-    let result = tauri::async_runtime::spawn_blocking(move || inspect_retail(&inspect_path))
-        .await
-        .map_err(|e| format!("analyze worker failed: {e}"))?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        inspect_retail_with_options(
+            &inspect_path,
+            four_player_spawns.unwrap_or(false),
+            crown_drops.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|e| format!("analyze worker failed: {e}"))?;
 
     let payload = verdict(&result);
     let state = app.state::<AppState>();
     let mut input = state.input.lock().expect("input lock");
     let mut report = state.report.lock().expect("report lock");
+    // Rapid option/input changes can finish out of order. An older inspection
+    // must never replace the input associated with the current GUI verdict.
+    if state.analysis_epoch.load(Ordering::SeqCst) != epoch {
+        return Ok(payload);
+    }
     match result {
         Ok(clean) => {
             *input = Some(std::path::PathBuf::from(&path));
@@ -233,8 +263,21 @@ pub async fn plan_summary(app: AppHandle) -> Result<PlanSummaryPayload, String> 
 ///
 /// Returns `Err` synchronously only when no disc has been analysed yet.
 #[tauri::command]
-pub async fn start_patch(output: String, overwrite: bool, app: AppHandle) -> Result<(), String> {
-    let plan = PatchPlan::default();
+pub async fn start_patch(
+    output: String,
+    overwrite: bool,
+    four_player_spawns: Option<bool>,
+    crown_drops: Option<bool>,
+    random_crown_colours: Option<bool>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let permit = app.state::<AppState>().begin_operation()?;
+    let plan = PatchPlan {
+        four_player_spawns: four_player_spawns.unwrap_or(false),
+        crown_drops: crown_drops.unwrap_or(false),
+        random_crown_colours: random_crown_colours.unwrap_or(false),
+        ..PatchPlan::default()
+    };
     let input = {
         let state = app.state::<AppState>();
         let stored = state.input.lock().expect("input lock");
@@ -246,6 +289,7 @@ pub async fn start_patch(output: String, overwrite: bool, app: AppHandle) -> Res
     let opts = PatchOptions { overwrite };
 
     tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
         let mut progress = |p: dw4vhp_core::writer::Progress| {
             // The window may be closed mid-patch; a dropped listener is not
             // worth stopping the write for.
@@ -285,6 +329,37 @@ fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
         dw4vhp_core::writer::Phase::Inspecting => "inspecting",
         dw4vhp_core::writer::Phase::Copying => "copying",
         dw4vhp_core::writer::Phase::Writing => "writing",
+        dw4vhp_core::writer::Phase::Extending => "writing",
         dw4vhp_core::writer::Phase::Verifying => "verifying",
+        dw4vhp_core::writer::Phase::Hashing => "verifying",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn already_modded_verdict_is_structured_and_explains_how_to_continue() {
+        let result = verdict(&Err(Error::AlreadyModded {
+            rarity_nonzero: 600,
+        }));
+        assert_eq!(result.kind, "refused");
+        assert_eq!(result.reason, Some("already-modded"));
+        assert!(result.text.contains("already modded") && result.text.contains("original"));
+        assert!(!result.text.contains("600"));
+    }
+    #[test]
+    fn invalid_disc_message_covers_both_supported_consoles() {
+        for error in [
+            Error::NotThisDisc,
+            Error::FileNotFound {
+                name: "SYSTEM.CNF".into(),
+            },
+        ] {
+            let result = verdict(&Err(error));
+            assert!(result.reason.is_none());
+            assert!(result.text.contains("supported disc image"));
+            assert!(!result.text.contains("PS2"));
+        }
     }
 }

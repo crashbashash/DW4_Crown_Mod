@@ -1,4 +1,6 @@
 import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
+import packageInfo from "../../package.json";
+import type { UpdateCheck } from "../bindings/UpdateCheck";
 import type { Backend } from "./backend";
 
 /**
@@ -7,6 +9,8 @@ import type { Backend } from "./backend";
  * failure path and the analyze verdict are queued through the public fields.
  */
 export class MockBackend implements Backend {
+  async checkUpdates(): Promise<UpdateCheck> { return { currentVersion: packageInfo.version, update: null }; }
+  async acceptUpdate(_version: string): Promise<"browser" | "installer"> { return "browser"; }
   /** The status the next `analyze` call returns, then resets. */
   seedStatus: DiscStatus | null = null;
   /** The message the next `startPatch` reports as patch-failed, then resets. */
@@ -25,11 +29,11 @@ export class MockBackend implements Backend {
     return `/mock/${defaultName}`;
   }
 
-  async analyze(path: string): Promise<DiscStatus> {
+  async analyze(path: string, _fourPlayerSpawns = false, _crownDrops = false): Promise<DiscStatus> {
     const error = this.nextAnalyzeError;
     this.nextAnalyzeError = null;
     if (error !== null) {
-      return { kind: "refused", text: error, size: 0, outputSize: 0, copies: null };
+      return { kind: "refused", text: error, reason: error.includes("already modded") ? "already-modded" : undefined, size: 0, outputSize: 0, copies: null };
     }
     const seeded = this.seedStatus;
     this.seedStatus = null;
@@ -73,6 +77,9 @@ export class MockBackend implements Backend {
   async startPatch(
     _output: string,
     _overwrite: boolean,
+    _fourPlayerSpawns = false,
+    _crownDrops = false,
+    _randomCrownColours = false,
   ): Promise<void> {
     for (let i = 1; i <= 3; i++) {
       this.emit<ProgressEvent>("patch-progress", { phase: "copying", done: i, total: 3 });

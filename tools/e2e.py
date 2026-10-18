@@ -62,24 +62,24 @@ def main():
         initial = drive("snapshot")
         assert not enabled(initial)
         assert not any(name in initial["text"] for name in ("Extreme", "Brutal", "Custom", "Advanced"))
-        assert not any(i["type"] == "checkbox" for i in initial["inputs"])
+        switches = [i for i in initial["inputs"] if i["type"] == "checkbox"]
+        assert len(switches) == 3 and not any(i["checked"] for i in switches)
         record("base mode only; patch disabled without a disc")
 
         drive("fill", "disc path", str(failures))
-        text_is("this is not a supported clean PS2 disc")
+        text_is("not a supported disc image")
         assert not enabled(drive("snapshot"))
-        record("invalid disc refused")
+        drive("click", "OK")
+        record("invalid disc refused with dismissible popup")
 
         drive("fill", "disc path", str(iso))
-        text_is({"usa": "clean Digimon World 4 (USA)",
-                 "europe": "clean Digimon World 4 (Europe)",
-                 "japan": "clean Digimon World X (Japan)"}[args.region])
         wait(enabled)
         assert f"{args.expected_size / 1e9:.2f} GB of free space" in drive("snapshot")["text"]
         assert "pinned" not in drive("snapshot")["text"]
+        assert not drive("eval", "!!document.querySelector('.log-panel, .status-ok')")
         drive("fill", "output path", str(output))
         drive("click", "Patch ISO")
-        done = text_is("GB, md5 " + args.expected_md5.lower())
+        done = text_is("Ready to play")
         wait(enabled)
         assert output.stat().st_size == args.expected_size
         assert md5(output) == args.expected_md5.lower()
@@ -88,10 +88,11 @@ def main():
         drive("screenshot", str(folder / "success.png"))
         (folder / "success-ui.json").write_text(json.dumps(done, indent=2))
         record("native UI patch matches reference MD5; original unchanged; no partial file")
+        drive("click", "OK")
 
         drive("click", "Patch ISO")
         text_is("Overwrite existing file?")
-        assert "Replace it with the patched ISO?" in drive("snapshot")["text"]
+        assert "Overwrite it?" in drive("snapshot")["text"]
         drive("screenshot", str(folder / "overwrite-question.png"))
         drive("click", "Cancel")
         assert "Overwrite existing file?" not in drive("snapshot")["text"]
@@ -100,27 +101,28 @@ def main():
 
         drive("click", "Patch ISO")
         text_is("Overwrite existing file?")
-        before_logs = drive("eval", "document.querySelectorAll('.log-line').length")
-        drive("click", "Overwrite and patch")
-        wait(lambda s: enabled(s) and drive("eval", "document.querySelectorAll('.log-line').length") > before_logs)
-        latest = drive("eval", "document.querySelector('.log-line:last-child').innerText")
-        assert latest.startswith("Patched "), latest
+        drive("click", "Overwrite")
+        text_is("Ready to play")
+        wait(enabled)
+        drive("click", "OK")
         assert md5(output) == args.expected_md5.lower()
         record("confirmed overwrite patches successfully")
 
         drive("fill", "output path", str(iso))
         drive("click", "Patch ISO")
         text_is("Overwrite existing file?")
-        drive("click", "Overwrite and patch")
+        drive("click", "Overwrite")
         text_is("the output path is the same file as the input")
         wait(enabled)
         assert md5(iso) == before
-        record("output equal to input refused; original unchanged")
+        drive("click", "OK")
+        record("output equal to input refused with popup; original unchanged")
 
         drive("fill", "disc path", str(output))
         text_is("already")
         assert not enabled(drive("snapshot"))
-        record("already-modded ISO refused")
+        drive("click", "OK")
+        record("already-modded ISO refused with popup")
 
         report = {"passed": checks, "originalMd5": before, "outputMd5": md5(output),
                   "output": str(output), "finalUi": drive("snapshot")}

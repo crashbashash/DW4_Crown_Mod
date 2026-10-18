@@ -1,12 +1,11 @@
 name: Release Linux
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
 
 permissions:
-  # Creating the release and uploading the built assets needs write access.
-  contents: write
+  # Build-only reusable workflow; the caller publishes both platforms together.
+  contents: read
 
 jobs:
   build:
@@ -34,6 +33,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
       - uses: actions/setup-node@v4
+      - name: Prepare version-checked release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/release-notes.mjs --tag "$RELEASE_TAG" --output release-notes.md
       - name: Build the frontend and the Tauri app
         run: |
           npm ci
@@ -127,30 +130,3 @@ jobs:
             dw4-crown-mod-*.AppImage
             dw4-crown-mod-*.deb
           if-no-files-found: error
-
-      - name: Publish Linux assets to release
-        # v2: softprops/action-gh-release
-        uses:
-          softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
-        with:
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          append_body: true
-          body: |
-            DW4 Crown Mod ${{ github.ref_name }}.
-
-            Linux: `.AppImage`, `.deb`, and a plain binary tarball
-            (`dw4-crown-mod-${{ github.ref_name }}-linux-x86_64.*`).
-            Built in CI; launching them is unverified here — not run in
-            this environment.
-
-            No game data is bundled: every byte the app writes is
-            derived from your own clean PS2 Digimon World 4 (USA/Europe)
-            or Digimon World X (Japan) disc at runtime.
-          files: |
-            dw4-crown-mod-*-linux-x86_64.tar.gz
-            dw4-crown-mod-*-linux-x86_64.AppImage
-            dw4-crown-mod-*-linux-x86_64.deb
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

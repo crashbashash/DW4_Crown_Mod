@@ -1,15 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.10.0
 
-- Rename the app and new downloads to **DW4 Crown Mod**, matching the community name.
-  Rename the GitHub repository to `DW4_Crown_Mod`; existing repository links
-  redirect to the new name. The existing installation identity is retained.
-- New patched images use the `[CrownMod]` filename marker.
-- Match the DigiLab and DigiAtlas app style with dark panels, gold accents and
-  a crown icon in the same badge layout.
-- Attach open/save file pickers to the app window so desktop portals can treat
-  them as dialogs on Linux.
+- Added optional four-player enemy spawn counts for smaller parties.
+- Added an optional custom loot rebalance, with rewards suited to the area and difficulty.
+- Added optional random crown colours for enemy spawns. Bosses keep yellow.
+- Halved practice-stage enemy Speed.
+- Added automatic update checks with release notes.
 
 ## v0.9.0
 

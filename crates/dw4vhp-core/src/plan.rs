@@ -6,14 +6,17 @@ use crate::table::EnemyTable;
 /// byte-identical so they still break normally (spec §3.4).
 pub const DESTRUCTIBLE_ROWS: std::ops::RangeInclusive<usize> = 370..=378;
 
-/// The `e_cockatri` tutorial pair: a deliberate tripwire, left byte-identical so
-/// a base-stat Kokatorimon proves which row a spawn took (spec §3.4).
+/// The `e_cockatri` tutorial pair: excluded from the general buffs. The separate
+/// practice-only Speed adjustment also applies to these rows.
 pub const TRIPWIRE_ROWS: [usize; 2] = [644, 645];
 
 /// The practice stage's lesson rows: when [`PatchPlan::exclude_practice`] is
 /// set these are left byte-identical, so the training enemies stay exactly as
 /// the vanilla game ships them (spec §3.6).
 pub const PRACTICE_ROWS: std::ops::RangeInclusive<usize> = 638..=643;
+/// Includes the two Kokatorimon practice variants as well as the lesson rows.
+pub const PRACTICE_ENEMY_ROWS: std::ops::RangeInclusive<usize> = 638..=645;
+pub const SPEED_COLUMN: usize = 4;
 
 /// Practice-stage overrides, `(destination, source)`: the tutorial rows
 /// 638–643 are authored as token values, so each is replaced by an ordinary
@@ -54,8 +57,20 @@ pub struct PatchPlan {
     /// the practice buff never fires.
     pub exclude_practice: bool,
     pub practice_buff: bool,
+    /// Applied to practice Speed after the normal buffs, including the two
+    /// otherwise-excluded Kokatorimon rows. `exclude_practice` still wins.
+    pub practice_speed_mult: f64,
     pub collapse_to_top: bool,
     pub force_very_hard: bool,
+    /// Use four-player enemy counts and concurrent caps. Does not alter party
+    /// state, enemy stats, scripts, destructibles or any drop-list references.
+    pub four_player_spawns: bool,
+    /// Rebalance enemy loot categories while preserving scripted rewards.
+    pub crown_drops: bool,
+    /// Randomise the icon argument on each enemy spawn, preserving boss yellow.
+    pub random_crown_colours: bool,
+    /// Optional reproducible private colour RNG seed; normally chosen per patch.
+    pub crown_colour_seed: Option<u32>,
     pub serial: Option<String>,
 }
 
@@ -73,8 +88,13 @@ impl Default for PatchPlan {
             exclude_tripwire: true,
             exclude_practice: false,
             practice_buff: true,
+            practice_speed_mult: 0.5,
             collapse_to_top: false,
             force_very_hard: false,
+            four_player_spawns: false,
+            crown_drops: false,
+            random_crown_colours: false,
+            crown_colour_seed: None,
             serial: None,
         }
     }
@@ -196,6 +216,22 @@ pub fn transform(
             out.rarity[dest] = out.rarity[src];
             summary.practice_rows += 1;
         }
+    }
+
+    if !plan.exclude_practice {
+        for row in PRACTICE_ENEMY_ROWS {
+            let old = out.stat[row][SPEED_COLUMN];
+            out.stat[row][SPEED_COLUMN] = (old as f64 * plan.practice_speed_mult)
+                .round_ties_even()
+                .clamp(STAT_MIN, STAT_MAX) as i16;
+            if is_excluded(row, plan) && out.stat[row][SPEED_COLUMN] != old {
+                summary.rows_changed += 1;
+            }
+        }
+    }
+
+    if plan.random_crown_colours {
+        crate::crown_colours::mark_rows(&mut out);
     }
 
     (out, summary)

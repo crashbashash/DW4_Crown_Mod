@@ -23,11 +23,14 @@ const CHUNK: usize = 8 * 1024 * 1024;
 pub enum Phase {
     Inspecting,
     Copying,
+    Extending,
     Writing,
     Verifying,
+    Hashing,
 }
 
-/// A progress report: how much of `total` bytes has been done in `phase`.
+/// Low-level writer counters use phase-local bytes or region counts. The patch
+/// entry points map these to estimated overall work out of 10,000.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Progress {
     pub phase: Phase,
@@ -123,7 +126,12 @@ pub fn write_output_extended(
     if let Some(extension) = extension {
         let appended = (|| {
             let mut part = OpenOptions::new().append(true).open(&part_path)?;
-            (extension.append)(&mut part, progress)?;
+            (extension.append)(&mut part, &mut |p| {
+                progress(Progress {
+                    phase: Phase::Extending,
+                    ..p
+                })
+            })?;
             part.sync_all()?;
             if part.metadata()?.len() != output_len {
                 return Err(Error::VerificationFailed(
@@ -146,18 +154,29 @@ pub fn write_output_extended(
 
     progress(Progress {
         phase: Phase::Verifying,
-        done: input_len,
-        total: input_len,
+        done: 0,
+        total: 1,
     });
     if let Err(e) = verify(&part_path) {
         let _ = fs::remove_file(&part_path);
         return Err(e);
     }
+    progress(Progress {
+        phase: Phase::Verifying,
+        done: 1,
+        total: 1,
+    });
 
     fs::rename(&part_path, output)?;
 
     Ok(WriteOutcome {
-        md5: md5_hex(output)?,
+        md5: md5_hex_with_progress(output, &mut |done, total| {
+            progress(Progress {
+                phase: Phase::Hashing,
+                done,
+                total,
+            })
+        })?,
         bytes: output_len,
     })
 }
@@ -213,7 +232,7 @@ fn apply_regions(
         done: 0,
         total: regions.len() as u64,
     });
-    for region in regions {
+    for (index, region) in regions.iter().enumerate() {
         let end = region
             .offset
             .checked_add(region.bytes.len() as u64)
@@ -233,6 +252,13 @@ fn apply_regions(
         }
         part.seek(SeekFrom::Start(region.offset))?;
         part.write_all(&region.bytes)?;
+        if (index + 1).is_multiple_of(32) || index + 1 == regions.len() {
+            progress(Progress {
+                phase: Phase::Writing,
+                done: index as u64 + 1,
+                total: regions.len() as u64,
+            });
+        }
     }
     part.sync_all()?;
     Ok(())
@@ -269,8 +295,14 @@ pub(crate) fn available_space(dir: &Path) -> Result<u64> {
 }
 
 /// Hex MD5 of a file, streamed so a 1.4 GB image is not loaded into memory.
-pub(crate) fn md5_hex(path: &Path) -> Result<String> {
+pub(crate) fn md5_hex_with_progress(
+    path: &Path,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<String> {
     let mut file = File::open(path)?;
+    let total = file.metadata()?.len();
+    let mut done = 0;
+    progress(done, total);
     let mut hasher = Md5::new();
     let mut buf = vec![0u8; CHUNK];
     loop {
@@ -279,6 +311,8 @@ pub(crate) fn md5_hex(path: &Path) -> Result<String> {
             break;
         }
         hasher.update(&buf[..n]);
+        done += n as u64;
+        progress(done, total);
     }
     Ok(format!("{:x}", hasher.finalize()))
 }

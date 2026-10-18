@@ -51,7 +51,8 @@ verification fingerprints. The "before" values always come from the player's own
 ## Releases
 
 Release builds (Windows zip/MSI, Linux AppImage/deb/tarball) are produced by CI for
-tagged releases. The Linux builds are launch-tested. The Windows builds are built but
+tagged releases. The release workflow waits for both platform builds, uploads all
+assets to a draft, and publishes only after upload completes. The Linux builds are launch-tested. The Windows builds are built but
 never run in CI. Like all release assets, they are unsigned.
 
 ## Testing against real discs
@@ -59,7 +60,24 @@ never run in CI. Like all release assets, they are unsigned.
 Point these environment variables at clean local images:
 `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`, `DW4_RETAIL_JAPAN_ISO`.
 
-GameCube images were checked by hand with `patch_file` on NKit `.iso`, `.ciso` and `.rvz` inputs, and the RVZ and CISO outputs were read back with Dolphin's `dolphin-tool`. The tables sit at a fixed distance from the start of `area.afs`, because NKit and RVZ conversions move files.
+The current optional-resource matrix also accepts `DW4_RETAIL_GC_USA_ISO` and
+`DW4_RETAIL_GC_JAPAN_ISO` for plain/NKit GameCube images, plus
+`DW4_RETAIL_GC_USA_CISO`, `DW4_RETAIL_GC_JAPAN_CISO`,
+`DW4_RETAIL_GC_USA_RVZ` and `DW4_RETAIL_GC_JAPAN_RVZ` for compressed images.
+The [completed release/container matrix](testing/resource-options.md) records the
+current validation. The test exercises all four spawn/drop switch combinations on each raw release and
+both options together through each compressed pipeline, plus a case with random
+crown colours enabled alongside them. It verifies all 1,995
+current-balance table blocks and unchanged original files, and checks the detected
+release, output format and predicted raw output size. Outputs are temporary.
+It also checks [overall patch progress](testing/patch-progress.md) for every build.
+
+```sh
+cargo test --release --test resource_options -- --nocapture
+```
+
+Unconfigured inputs are skipped. The tables sit at a fixed distance from the start
+of `area.afs`, because NKit and RVZ conversions can move files.
 
 ```sh
 cargo test -p dw4vhp-core --test retail -- --nocapture
@@ -80,9 +98,12 @@ Other tests:
   `DW4_ROWGROUP_SNAPSHOT`. They check the engine's enemy grouping utilities.
 - **Frontend:** `npm test`, `npm run typecheck`, `npm run lint`.
 
+The [four-player spawn and practice Speed checks](testing/four-player-spawns.md)
+describe the optional spawn transform, its preserved data and current validation.
+
 ## Regional notes
 
-The three releases contain the same 649-row enemy tables, repeated 665 times. The
+The five supported releases contain the same 649-row enemy tables, repeated 665 times. The
 app uses each release's own offsets and patches every copy, preserving the original
 boot serial, language, video mode and save identity.
 
@@ -117,7 +138,7 @@ afterward.
 Run the full UI test on a freshly launched app:
 
 ```sh
-python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 9ba8432d2237330a687d4ac1a0203d68 --expected-size 2179143680
+python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 c70d2447e87b65fa9663e49d9ae31a42 --expected-size 2179143680
 ```
 
 The test checks invalid and already-modded inputs, patching, overwrite cancellation
@@ -126,3 +147,28 @@ checksum and that the original is unchanged. Reports, screenshots and test ISOs 
 to a new directory under `/tmp`. The UI needs a working desktop display, and
 screenshots need the X11 tools above. Pass `--region europe` or `--region japan`
 and the matching checksum to test those releases.
+
+Optional loot rebalance details: [custom crown drops](testing/custom-drops.md).
+
+Disc-selection and patching errors use dismissible notices; already-modded images
+have a specific notice title. Successful analysis enables patching without adding
+technical status text to the Disc panel. The patching console and duplicate output
+path are removed; progress and completion feedback remain. Live native UI checks
+covered invalid files, missing files, already-modded discs and an unwritable output
+parent, including dismissal and recovery to a clean selection. Frontend tests also
+cover error notices and recovery; native tests check the structured modded reason.
+
+Application update behavior, release-version checks and validation are described
+in [application updates](testing/app-updates.md).
+
+Disc analysis shows a modal with an animated, indeterminate progress bar. It
+closes automatically when inspection finishes; errors then use the usual notice
+popup. Tests cover successful/refused results and prevent premature dismissal.
+
+Patching uses one continuous activity indicator and a stable message until work
+finishes. Internal counters can restart during unpacking, copying, archive writing,
+compression and verification, so they are not presented as overall percentages or
+repeated stage labels. The main Output panel contains no progress/status readout.
+Success opens the friendly completion popup; failures open an error notice. Tests
+cover the compressed-image event sequence, completion/failure handoff and
+non-dismissal while busy.

@@ -1,7 +1,6 @@
 import { Button, Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 
-export function OverwriteDialog({ path, onCancel, onConfirm }: {
-  path: string;
+export function OverwriteDialog({ onCancel, onConfirm }: {
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -9,13 +8,11 @@ export function OverwriteDialog({ path, onCancel, onConfirm }: {
     <ModalOverlay isOpen onOpenChange={(open) => { if (!open) onCancel(); }} isDismissable>
       <Modal>
         <Dialog>
-          <Heading slot="title">Overwrite existing file?</Heading>
-          <p>A file already exists at:</p>
-          <p className="overwrite-path">{path}</p>
-          <p>Replace it with the patched disc?</p>
+          <Heading slot="title">File already exists</Heading>
+          <p>Overwrite it?</p>
           <div className="row">
             <Button autoFocus onPress={onCancel}>Cancel</Button>
-            <Button className="primary" onPress={onConfirm}>Overwrite and patch</Button>
+            <Button className="primary" onPress={onConfirm}>Overwrite</Button>
           </div>
         </Dialog>
       </Modal>

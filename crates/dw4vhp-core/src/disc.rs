@@ -120,6 +120,21 @@ pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
 /// Inspect any supported retail PS2 release, checking its tables and crown
 /// resources and calculating the expanded output size without writing anything.
 pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
+    inspect_retail_with_spawns(path, false)
+}
+
+/// Inspect the selected resource option so the GUI's output-size estimate
+/// includes the same archive rebuild that patching will perform.
+pub fn inspect_retail_with_spawns(path: &Path, four_player_spawns: bool) -> Result<DiscReport> {
+    inspect_retail_with_options(path, four_player_spawns, false)
+}
+
+/// Inspect both optional enemy-resource patches using the exact output recipe.
+pub fn inspect_retail_with_options(
+    path: &Path,
+    four_player_spawns: bool,
+    crown_drops: bool,
+) -> Result<DiscReport> {
     let format = container::detect(path)?;
     if format != Format::Raw {
         // Inspection needs the plain image, so expand into a throwaway folder.
@@ -132,7 +147,7 @@ pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
             };
         let plain = work.path().join("disc.iso");
         container::unpack(format, path, &plain, &mut |_, _| {})?;
-        return inspect_retail(&plain);
+        return inspect_retail_with_options(&plain, four_player_spawns, crown_drops);
     }
     let file = File::open(path)?;
     if file.metadata()?.len() == 0 {
@@ -140,7 +155,8 @@ pub fn inspect_retail(path: &Path) -> Result<DiscReport> {
     }
     // Safety: input is opened read-only and is never modified by the patcher.
     let mmap = unsafe { Mmap::map(&file)? };
-    inspect_retail_bytes(&mmap)
+    inspect_retail_planned_with_options(&mmap, four_player_spawns, crown_drops)
+        .map(|(report, _)| report)
 }
 
 pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
@@ -149,6 +165,14 @@ pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
 
 /// Retain the validated rebuild plan when inspection is immediately followed by a write.
 pub(crate) fn inspect_retail_planned(iso: &[u8]) -> Result<(DiscReport, crate::crown::CrownPlan)> {
+    inspect_retail_planned_with_options(iso, false, false)
+}
+
+pub(crate) fn inspect_retail_planned_with_options(
+    iso: &[u8],
+    four_player_spawns: bool,
+    crown_drops: bool,
+) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
     let mut report = inspect_bytes(iso, &release.layout_in(iso)?)?;
     // All three retail releases carry identical tables. Copy counts alone do
@@ -164,9 +188,9 @@ pub(crate) fn inspect_retail_planned(iso: &[u8]) -> Result<(DiscReport, crate::c
         }
     }
     let crowns = if release.is_gamecube() {
-        crate::crown::CrownPlan::build_gcm(iso)?
+        crate::crown::CrownPlan::build_gcm_with_options(iso, four_player_spawns, crown_drops)?
     } else {
-        crate::crown::CrownPlan::build(iso)?
+        crate::crown::CrownPlan::build_with_options(iso, four_player_spawns, crown_drops)?
     };
     report.output_size = crowns.output_size;
     report.release = Some(release);

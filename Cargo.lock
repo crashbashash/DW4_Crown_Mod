@@ -66,9 +66,10 @@ dependencies = [
 
 [[package]]
 name = "dw4vhp-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "fs4",
+ "getrandom",
  "md-5",
  "memchr",
  "memmap2",

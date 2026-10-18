@@ -201,7 +201,7 @@ fn golden_chain_reproduces_the_shipped_builds() {
     patch_file(
         &pristine,
         &out,
-        &PatchPlan::default(),
+        &historical_plan(),
         &PatchOptions { overwrite: false },
         &mut |_| {},
     )
@@ -213,7 +213,7 @@ fn golden_chain_reproduces_the_shipped_builds() {
     // Step 3: practice buff off reproduces the shipped v5 disc.
     let no_practice = PatchPlan {
         practice_buff: false,
-        ..PatchPlan::default()
+        ..historical_plan()
     };
     let out3 = tmp.path().join("v5b4.iso");
     patch_file(
@@ -232,7 +232,7 @@ fn golden_chain_reproduces_the_shipped_builds() {
     // shared table rewrite cancels between the two patched outputs.
     let serial = PatchPlan {
         serial: Some(DEFAULT_SERIAL.into()),
-        ..PatchPlan::default()
+        ..historical_plan()
     };
     let out4 = tmp.path().join("serial.iso");
     patch_file(
@@ -257,7 +257,7 @@ fn golden_chain_reproduces_the_shipped_builds() {
     // Step 5: the ELF step changes exactly four bytes, at the difficulty word.
     let extreme = PatchPlan {
         force_very_hard: true,
-        ..PatchPlan::default()
+        ..historical_plan()
     };
     let out5 = tmp.path().join("extreme.iso");
     patch_file(
@@ -289,7 +289,7 @@ fn golden_chain_reproduces_the_shipped_builds() {
             exclude_practice: true,
             collapse_to_top: true,
             force_very_hard: true,
-            ..PatchPlan::default()
+            ..historical_plan()
         },
         &PatchOptions { overwrite: false },
         &mut |_| {},
@@ -354,4 +354,12 @@ fn read_word(path: &Path, offset: u64) -> [u8; 4] {
     let mut word = [0u8; 4];
     file.read_exact(&mut word).unwrap();
     word
+}
+
+/// Historical output fingerprints predate the practice-only Speed adjustment.
+fn historical_plan() -> PatchPlan {
+    PatchPlan {
+        practice_speed_mult: 1.0,
+        ..PatchPlan::default()
+    }
 }

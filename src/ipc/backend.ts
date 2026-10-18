@@ -1,3 +1,4 @@
+import type { UpdateCheck } from "../bindings/UpdateCheck";
 import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 
 /**
@@ -7,13 +8,15 @@ import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bi
  * the mock in a plain browser tab and in tests.
  */
 export interface Backend {
+  checkUpdates(): Promise<UpdateCheck>;
+  acceptUpdate(version: string): Promise<"browser" | "installer">;
   chooseIso(): Promise<string | null>;
   chooseOutput(defaultName: string): Promise<string | null>;
-  analyze(path: string): Promise<DiscStatus>;
+  analyze(path: string, fourPlayerSpawns?: boolean, crownDrops?: boolean): Promise<DiscStatus>;
   defaultOutput(input: string): Promise<string>;
   outputExists(output: string): Promise<boolean>;
   planSummary(): Promise<PlanSummary | null>;
-  startPatch(output: string, overwrite: boolean): Promise<void>;
+  startPatch(output: string, overwrite: boolean, fourPlayerSpawns?: boolean, crownDrops?: boolean, randomCrownColours?: boolean): Promise<void>;
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;

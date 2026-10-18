@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import type { PatchOutcome, ProgressEvent } from "../bindings";
+import type { DiscStatus } from "../bindings";
+import { AnalyzingDialog } from "../features/disc/AnalyzingDialog";
 import { DiscPicker } from "../features/disc/DiscPicker";
 import { useDisc } from "../features/disc/useDisc";
 import { DoneDialog } from "../features/output/DoneDialog";
 import { OverwriteDialog } from "../features/output/OverwriteDialog";
+import { PatchingDialog } from "../features/output/PatchingDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
+import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { UpdateCenter } from "../features/updates/UpdateCenter";
+import { MessageDialog } from "../components/MessageDialog";
 import { BackendProvider, useBackend } from "../ipc/context";
 import "./theme.css";
 import "./layout.css";
@@ -31,43 +36,46 @@ export function App() {
 
 function AppInner() {
   const backend = useBackend();
-  const disc = useDisc(backend);
+  const [fourPlayerSpawns, setFourPlayerSpawns] = useState(false);
+  const [crownDrops, setCrownDrops] = useState(false);
+  const [randomCrownColours, setRandomCrownColours] = useState(false);
+  const disc = useDisc(backend, fourPlayerSpawns, crownDrops);
   const wide = useMediaQuery("(min-width: 900px)");
 
+  const [updating, setUpdating] = useState(false);
+  const [dismissedDiscStatus, setDismissedDiscStatus] = useState<DiscStatus | null>(null);
+  const discError = disc.status !== null && disc.status.kind !== "ok" && disc.status !== dismissedDiscStatus ? disc.status : null;
   const [overwritePath, setOverwritePath] = useState<string | null>(null);
-  const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
-  const [lastOutcome, setLastOutcome] = useState<PatchOutcome | null>(null);
-  const [donePopup, setDonePopup] = useState<PatchOutcome | null>(null);
+  const [patchProgress, setPatchProgress] = useState(0);
+  const [patchError, setPatchError] = useState<string | null>(null);
+  const [donePopup, setDonePopup] = useState<string | null>(null);
   const outputRef = useRef<string | null>(null);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
     const ups: Promise<() => void>[] = [];
     ups.push(
-      backend.onPatchProgress((p) => {
-        setProgress(p);
+      backend.onPatchProgress(({ done, total }) => {
         setBusy(true);
+        if (total > 0 && Number.isFinite(done) && Number.isFinite(total)) {
+          // Only the verified terminal event completes the operation.
+          const percentage = Math.min(99, Math.max(0, Math.floor(done / total * 100)));
+          setPatchProgress(previous => Math.max(previous, percentage));
+        }
       }),
     );
     ups.push(
-      backend.onPatchDone((o) => {
-        setLastOutcome(o);
-        setDonePopup(o);
-        setProgress(null);
+      backend.onPatchDone(() => {
+        setPatchProgress(100);
+        setDonePopup(outputRef.current ?? "");
         setBusy(false);
-        setLog((lines) => [
-          ...lines,
-          `Patched ${(o.bytes / 1_000_000_000).toFixed(2)} GB, md5 ${o.md5}`,
-        ]);
       }),
     );
     ups.push(
       backend.onPatchFailed((message) => {
-        setProgress(null);
         setBusy(false);
-        setLog((lines) => [...lines, `patch refused: ${message}`]);
+        setPatchError(message);
       }),
     );
     return () => {
@@ -79,7 +87,9 @@ function AppInner() {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
-    void backend.onFileDropped((path) => void disc.setInputPath(path)).then((fn) => {
+    void backend.onFileDropped((path) => {
+      if (!busy && !updating && !disc.analyzing) void disc.setInputPath(path);
+    }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
@@ -87,7 +97,7 @@ function AppInner() {
       cancelled = true;
       unlisten?.();
     };
-  }, [backend, disc]);
+  }, [backend, disc, busy, updating]);
 
   const analyzed = disc.status?.kind === "ok";
   const canPatch = analyzed && disc.outputPath !== null;
@@ -95,18 +105,20 @@ function AppInner() {
   const runPatch = async (output: string, overwrite: boolean) => {
     outputRef.current = output;
     setBusy(true);
-    setLog((lines) => [...lines, `patching ${disc.inputPath} -> ${output}`]);
+    setPatchProgress(0);
+    setPatchError(null);
     try {
-      await backend.startPatch(output, overwrite);
+      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours);
     } catch (error) {
       setBusy(false);
-      setLog((lines) => [...lines, `patch refused: ${String(error)}`]);
+      setPatchError(String(error));
     }
   };
 
   const startPatch = async () => {
     const output = disc.outputPath;
     if (output === null || busy) return;
+    setPatchProgress(0);
     setBusy(true);
     try {
       if (await backend.outputExists(output)) {
@@ -117,7 +129,7 @@ function AppInner() {
       }
     } catch (error) {
       setBusy(false);
-      setLog((lines) => [...lines, `patch refused: ${String(error)}`]);
+      setPatchError(String(error));
     }
   };
 
@@ -160,40 +172,43 @@ function AppInner() {
             <DiscPicker
               key={disc.inputPath ?? ""}
               inputPath={disc.inputPath}
-              outputPath={disc.outputPath}
-              status={disc.status}
-              analyzing={disc.analyzing}
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
+            <SettingsPanel fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} busy={busy || updating || disc.analyzing} />
           </div>
           <div className="col">
             <OutputPanel
               outputPath={disc.outputPath}
-              busy={busy || disc.analyzing}
+              busy={busy || updating}
               canPatch={canPatch}
-              progress={progress}
-              log={log}
               status={disc.status}
-              lastOutcome={lastOutcome}
+              refreshing={disc.refreshing}
               onPatch={() => void startPatch()}
               onChooseOutput={() => void chooseOutput()}
               onSetOutput={setOutput}
             />
           </div>
         </main>
-        <p className="workspace-footer">Creates a separate modded copy. Your original disc stays unchanged.</p>
+        <div className="workspace-footer footer-row">
+          <UpdateCenter blocked={busy || disc.checking || overwritePath !== null || donePopup !== null || patchError !== null || discError !== null} onBusyChange={setUpdating} />
+        </div>
       </div>
-      {donePopup !== null && (
+      {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}
+      {!busy && !disc.analyzing && discError !== null && (
+        <MessageDialog title={discError.reason === "already-modded" ? "Disc already modded" : "Unable to open disc"} message={discError.text} onClose={() => setDismissedDiscStatus(discError)} />
+      )}
+      {!busy && !disc.analyzing && patchError !== null && (
+        <MessageDialog title="Unable to patch disc" message={patchError} onClose={() => setPatchError(null)} />
+      )}
+      {!busy && !disc.analyzing && donePopup !== null && (
         <DoneDialog
-          path={outputRef.current ?? ""}
-          outcome={donePopup}
+          path={donePopup}
           onClose={() => setDonePopup(null)}
         />
       )}
-      {overwritePath !== null && (
+      {!busy && !disc.analyzing && overwritePath !== null && (
         <OverwriteDialog
-          path={overwritePath}
           onCancel={() => setOverwritePath(null)}
           onConfirm={() => {
             const output = overwritePath;

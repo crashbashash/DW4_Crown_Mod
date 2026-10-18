@@ -17,6 +17,7 @@ fn blank() -> EnemyTable {
 fn default_plan_is_the_base_very_hard_plus_mode() {
     let p = PatchPlan::default();
     assert!(p.practice_buff && p.exclude_destructibles && p.exclude_tripwire);
+    assert!(!p.four_player_spawns && !p.crown_drops);
     assert!(!p.exclude_practice && !p.force_very_hard && p.serial.is_none() && p.crown_rank == 5);
 }
 
@@ -64,7 +65,7 @@ fn exclusions_are_left_byte_identical_and_every_other_row_gets_the_crown() {
     }
     assert_eq!(out.rarity[0], 5);
     assert_eq!(out.rarity[300], 5); // an empty row still gets the crown
-    assert_eq!(s.rows_changed, 649 - 11);
+    assert_eq!(s.rows_changed, 649 - 9);
 }
 
 #[test]
@@ -84,7 +85,7 @@ fn the_summary_counts_live_rows_by_non_zero_authored_hp() {
     t.hp[644] = 0; // an *excluded* row: the live base is the authored table, not the handled rows
     let (_, s) = transform(&t, &PatchPlan::default(), &ratio);
     assert_eq!(s.live_rows, 649 - 2);
-    assert_eq!(s.rows_changed, 649 - 11);
+    assert_eq!(s.rows_changed, 649 - 9);
 }
 
 #[test]
@@ -164,7 +165,9 @@ fn the_practice_rows_become_an_ordinary_row_of_their_type() {
         },
     );
     assert_eq!(out.hp[638], out.hp[0]);
-    assert_eq!(out.stat[638], out.stat[0]);
+    let mut expected = out.stat[0];
+    expected[4] /= 2;
+    assert_eq!(out.stat[638], expected);
     assert_eq!(out.crit[638], out.crit[0]);
     assert_eq!(s.practice_rows, PRACTICE_MAP.len());
     assert_eq!((out.hp[644], out.rarity[644]), (100, 0)); // the tripwire survives the buff
@@ -272,6 +275,7 @@ fn collapse_leaves_the_practice_rows_and_the_tripwire_alone() {
     let plan = PatchPlan {
         collapse_to_top: true,
         practice_buff: false,
+        practice_speed_mult: 1.0,
         exclude_destructibles: false,
         exclude_tripwire: false,
         ..PatchPlan::default()
@@ -310,4 +314,33 @@ fn collapse_then_practice_buff_puts_the_lesson_rows_on_their_type_top() {
     assert_eq!(out.hp[644], 644); // still the authored tripwire row
     assert_eq!(s.practice_rows, 6);
     assert_eq!(s.collapsed_rows, 524);
+}
+
+#[test]
+fn practice_speed_is_halved_after_buffs_and_no_other_values_change() {
+    use dw4vhp_core::plan::{PRACTICE_ENEMY_ROWS, SPEED_COLUMN};
+    let t = indexed();
+    let normal = PatchPlan {
+        practice_speed_mult: 1.0,
+        ..PatchPlan::default()
+    };
+    let (before, _) = transform(&t, &normal, &identity_ratio());
+    let (after, _) = transform(&t, &PatchPlan::default(), &identity_ratio());
+    assert_eq!(after.hp, before.hp);
+    assert_eq!(after.crit, before.crit);
+    assert_eq!(after.para, before.para);
+    assert_eq!(after.rarity, before.rarity);
+    for row in 0..t.len() {
+        for column in 0..12 {
+            let expected = if PRACTICE_ENEMY_ROWS.contains(&row) && column == SPEED_COLUMN {
+                (before.stat[row][column] as f64 * 0.5).round_ties_even() as i16
+            } else {
+                before.stat[row][column]
+            };
+            assert_eq!(
+                after.stat[row][column], expected,
+                "row {row}, column {column}"
+            );
+        }
+    }
 }

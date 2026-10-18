@@ -2,10 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
+import type { UpdateCheck } from "../bindings/UpdateCheck";
 import type { Backend } from "./backend";
 
 /** The real backend: Tauri invoke + event listen. */
 export class TauriBackend implements Backend {
+  async checkUpdates(): Promise<UpdateCheck> {
+    return invoke<UpdateCheck>("check_updates");
+  }
+
+  async acceptUpdate(version: string): Promise<"browser" | "installer"> {
+    return invoke("accept_update", { version });
+  }
   async chooseIso(): Promise<string | null> {
     return invoke<string | null>("choose_iso");
   }
@@ -14,8 +22,8 @@ export class TauriBackend implements Backend {
     return invoke<string | null>("choose_output", { defaultName });
   }
 
-  async analyze(path: string): Promise<DiscStatus> {
-    return invoke<DiscStatus>("analyze", { path });
+  async analyze(path: string, fourPlayerSpawns = false, crownDrops = false): Promise<DiscStatus> {
+    return invoke<DiscStatus>("analyze", { path, fourPlayerSpawns, crownDrops });
   }
 
   async defaultOutput(input: string): Promise<string> {
@@ -30,8 +38,8 @@ export class TauriBackend implements Backend {
     return invoke<PlanSummary | null>("plan_summary");
   }
 
-  async startPatch(output: string, overwrite: boolean): Promise<void> {
-    await invoke("start_patch", { output, overwrite });
+  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false): Promise<void> {
+    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

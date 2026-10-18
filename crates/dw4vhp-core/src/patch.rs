@@ -3,7 +3,7 @@
 //! it before the final rename. Input is always read-only and mmap-backed.
 
 use crate::container::{self, Format};
-use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned, DiscReport};
+use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned_with_options, DiscReport};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -13,8 +13,8 @@ use crate::region::WriteRegion;
 use crate::serial::serial_regions;
 use crate::table::EnemyTable;
 use crate::writer::{
-    canonical_output, md5_hex, part_path, write_output_extended, Extension, Phase, Progress,
-    WriteOptions,
+    canonical_output, md5_hex_with_progress, part_path, write_output_extended, Extension, Phase,
+    Progress, WriteOptions,
 };
 use memmap2::Mmap;
 use std::fs::File;
@@ -86,6 +86,16 @@ pub fn plan_regions(
         }
     }
 
+    if plan.random_crown_colours {
+        regions.extend(crate::crown_colours::regions(
+            iso,
+            report,
+            plan.crown_colour_seed.ok_or_else(|| {
+                Error::CrownData("colour seed must be resolved before planning".into())
+            })?,
+        )?);
+    }
+
     let gamecube = report.release.is_some_and(|release| release.is_gamecube());
     if (plan.force_very_hard || plan.serial.is_some()) && gamecube {
         return Err(Error::UnsupportedDifficulty);
@@ -113,7 +123,8 @@ pub fn plan_regions(
 }
 
 /// The app's entry point: patches `input` into `output` against the retail
-/// layout detected from its boot configuration.
+/// layout detected from its boot configuration. Progress counters represent
+/// estimated overall work out of 10,000, including container round trips.
 pub fn patch_file(
     input: &Path,
     output: &Path,
@@ -121,6 +132,19 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
+    let resolved;
+    let plan = if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
+        let mut seed = [0u8; 4];
+        getrandom::fill(&mut seed)
+            .map_err(|e| Error::CrownData(format!("could not seed crown colours: {e}")))?;
+        resolved = PatchPlan {
+            crown_colour_seed: Some(u32::from_le_bytes(seed)),
+            ..plan.clone()
+        };
+        &resolved
+    } else {
+        plan
+    };
     match container::detect(input)? {
         Format::Raw => patch_file_internal(input, output, plan, opts, None, progress),
         format => patch_container(format, input, output, plan, opts, progress),
@@ -153,31 +177,40 @@ fn patch_container(
     let (plain_in, plain_out) = (work.path().join("in.iso"), work.path().join("out.iso"));
     let part = part_path(output);
     let result = (|| {
-        let step = |phase| move |done: u64, total: u64| Progress { phase, done, total };
-        let unpacking = step(Phase::Copying);
+        progress(Progress {
+            phase: Phase::Copying,
+            done: 0,
+            total: 10000,
+        });
         container::unpack(format, input, &plain_in, &mut |d, t| {
-            progress(unpacking(d, t))
+            progress(scaled(Phase::Copying, d, t, 0, 1500))
         })?;
         let inner = PatchOptions { overwrite: true };
-        let outcome = patch_file_internal(&plain_in, &plain_out, plan, &inner, None, progress)?;
+        let outcome = patch_file_internal(&plain_in, &plain_out, plan, &inner, None, &mut |p| {
+            progress(scaled(p.phase, p.done, p.total, 1500, 6500))
+        })?;
         std::fs::remove_file(&plain_in)?;
-        let packing = step(Phase::Writing);
         container::pack(format, &plain_out, &part, &mut |d, t| {
-            progress(packing(d, t))
+            progress(scaled(Phase::Writing, d, t, 6500, 8500))
         })?;
 
         // Round trip: the packed file must expand to the image that was patched.
         let check = work.path().join("check.iso");
-        let verifying = step(Phase::Verifying);
-        container::unpack(format, &part, &check, &mut |d, t| progress(verifying(d, t)))?;
-        if !same_image(&plain_out, &check)? {
+        container::unpack(format, &part, &check, &mut |d, t| {
+            progress(scaled(Phase::Verifying, d, t, 8500, 9200))
+        })?;
+        if !same_image(&plain_out, &check, &mut |d, t| {
+            progress(scaled(Phase::Verifying, d, t, 9200, 9800))
+        })? {
             return Err(Error::VerificationFailed(
                 "the packed disc does not match the patched image".into(),
             ));
         }
         std::fs::rename(&part, output)?;
         Ok(PatchOutcome {
-            md5: md5_hex(output)?,
+            md5: md5_hex_with_progress(output, &mut |d, t| {
+                progress(scaled(Phase::Hashing, d, t, 9800, 10000))
+            })?,
             bytes: std::fs::metadata(output)?.len(),
             summary: outcome.summary,
         })
@@ -191,6 +224,7 @@ fn patch_container(
 /// The explicit-layout seam used by generated tests and low-level callers. `patch_file`
 /// uses the same table/writer checks. This seam deliberately omits archive
 /// expansion for generated fixtures; retail/application callers use `patch_file`.
+/// Progress uses the same overall-work counters as `patch_file`.
 pub fn patch_file_with_layout(
     input: &Path,
     output: &Path,
@@ -210,6 +244,18 @@ fn patch_file_internal(
     layout: Option<&Layout>,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
+    progress(Progress {
+        phase: Phase::Inspecting,
+        done: 0,
+        total: 10000,
+    });
+    if layout.is_some()
+        && (plan.four_player_spawns || plan.crown_drops || plan.random_crown_colours)
+    {
+        return Err(Error::CrownData(
+            "optional enemy resources require complete retail archives".into(),
+        ));
+    }
     let file = File::open(input)?;
     if file.metadata()?.len() == 0 {
         return Err(Error::NotThisDisc);
@@ -220,7 +266,11 @@ fn patch_file_internal(
     let (report, crowns) = match layout {
         Some(layout) => (inspect_bytes(&mmap[..], layout)?, None),
         None => {
-            let (report, crowns) = inspect_retail_planned(&mmap)?;
+            let (report, crowns) = inspect_retail_planned_with_options(
+                &mmap,
+                plan.four_player_spawns,
+                plan.crown_drops,
+            )?;
             (report, Some(crowns))
         }
     };
@@ -272,7 +322,17 @@ fn patch_file_internal(
         output,
         &regions,
         &write_opts,
-        progress,
+        &mut |p| {
+            let (start, end) = match p.phase {
+                Phase::Inspecting => (1000, 1000),
+                Phase::Copying => (1000, 4000),
+                Phase::Extending => (4000, 6500),
+                Phase::Writing => (6500, 7000),
+                Phase::Verifying => (7000, 9000),
+                Phase::Hashing => (9000, 10000),
+            };
+            progress(scaled(p.phase, p.done, p.total, start, end));
+        },
         &verify,
         extension,
     )?;
@@ -334,9 +394,12 @@ fn verify_blocks(iso: &[u8], blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<(
 
 /// True when `unpacked` holds exactly the bytes of `patched`, followed by
 /// nothing but zeros (CISO pads its last block).
-fn same_image(patched: &Path, unpacked: &Path) -> Result<bool> {
+fn same_image(patched: &Path, unpacked: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<bool> {
     use std::io::Read;
     let (mut a, mut b) = (File::open(patched)?, File::open(unpacked)?);
+    let total = b.metadata()?.len();
+    let mut done = 0;
+    progress(done, total);
     if b.metadata()?.len() < a.metadata()?.len() {
         return Ok(false);
     }
@@ -350,6 +413,8 @@ fn same_image(patched: &Path, unpacked: &Path) -> Result<bool> {
         if left[..n] != right[..n] {
             return Ok(false);
         }
+        done += n as u64;
+        progress(done, total);
     }
     loop {
         let n = b.read(&mut right)?;
@@ -359,5 +424,22 @@ fn same_image(patched: &Path, unpacked: &Path) -> Result<bool> {
         if right[..n].iter().any(|&byte| byte != 0) {
             return Ok(false);
         }
+        done += n as u64;
+        progress(done, total);
+    }
+}
+
+// Fixed work ranges keep repeated low-level phases from resetting overall
+// progress. These weights estimate work, rather than promising elapsed time.
+fn scaled(phase: Phase, done: u64, total: u64, start: u64, end: u64) -> Progress {
+    let fraction = if total == 0 {
+        0
+    } else {
+        ((end - start) as u128 * done.min(total) as u128 / total as u128) as u64
+    };
+    Progress {
+        phase,
+        done: start + fraction,
+        total: 10000,
     }
 }

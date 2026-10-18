@@ -1,23 +1,18 @@
 import { Button, Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
-import type { PatchOutcome } from "../../bindings";
 
 /** The popup shown when a patch has been written and verified. */
-export function DoneDialog({ path, outcome, onClose }: {
+export function DoneDialog({ path, onClose }: {
   path: string;
-  outcome: PatchOutcome;
   onClose: () => void;
 }) {
   return (
     <ModalOverlay isOpen onOpenChange={(open) => { if (!open) onClose(); }} isDismissable>
       <Modal>
         <Dialog>
-          <Heading slot="title">Patching complete</Heading>
-          <p>Your Crown Mod disc was written and verified:</p>
+          <Heading slot="title">Ready to play</Heading>
+          <p>Your Crown Mod game has been saved to:</p>
           <p className="overwrite-path">{path}</p>
-          <p className="hint">
-            {(outcome.bytes / 1_000_000_000).toFixed(2)} GB, {outcome.summary.rowsChanged} enemy
-            rows changed, md5 {outcome.md5}
-          </p>
+          <p className="hint">Open this file in your emulator to play.</p>
           <div className="row">
             <Button className="primary" autoFocus onPress={onClose}>OK</Button>
           </div>

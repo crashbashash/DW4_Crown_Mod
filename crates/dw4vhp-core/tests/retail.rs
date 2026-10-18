@@ -29,7 +29,11 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     let outcome = patch_file(
         &path,
         &output,
-        &PatchPlan::default(),
+        // Pin the published v0.9 disc separately from the newer practice-speed adjustment.
+        &PatchPlan {
+            practice_speed_mult: 1.0,
+            ..PatchPlan::default()
+        },
         &PatchOptions { overwrite: false },
         &mut |_| {},
     )

@@ -1,12 +1,11 @@
 name: Release Windows
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
 
 permissions:
-  # Creating the release and uploading the built assets needs write access.
-  contents: write
+  # Build-only reusable workflow; the caller publishes both platforms together.
+  contents: read
 
 jobs:
   build:
@@ -21,6 +20,11 @@ jobs:
         with:
           toolchain: stable
       - uses: actions/setup-node@v4
+      - name: Prepare version-checked release notes
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/release-notes.mjs --tag "$env:RELEASE_TAG" --output release-notes.md
       - name: Build the frontend and the Tauri app (MSI via the bundler)
         run: |
           npm ci
@@ -63,26 +67,3 @@ jobs:
             dw4-crown-mod-*.zip
             dw4-crown-mod-*.msi
           if-no-files-found: error
-
-      - name: Publish Windows assets to release
-        # v2: softprops/action-gh-release
-        uses:
-          softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
-        with:
-          name: DW4 Crown Mod ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          append_body: true
-          body: |
-            Windows: `dw4-crown-mod-${{ github.ref_name
-              }}-windows-x86_64.zip` has the release `.exe`;
-              `…-x86_64.msi` is the same build as an installer (into
-              Program Files, with a Start-menu shortcut). Both are built
-              in CI, but launching either is unverified here — not run in
-              this environment.
-          files: |
-            dw4-crown-mod-*-windows-x86_64.zip
-            dw4-crown-mod-*-windows-x86_64.msi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
