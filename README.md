@@ -67,10 +67,15 @@ The downloads are unsigned, so Windows may show a warning the first time you run
 ## Updating the app
 
 The app checks for newer versions at startup and shows their release notes before
-asking whether to update. You can also use **Check for updates**. MSI-installed
-Windows copies download and open the installer after you accept; portable Windows
-and Linux copies open the GitHub release page. Choose **Later** to keep using the
-current version.
+asking whether to update. You can also use **Check for updates**.
+
+On Windows, MSI installations automatically download and start the update
+installer after you accept. Portable Windows builds open the GitHub release page.
+
+On Linux, update through your package manager or manually download the latest
+release. The **Update** button opens the GitHub release page.
+
+Choose **Later** to keep using the current version.
 
 Versions before 0.10.0 need one manual download to get this feature.
 
