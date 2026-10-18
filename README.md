@@ -32,18 +32,11 @@ Your original file is never changed.
 - **Optional four-player enemy spawns.** Use four-player spawn counts and wave
   limits with a smaller party. Enemy stats and per-kill drop tables are unchanged
   by this option. Stage scripts still use the actual party size.
-- **Easier-to-hit practice enemies.** All eight practice-stage enemy variants
-  have half their previous Crown Mod Speed, rounded to a whole stat value.
 - **Tougher enemies.** Enemy health and other stats are boosted. Attack values are
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.
-- **Yellow crowns.** The strongest enemy variants wear a yellow crown. The game
-  normally shows crowns on only 4 characters at once. This mod raises that to 64, so
-  every crowned enemy shows its crown, not just the first few. Enemy spawn counts are
-  unchanged.
 
-All optional settings and the practice Speed adjustment apply to every supported
-console and region listed below.
+All optional settings apply to every supported console and region listed below.
 
 ## What you need
 
