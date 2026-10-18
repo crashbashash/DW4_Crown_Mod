@@ -36,8 +36,6 @@ Your original file is never changed.
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.
 
-All optional settings apply to every supported console and region listed below.
-
 ## What you need
 
 - A clean copy of Digimon World 4, as an `.iso` file (PS2 or GameCube), or a GameCube `.ciso` or `.rvz`. These releases work:
