@@ -48,7 +48,7 @@ Your original file is never changed.
   | GameCube USA | `GDJE` |
   | GameCube Japan (*Digimon World X*) | `GDJJ` |
 
-  GameCube images can be a plain `.iso`, an NKit `.iso`, a `.ciso` or an `.rvz` (uncompressed or zstd). The Europe GameCube release is not supported yet.
+  GameCube images can be a plain `.iso`, an NKit `.iso`, a `.ciso` or an `.rvz` (uncompressed or zstd).
 
   The app detects your release automatically. It refuses discs that are unknown or
   already modified.
