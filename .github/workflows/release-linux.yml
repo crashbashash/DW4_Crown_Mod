@@ -45,12 +45,12 @@ jobs:
         run: |
           set -euo pipefail
           DEB_VERSION="${ASSET_VERSION#v}"
-          BIN="target/release/dw4-veryhard-plus"
-          PREFIX="dw4-veryhard-plus-${ASSET_VERSION}-linux-x86_64"
+          BIN="target/release/dw4-crown-mod"
+          PREFIX="dw4-crown-mod-${ASSET_VERSION}-linux-x86_64"
           STAGE="$(mktemp -d)"
 
           # Plain binary tarball (the binary only, no installer).
-          tar -czf "${PREFIX}.tar.gz" -C target/release dw4-veryhard-plus
+          tar -czf "${PREFIX}.tar.gz" -C target/release dw4-crown-mod
 
           # --- AppImage ---
           APPDIR="${STAGE}/AppDir"
@@ -58,25 +58,25 @@ jobs:
             "${APPDIR}/usr/bin" \
             "${APPDIR}/usr/share/applications" \
             "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
-          install -m 755 "${BIN}" "${APPDIR}/usr/bin/dw4-veryhard-plus"
-          ln -s usr/bin/dw4-veryhard-plus "${APPDIR}/AppRun"
+          install -m 755 "${BIN}" "${APPDIR}/usr/bin/dw4-crown-mod"
+          ln -s usr/bin/dw4-crown-mod "${APPDIR}/AppRun"
           IC="crates/dw4vhp-tauri/icons/icon.png"
           APPSHARE="${APPDIR}/usr/share/icons/hicolor/256x256/apps"
           cp "$IC" "$APPSHARE/"
-          mv "$APPSHARE/icon.png" "$APPSHARE/dw4-veryhard-plus.png"
-          cp "$IC" "${APPDIR}/dw4-veryhard-plus.png"
-          cat > "${APPDIR}/dw4-veryhard-plus.desktop" <<'EOF'
+          mv "$APPSHARE/icon.png" "$APPSHARE/dw4-crown-mod.png"
+          cp "$IC" "${APPDIR}/dw4-crown-mod.png"
+          cat > "${APPDIR}/dw4-crown-mod.desktop" <<'EOF'
           [Desktop Entry]
           Type=Application
-          Name=DW4 Very Hard Plus
-          Comment=Patch a PS2 Digimon World 4 / World X ISO to Very Hard Plus
-          Exec=dw4-veryhard-plus
-          Icon=dw4-veryhard-plus
+          Name=DW4 Crown Mod
+          Comment=Patch a PS2 Digimon World 4 / World X ISO to Crown Mod
+          Exec=dw4-crown-mod
+          Icon=dw4-crown-mod
           Categories=Utility;
           Terminal=false
           EOF
-          cp "${APPDIR}/dw4-veryhard-plus.desktop" \
-            "${APPDIR}/usr/share/applications/dw4-veryhard-plus.desktop"
+          cp "${APPDIR}/dw4-crown-mod.desktop" \
+            "${APPDIR}/usr/share/applications/dw4-crown-mod.desktop"
 
           APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool
           APPIMAGETOOL_URL="$APPIMAGETOOL_URL/releases/download/continuous"
@@ -95,21 +95,21 @@ jobs:
             "${PKGROOT}/usr/bin" \
             "${PKGROOT}/usr/share/applications" \
             "${PKGROOT}/usr/share/icons/hicolor/256x256/apps"
-          install -m 755 "${BIN}" "${PKGROOT}/usr/bin/dw4-veryhard-plus"
-          cp "${APPDIR}/dw4-veryhard-plus.desktop" \
+          install -m 755 "${BIN}" "${PKGROOT}/usr/bin/dw4-crown-mod"
+          cp "${APPDIR}/dw4-crown-mod.desktop" \
             "${PKGROOT}/usr/share/applications/"
           PKGSHARE="${PKGROOT}/usr/share/icons/hicolor/256x256/apps"
           cp "$IC" "$PKGSHARE/"
-          mv "$PKGSHARE/icon.png" "$PKGSHARE/dw4-veryhard-plus.png"
+          mv "$PKGSHARE/icon.png" "$PKGSHARE/dw4-crown-mod.png"
 
           cat > "${PKGROOT}/DEBIAN/control" <<EOF
-          Package: dw4-veryhard-plus
+          Package: dw4-crown-mod
           Version: ${DEB_VERSION}
           Section: games
           Priority: optional
           Architecture: amd64
           Maintainer: ${MAINT}
-          Description: Patch a PS2 Digimon World 4 / World X ISO to Very Hard Plus
+          Description: Patch a PS2 Digimon World 4 / World X ISO to Crown Mod
            A desktop app that turns a player's own clean Digimon World 4
            (USA/Europe) or World X (Japan) PS2 disc into a much harder one.
           EOF
@@ -123,9 +123,9 @@ jobs:
         with:
           name: linux-assets
           path: |
-            dw4-veryhard-plus-*.tar.gz
-            dw4-veryhard-plus-*.AppImage
-            dw4-veryhard-plus-*.deb
+            dw4-crown-mod-*.tar.gz
+            dw4-crown-mod-*.AppImage
+            dw4-crown-mod-*.deb
           if-no-files-found: error
 
       - name: Publish Linux assets to release
@@ -138,10 +138,10 @@ jobs:
           prerelease: false
           append_body: true
           body: |
-            DW4 Very Hard Plus ${{ github.ref_name }}.
+            DW4 Crown Mod ${{ github.ref_name }}.
 
             Linux: `.AppImage`, `.deb`, and a plain binary tarball
-            (`dw4-veryhard-plus-${{ github.ref_name }}-linux-x86_64.*`).
+            (`dw4-crown-mod-${{ github.ref_name }}-linux-x86_64.*`).
             Built in CI; launching them is unverified here — not run in
             this environment.
 
@@ -149,8 +149,8 @@ jobs:
             derived from your own clean PS2 Digimon World 4 (USA/Europe)
             or Digimon World X (Japan) disc at runtime.
           files: |
-            dw4-veryhard-plus-*-linux-x86_64.tar.gz
-            dw4-veryhard-plus-*-linux-x86_64.AppImage
-            dw4-veryhard-plus-*-linux-x86_64.deb
+            dw4-crown-mod-*-linux-x86_64.tar.gz
+            dw4-crown-mod-*-linux-x86_64.AppImage
+            dw4-crown-mod-*-linux-x86_64.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

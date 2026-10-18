@@ -3,7 +3,7 @@ name = "dw4vhp-core"
 version = "0.9.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Engine for the Digimon World 4 Very Hard Plus ISO patcher"
+description = "Engine for the Digimon World 4 Crown Mod ISO patcher"
 
 [lib]
 name = "dw4vhp_core"

@@ -57,8 +57,8 @@ export function OutputPanel({
           Patched {(lastOutcome.bytes / 1_000_000_000).toFixed(2)} GB, md5 {lastOutcome.md5}
         </p>
       )}
-      <div className="row">
-        <button type="button" onClick={onPatch} disabled={!canPatch || busy}>
+      <div className="row patch-actions">
+        <button className="primary" type="button" onClick={onPatch} disabled={!canPatch || busy}>
           Patch ISO
         </button>
         {progress !== null && (
@@ -73,6 +73,7 @@ export function OutputPanel({
         {busy && progress === null && <span className="hint">working…</span>}
       </div>
       <div className="log-panel" aria-label="log">
+        {log.length === 0 && <span className="log-empty">Patching progress will appear here.</span>}
         {log.map((line, i) => (
           /* The log is append-only; the index is stable per line. */
           <div key={i} className="log-line">

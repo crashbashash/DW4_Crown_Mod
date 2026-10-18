@@ -50,10 +50,7 @@ export function DiscPicker({
           Browse…
         </button>
       </div>
-      {inputPath === null && (
-        <p className="hint">choose a disc (Browse, or drag the ISO onto this window)</p>
-      )}
-      <p className="hint">or drag and drop the ISO onto this window</p>
+      <p className="hint">{inputPath === null ? "Choose a disc with Browse, or drag and drop it onto this window." : "You can also drag and drop a disc onto this window."}</p>
       {analyzing && <p className="status-line status-unknown">analyzing…</p>}
       {status !== null && <p className={`status-line status-${status.kind}`}>{status.text}</p>}
       {outputPath !== null && <p className="hint">output: {outputPath}</p>}

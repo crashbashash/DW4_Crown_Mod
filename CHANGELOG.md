@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Rename the app and new downloads to **DW4 Crown Mod**, matching the community name.
+  The GitHub repository URL and existing installation identity are retained.
+- New patched images use the `[CrownMod]` filename marker.
+- Match the DigiLab and DigiAtlas app style with dark panels, gold accents and
+  a crown icon in the same badge layout.
+- Attach open/save file pickers to the app window so desktop portals can treat
+  them as dialogs on Linux.
+
 ## v0.9.0
 
 - Support Digimon World 4 (USA) and Digimon World X (Japan) on GameCube, with the same

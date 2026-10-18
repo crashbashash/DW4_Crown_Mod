@@ -1,130 +1,55 @@
-/* Responsive layout: one column by default, two columns in a wide window.
-   No fixed pixel widths — sizes derive from the window, per the spec. */
-
+.app-header {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand img { display: block; }
+.brand h1 { font-size: 17px; font-weight: 700; margin: 0; }
+.platforms { margin-left: auto; color: var(--muted); font-size: 12px; }
+.workspace { max-width: 1160px; margin: 0 auto; padding: 28px 24px; }
+.app-intro { margin-bottom: 24px; }
+.app-intro h2 { font-size: 24px; font-weight: 500; letter-spacing: -0.4px; margin: 0 0 8px; }
+.app-subtitle { color: var(--muted); margin: 0; max-width: 680px; }
 main.app-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 1rem;
-  padding: 1rem;
-  align-content: start;
+  gap: 16px;
+  align-items: start;
 }
-
 @media (min-width: 900px) {
-  main.app-main.layout-two-col {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
+  main.app-main.layout-two-col { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1rem;
-  min-width: 0;
-}
-
-main.app-main .col {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-width: 0;
-}
-
-.row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.path-field {
-  flex: 1 1 200px;
-  min-width: 0;
-}
-
-.status-line {
-  font-weight: 500;
-}
-
-.status-ok { color: var(--ok); }
-.status-refused { color: var(--danger); }
-.status-unknown { color: var(--muted); }
-
-.note-warn { color: var(--accent); }
-.note-ok { color: var(--ok); }
-
-.progress-line {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-}
-
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; min-width: 0; }
+.col { min-width: 0; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.path-field { flex: 1 1 200px; min-width: 0; }
+.status-line { font-weight: 500; }
+.panel .hint { overflow-wrap: anywhere; }
+.patch-actions { margin-top: 20px; }
+.workspace-footer { color: var(--muted); font-size: 12px; margin: 16px 0 0; }
+.progress-line { display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; font-size: 13px; }
+progress { accent-color: var(--accent); min-width: 40px; flex: 1; height: 6px; }
 .log-panel {
-  margin-top: 0.75rem;
-  max-height: 10rem;
+  margin-top: 20px;
+  max-height: 160px;
   overflow-y: auto;
+  overflow-wrap: anywhere;
   font-family: ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.5rem;
+  padding: 10px 12px;
   background: var(--bg);
 }
-
-.hint {
-  color: var(--muted);
-  font-size: 0.85rem;
+.log-empty { font-family: inherit; color: var(--muted); }
+.log-line + .log-line { margin-top: 4px; }
+@media (max-width: 600px) {
+  .workspace { padding: 20px 16px; }
+  .panel { padding: 16px; }
+  .platforms { max-width: 90px; text-align: right; }
 }
-
-button {
-  background: var(--panel);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 0.8rem;
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-input, select {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.3rem 0.5rem;
-}
-
-.hidden-file-btn {
-  display: none;
-}
-
-.react-aria-ModalOverlay {
-  position: fixed;
-  inset: 0;
-  background: rgb(0 0 0 / 60%);
-  display: grid;
-  place-items: center;
-  z-index: 100;
-  padding: 1rem;
-}
-
-.react-aria-Modal {
-  background: var(--panel);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
-  width: min(100%, 32rem);
-}
-
-.overwrite-path { overflow-wrap: anywhere; }

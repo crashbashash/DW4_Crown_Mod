@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Crown Mod: the DigiLab / DigiAtlas family badge, with a gold crown. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#2b281f" stroke="#665838" stroke-width="1.6"/>
+  <path d="m10.5 23.5 9 7.5L26 13l6.5 18 9-7.5-5 20.5h-21z" fill="#f2cf78" stroke="#f2cf78" stroke-width="1.5" stroke-linejoin="round"/>
+  <rect x="15" y="47" width="22" height="3" rx="1.5" fill="#f2cf78"/>
+  <text x="50" y="54" text-anchor="middle" font-family="DejaVu Sans, Verdana, sans-serif" font-weight="700" font-size="19" fill="#f2cf78">4</text>
+</svg>

@@ -12,14 +12,14 @@ export function DoneDialog({ path, outcome, onClose }: {
       <Modal>
         <Dialog>
           <Heading slot="title">Patching complete</Heading>
-          <p>Your Very Hard Plus disc was written and verified:</p>
+          <p>Your Crown Mod disc was written and verified:</p>
           <p className="overwrite-path">{path}</p>
           <p className="hint">
             {(outcome.bytes / 1_000_000_000).toFixed(2)} GB, {outcome.summary.rowsChanged} enemy
             rows changed, md5 {outcome.md5}
           </p>
           <div className="row">
-            <Button autoFocus onPress={onClose}>OK</Button>
+            <Button className="primary" autoFocus onPress={onClose}>OK</Button>
           </div>
         </Dialog>
       </Modal>

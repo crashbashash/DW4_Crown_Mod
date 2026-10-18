@@ -1,61 +1,89 @@
-/* Theme: CSS variables for light and dark, following the OS via
-   prefers-color-scheme, as DW4orge does. No manual toggle. */
-
+/* DigiLab / DigiAtlas's dark surfaces and control scale, with Crown Mod gold. */
 :root {
-  --bg: #f6f6f4;
-  --fg: #22221f;
-  --panel: #ffffff;
-  --border: #d8d6d0;
-  --accent: #b8860b;
-  --accent-fg: #ffffff;
-  --danger: #b03030;
-  --ok: #1f7a34;
-  --muted: #6b6b66;
+  color-scheme: dark;
+  --bg: #0f1218;
+  --fg: #e7eaf0;
+  --panel: #171b23;
+  --raised: #1e232d;
+  --hover: #252b37;
+  --border: #2b3240;
+  --border-strong: #3a4354;
+  --accent: #f2cf78;
+  --accent-hover: #f7dca0;
+  --accent-fg: #251d0d;
+  --danger: #ff8a80;
+  --ok: #7ed39a;
+  --muted: #9aa4b5;
+  --radius: 7px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-synthesis: none;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1a;
-    --fg: #e8e8e4;
-    --panel: #262624;
-    --border: #3c3c38;
-    --accent: #d4a017;
-    --accent-fg: #111110;
-    --danger: #e06060;
-    --ok: #5fbf7a;
-    --muted: #9a9a94;
-  }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); line-height: 1.4; }
+button, input, select { font: inherit; }
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--raised);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
 }
-
-* {
-  box-sizing: border-box;
+button:hover:not(:disabled) { background: var(--hover); border-color: var(--muted); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  padding: 9px 18px;
 }
-
-body {
-  margin: 0;
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+input, select {
   background: var(--bg);
   color: var(--fg);
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
-  font-size: 15px;
-  line-height: 1.45;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 13px;
 }
-
-h1 {
-  font-size: clamp(1.2rem, 1rem + 1vw, 1.6rem);
-  margin: 0;
+input:hover { border-color: var(--muted); }
+input:focus { border-color: var(--accent); }
+:focus-visible, [data-focus-visible] { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, p { overflow-wrap: anywhere; }
+h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
+p { margin: 12px 0; }
+.hint { color: var(--muted); font-size: 13px; }
+.status-ok, .note-ok { color: var(--ok); }
+.status-refused { color: var(--danger); }
+.status-unknown { color: var(--muted); }
+.note-warn { color: var(--accent); }
+.react-aria-ModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: #0f1218d9;
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  padding: 16px;
 }
-
-.app-header {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
+.react-aria-Modal {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 24px;
+  width: min(100%, 480px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  box-shadow: 0 12px 32px #0007;
 }
-
-.app-subtitle {
-  margin: 0.25rem 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
+.react-aria-Dialog { outline: none; }
+.react-aria-Dialog .row { justify-content: flex-end; margin-top: 20px; }
+.overwrite-path { overflow-wrap: anywhere; color: var(--accent); }

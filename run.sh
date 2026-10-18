@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run DW4 Very Hard Plus.
+# Build and run DW4 Crown Mod.
 #
 #   ./run.sh              live-reloading development window (npx tauri dev)
 #   ./run.sh --release    optimised build, then open the app
@@ -19,7 +19,7 @@ case "${1:-}" in
   -h|--help) usage ;;
   --release)
     npx tauri build --no-bundle
-    exec "$root/target/release/dw4-veryhard-plus"
+    exec "$root/target/release/dw4-crown-mod"
     ;;
   --test)
     cargo test -p dw4vhp-core

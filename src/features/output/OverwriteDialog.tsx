@@ -15,7 +15,7 @@ export function OverwriteDialog({ path, onCancel, onConfirm }: {
           <p>Replace it with the patched disc?</p>
           <div className="row">
             <Button autoFocus onPress={onCancel}>Cancel</Button>
-            <Button onPress={onConfirm}>Overwrite and patch</Button>
+            <Button className="primary" onPress={onConfirm}>Overwrite and patch</Button>
           </div>
         </Dialog>
       </Modal>

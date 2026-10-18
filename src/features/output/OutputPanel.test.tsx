@@ -9,7 +9,7 @@ function setup(overrides: Partial<Parameters<typeof OutputPanel>[0]> = {}) {
   const onChooseOutput = vi.fn();
   const onSetOutput = vi.fn();
   const props = {
-    outputPath: "/mock/game [VeryHardPlus].iso",
+    outputPath: "/mock/game [CrownMod].iso",
     busy: false,
     canPatch: true,
     progress: null as ProgressEvent | null,

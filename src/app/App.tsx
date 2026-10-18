@@ -20,7 +20,7 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-/** Disc selection and output for the base Very Hard Plus mode. */
+/** Disc selection and output for the base Crown Mod mode. */
 export function App() {
   return (
     <BackendProvider>
@@ -123,7 +123,7 @@ function AppInner() {
 
   const chooseOutput = async () => {
     const path = await backend.chooseOutput(
-      disc.outputPath?.split("/").pop() ?? "game [VeryHardPlus].iso",
+      disc.outputPath?.split("/").pop() ?? "game [CrownMod].iso",
     );
     if (path !== null) disc.setOutputPath(path);
   };
@@ -142,38 +142,48 @@ function AppInner() {
   return (
     <>
       <header className="app-header">
-        <h1>DW4 Very Hard Plus</h1>
-        <p className="app-subtitle">
-          Turn your own clean PS2 or GameCube Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
-        </p>
+        <div className="brand">
+          <img src="/crown.svg" alt="" width={28} height={28} />
+          <h1>DW4 Crown Mod</h1>
+        </div>
+        <span className="platforms">PS2 · GameCube</span>
       </header>
-      <main className={`app-main ${wide ? "layout-two-col" : "layout-one-col"}`}>
-        <div className="col">
-          <DiscPicker
-            key={disc.inputPath ?? ""}
-            inputPath={disc.inputPath}
-            outputPath={disc.outputPath}
-            status={disc.status}
-            analyzing={disc.analyzing}
-            onPick={() => void disc.pickDisc()}
-            onCommitDiscPath={setDiscPath}
-          />
+      <div className="workspace">
+        <div className="app-intro">
+          <h2>Patch your disc</h2>
+          <p className="app-subtitle">
+            Turn your own clean PS2 or GameCube Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
+          </p>
         </div>
-        <div className="col">
-          <OutputPanel
-            outputPath={disc.outputPath}
-            busy={busy || disc.analyzing}
-            canPatch={canPatch}
-            progress={progress}
-            log={log}
-            status={disc.status}
-            lastOutcome={lastOutcome}
-            onPatch={() => void startPatch()}
-            onChooseOutput={() => void chooseOutput()}
-            onSetOutput={setOutput}
-          />
-        </div>
-      </main>
+        <main className={`app-main ${wide ? "layout-two-col" : "layout-one-col"}`}>
+          <div className="col">
+            <DiscPicker
+              key={disc.inputPath ?? ""}
+              inputPath={disc.inputPath}
+              outputPath={disc.outputPath}
+              status={disc.status}
+              analyzing={disc.analyzing}
+              onPick={() => void disc.pickDisc()}
+              onCommitDiscPath={setDiscPath}
+            />
+          </div>
+          <div className="col">
+            <OutputPanel
+              outputPath={disc.outputPath}
+              busy={busy || disc.analyzing}
+              canPatch={canPatch}
+              progress={progress}
+              log={log}
+              status={disc.status}
+              lastOutcome={lastOutcome}
+              onPatch={() => void startPatch()}
+              onChooseOutput={() => void chooseOutput()}
+              onSetOutput={setOutput}
+            />
+          </div>
+        </main>
+        <p className="workspace-footer">Creates a separate modded copy. Your original disc stays unchanged.</p>
+      </div>
       {donePopup !== null && (
         <DoneDialog
           path={outputRef.current ?? ""}

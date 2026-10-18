@@ -24,7 +24,7 @@ describe("useDisc — pick, default output, auto-analyze", () => {
     const { result } = renderHook(() => useDisc(backend));
     await result.current.setInputPath("/mock/mygame.iso");
     await waitFor(() => expect(result.current.status?.kind).toBe("ok"));
-    expect(result.current.outputPath).toBe("/mock/mygame [VeryHardPlus].iso");
+    expect(result.current.outputPath).toBe("/mock/mygame [CrownMod].iso");
   });
 
   test("an analyzed refusal is surfaced as status", async () => {

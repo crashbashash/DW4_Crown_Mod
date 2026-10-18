@@ -1,6 +1,6 @@
 # Development guide
 
-Details for people who want to build, test or contribute to DW4 Very Hard Plus.
+Details for people who want to build, test or contribute to DW4 Crown Mod.
 If you just want to play, see the [README](../README.md).
 
 ## Project layout
@@ -34,6 +34,13 @@ npm run dev        # frontend alone (mock backend, in a browser tab)
 npx tauri dev      # the desktop app, live-reloading
 npx tauri build    # distributables (exe/AppImage/deb/MSI)
 ```
+
+## App artwork
+
+`public/crown.svg` is the editable source for the UI mark, favicon and desktop
+icons. It follows the DigiLab / DigiAtlas badge layout with Crown Mod gold.
+After editing it, regenerate the committed PNG and Windows ICO with
+`python3 tools/gen_icon.py` (requires `rsvg-convert` and Python Pillow).
 
 ## One rule
 
@@ -94,7 +101,7 @@ rendered UI and the native patch engine, not the browser mock backend.
 ```sh
 npm run build
 cargo build --manifest-path crates/dw4vhp-tauri/Cargo.toml --features agent-control,tauri/custom-protocol
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json start --binary crates/dw4vhp-tauri/target/debug/dw4-veryhard-plus
+python3 tools/agent.py --session /tmp/dw4vhp-agent.json start --binary crates/dw4vhp-tauri/target/debug/dw4-crown-mod
 python3 tools/agent.py --session /tmp/dw4vhp-agent.json snapshot
 python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "disc path" "/path/to/clean.iso"
 python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "output path" "/tmp/patched.iso"

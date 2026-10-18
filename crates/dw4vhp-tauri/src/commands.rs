@@ -18,7 +18,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
-const OUTPUT_MARKER: &str = " [VeryHardPlus]";
+const OUTPUT_MARKER: &str = " [CrownMod]";
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -82,11 +82,13 @@ pub struct ProgressPayload {
 /// blocking dialog calls wait for that same thread to draw the dialog, so the
 /// window froze and the dialog never appeared.
 #[tauri::command]
-pub async fn choose_iso(app: AppHandle) -> Option<String> {
+pub async fn choose_iso(window: tauri::Window) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        window
+            .dialog()
             .file()
+            .set_parent(&window)
             .add_filter("PS2 or GameCube disc image", &["iso", "gcm", "ciso", "rvz"])
             .blocking_pick_file()
             .and_then(|p| p.into_path().ok())
@@ -99,11 +101,13 @@ pub async fn choose_iso(app: AppHandle) -> Option<String> {
 
 /// The native save dialog for the patched output. `None` when cancelled.
 #[tauri::command]
-pub async fn choose_output(app: AppHandle, default_name: String) -> Option<String> {
+pub async fn choose_output(window: tauri::Window, default_name: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        window
+            .dialog()
             .file()
+            .set_parent(&window)
             .set_file_name(&default_name)
             .blocking_save_file()
             .and_then(|p| p.into_path().ok())

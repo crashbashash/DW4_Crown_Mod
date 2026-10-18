@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DW4 Very Hard Plus",
+  "productName": "DW4 Crown Mod",
   "version": "0.9.0",
   "identifier": "io.github.crashbashash.dw4-veryhard-plus",
-  "mainBinaryName": "dw4-veryhard-plus",
+  "mainBinaryName": "dw4-crown-mod",
   "build": {
     "frontendDist": "../../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "DW4 Very Hard Plus",
+        "title": "DW4 Crown Mod",
         "width": 1000,
         "height": 720,
         "minWidth": 560,
@@ -30,8 +30,8 @@
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "category": "RolePlayingGame",
     "shortDescription": "Makes your Digimon World 4 disc much harder",
-    "longDescription": "Reads the player's own clean PS2 Digimon World 4 (USA/Europe) or Digimon World X (Japan) disc and writes a new, harder copy: boosted enemies and the yellow crown in the base Very Hard Plus mode.",
-    "publisher": "DW4 Very Hard Plus contributors",
+    "longDescription": "Reads the player's own clean PS2 Digimon World 4 (USA/Europe) or Digimon World X (Japan) disc and writes a new, harder copy: boosted enemies and the yellow crown in the base Crown Mod mode.",
+    "publisher": "DW4 Crown Mod contributors",
     "license": "GPL-3.0-or-later",
     "windows": {
       "wix": {

@@ -1,11 +1,11 @@
-# DW4 Very Hard Plus
+# DW4 Crown Mod
 
 [![CI Linux](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/ci-linux.yml?label=CI%20Linux&branch=main)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/ci-linux.yml)
 [![CI Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/ci-windows.yml?label=CI%20Windows&branch=main)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/ci-windows.yml)
 [![Release Linux](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/release-linux.yml?label=Release%20Linux)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/release-linux.yml)
 [![Release Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_VeryHard_Plus/release-windows.yml?label=Release%20Windows)](https://github.com/crashbashash/DW4_VeryHard_Plus/actions/workflows/release-windows.yml)
 
-A difficulty mod for **Digimon World 4** on PS2 and GameCube. Very Hard Plus makes enemies much
+**Crown Mod**, formerly **DW4 Very Hard Plus**, is a difficulty mod for **Digimon World 4** on PS2 and GameCube. It makes enemies much
 tougher, and marks the strongest ones with a yellow crown so you can spot them.
 
 You don't need any modding knowledge. Open the app, pick your own copy of the game,

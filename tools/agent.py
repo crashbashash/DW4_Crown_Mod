@@ -59,7 +59,7 @@ def main():
             raise
         return
     if args.command == "screenshot":
-        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", "^DW4 Very Hard Plus$"], text=True).splitlines()
+        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", "^DW4 Crown Mod$"], text=True).splitlines()
         if len(windows) != 1:
             raise RuntimeError("expected exactly one visible app window")
         subprocess.run(["import", "-window", windows[0], args.path], check=True)

@@ -32,7 +32,7 @@ afterEach(() => {
 describe("App layout", () => {
   test("renders the app header", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "DW4 Very Hard Plus" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "DW4 Crown Mod" })).toBeTruthy();
   });
 
   test("wide layout uses two columns", () => {
@@ -51,7 +51,7 @@ describe("App layout", () => {
 describe("App wiring", () => {
   test("offers only the base mode without editable difficulty settings", () => {
     render(<App />);
-    expect(screen.queryByRole("heading", { name: "Very Hard Plus" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Crown Mod" })).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByText(/Extreme|Brutal|Custom|Advanced/)).toBeNull();
     expect(screen.queryByLabelText("hp")).toBeNull();
@@ -85,7 +85,7 @@ describe("App disc wiring", () => {
     await waitFor(() =>
       expect(
         (screen.getByLabelText("output path") as HTMLInputElement).value,
-      ).toBe("/mock/mygame [VeryHardPlus].iso"),
+      ).toBe("/mock/mygame [CrownMod].iso"),
     );
   });
 });
@@ -103,7 +103,7 @@ describe("overwrite confirmation", () => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: confirm ? "Overwrite and patch" : "Cancel" }));
-    if (confirm) expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [VeryHardPlus].iso", true);
+    if (confirm) expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true);
     else expect(patch).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -124,7 +124,7 @@ describe("patch finished popup", () => {
     const user = await patchOnce();
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Patching complete");
-    expect(dialog.textContent).toContain("/mock/game [VeryHardPlus].iso");
+    expect(dialog.textContent).toContain("/mock/game [CrownMod].iso");
     await user.click(screen.getByRole("button", { name: "OK" }));
     expect(screen.queryByRole("dialog")).toBeNull();
   });

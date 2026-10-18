@@ -3,10 +3,10 @@ name = "dw4vhp-tauri"
 version = "0.9.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Desktop shell for the Digimon World 4 Very Hard Plus ISO patcher"
+description = "Desktop shell for the Digimon World 4 Crown Mod ISO patcher"
 
 [[bin]]
-name = "dw4-veryhard-plus"
+name = "dw4-crown-mod"
 path = "src/main.rs"
 
 [build-dependencies]

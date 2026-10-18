@@ -34,8 +34,8 @@ jobs:
           ASSET_VERSION: ${{ github.ref_name }}
         run: |
           $version = $env:ASSET_VERSION
-          $zip = "dw4-veryhard-plus-$version-windows-x86_64.zip"
-          Compress-Archive -Path crates\dw4vhp-tauri\target\release\dw4-veryhard-plus.exe `
+          $zip = "dw4-crown-mod-$version-windows-x86_64.zip"
+          Compress-Archive -Path crates\dw4vhp-tauri\target\release\dw4-crown-mod.exe `
             -DestinationPath $zip
           Get-Item $zip | Select-Object -ExpandProperty FullName
 
@@ -51,7 +51,7 @@ jobs:
           $msi = Get-ChildItem "crates\dw4vhp-tauri\target\release\bundle\msi" -Filter *.msi |
             Select-Object -First 1
           Copy-Item $msi.FullName `
-            -Destination "dw4-veryhard-plus-$version-windows-x86_64.msi"
+            -Destination "dw4-crown-mod-$version-windows-x86_64.msi"
           Get-Item *.msi | Select-Object -ExpandProperty FullName
 
       - name: Upload Windows assets
@@ -60,8 +60,8 @@ jobs:
         with:
           name: windows-assets
           path: |
-            dw4-veryhard-plus-*.zip
-            dw4-veryhard-plus-*.msi
+            dw4-crown-mod-*.zip
+            dw4-crown-mod-*.msi
           if-no-files-found: error
 
       - name: Publish Windows assets to release
@@ -69,20 +69,20 @@ jobs:
         uses:
           softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          name: DW4 Very Hard Plus ${{ github.ref_name }}
+          name: DW4 Crown Mod ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           draft: false
           prerelease: false
           append_body: true
           body: |
-            Windows: `dw4-veryhard-plus-${{ github.ref_name
+            Windows: `dw4-crown-mod-${{ github.ref_name
               }}-windows-x86_64.zip` has the release `.exe`;
               `…-x86_64.msi` is the same build as an installer (into
               Program Files, with a Start-menu shortcut). Both are built
               in CI, but launching either is unverified here — not run in
               this environment.
           files: |
-            dw4-veryhard-plus-*-windows-x86_64.zip
-            dw4-veryhard-plus-*-windows-x86_64.msi
+            dw4-crown-mod-*-windows-x86_64.zip
+            dw4-crown-mod-*-windows-x86_64.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

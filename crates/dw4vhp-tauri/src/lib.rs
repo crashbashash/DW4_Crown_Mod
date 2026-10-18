@@ -33,5 +33,5 @@ pub fn run() {
     ]);
     builder
         .run(tauri::generate_context!())
-        .expect("error while running the DW4 Very Hard Plus window");
+        .expect("error while running the DW4 Crown Mod window");
 }

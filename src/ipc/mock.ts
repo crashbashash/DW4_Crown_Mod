@@ -44,7 +44,7 @@ export class MockBackend implements Backend {
   }
 
   async defaultOutput(input: string): Promise<string> {
-    return input.replace(/\.(iso|gcm|ciso|rvz)$/i, (_, ext: string) => ` [VeryHardPlus].${/^(ciso|rvz)$/i.test(ext) ? ext.toLowerCase() : "iso"}`);
+    return input.replace(/\.(iso|gcm|ciso|rvz)$/i, (_, ext: string) => ` [CrownMod].${/^(ciso|rvz)$/i.test(ext) ? ext.toLowerCase() : "iso"}`);
   }
 
   async outputExists(_output: string): Promise<boolean> {
