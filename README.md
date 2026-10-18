@@ -77,8 +77,6 @@ release. The **Update** button opens the GitHub release page.
 
 Choose **Later** to keep using the current version.
 
-Versions before 0.10.0 need one manual download to get this feature.
-
 ## Contributing and building from source
 
 See the [development guide](docs/DEVELOPMENT.md) for build steps, tests and project
