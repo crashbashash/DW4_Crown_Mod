@@ -4,6 +4,20 @@
 [![CI Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-windows.yml?label=CI%20Windows&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-windows.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/release.yml?label=Release)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/release.yml)
 
+| Original game | Crown Mod — four-player spawns and random crown colours |
+| --- | --- |
+| ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
+
+The first bridge in **Goblin Pass**, playing solo with the same World 2-ready save
+on Normal difficulty.
+
+This encounter has **two enemies in the original game and five with four-player
+spawns enabled**. Random crown colours change the icons only; the colours do not
+indicate different enemy stats or drops. Colours can repeat; this example shows
+all five available colours. Click either image for the full-size view.
+
+Gameplay captured from the GameCube version in Dolphin.
+
 **Crown Mod** is a difficulty mod for **Digimon World 4** on PS2 and GameCube. It makes enemies much
 tougher, and marks the strongest ones with a yellow crown so you can spot them.
 
@@ -35,22 +49,6 @@ Patching a clean disc leaves your original file unchanged.
 - **Tougher enemies.** Enemy health and other stats are boosted. Attack values are
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.
-
-## In game
-
-The first bridge in **Goblin Pass**, playing solo with the same World 2-ready save
-on Normal difficulty:
-
-| Original game | Crown Mod — four-player spawns and random crown colours |
-| --- | --- |
-| ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
-
-This encounter has **two enemies in the original game and five with four-player
-spawns enabled**. Random crown colours change the icons only; the colours do not
-indicate different enemy stats or drops. Colours can repeat; this example shows
-all five available colours. Click either image for the full-size view.
-
-Gameplay captured from the GameCube version in Dolphin.
 
 ## What you need
 
