@@ -1,7 +1,9 @@
 import { useState } from "react";
+import type { DiscStatus } from "../../bindings";
 
 export interface DiscPickerProps {
   inputPath: string | null;
+  info?: DiscStatus["discInfo"];
   onPick: () => void;
   /** A typed path, committed on Enter or blur (not per keystroke). */
   onCommitDiscPath: (path: string) => void;
@@ -10,6 +12,7 @@ export interface DiscPickerProps {
 /** Disc selection; the app owns analysis notices and other dialogs. */
 export function DiscPicker({
   inputPath,
+  info,
   onPick,
   onCommitDiscPath,
 }: DiscPickerProps) {
@@ -44,6 +47,11 @@ export function DiscPicker({
           Browse…
         </button>
       </div>
+      {info && <dl className="disc-info" aria-label="Disc information">
+        <div><dt>Console</dt><dd>{info.console}</dd></div>
+        <div><dt>Region</dt><dd>{info.region}</dd></div>
+        <div><dt>Mod</dt><dd>{info.modded ? info.modVersion ? `Crown Mod v${info.modVersion}` : "Modded · version unknown" : "Unmodified"}</dd></div>
+      </dl>}
       <p className="hint">{inputPath === null ? "Choose a disc with Browse, or drag and drop it onto this window." : "You can also drag and drop a disc onto this window."}</p>
     </section>
   );

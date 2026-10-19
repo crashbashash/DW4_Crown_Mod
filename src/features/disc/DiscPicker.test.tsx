@@ -29,3 +29,14 @@ describe("DiscPicker", () => {
   });
 
 });
+
+ test.each([
+   [{ console: "PS2", region: "Europe", modded: false, modVersion: null }, "Unmodified"],
+   [{ console: "GameCube", region: "Japan", modded: true, modVersion: "0.11.0" }, "Crown Mod v0.11.0"],
+   [{ console: "PS2", region: "USA", modded: true, modVersion: null }, "Modded · version unknown"],
+ ] as const)("disc information reflects the detected image", (info, status) => {
+   render(<DiscPicker inputPath="/mock/game.iso" info={info} onPick={() => {}} onCommitDiscPath={() => {}} />);
+   expect(screen.getByText(info.console)).toBeTruthy();
+   expect(screen.getByText(info.region)).toBeTruthy();
+   expect(screen.getByText(status)).toBeTruthy();
+ });

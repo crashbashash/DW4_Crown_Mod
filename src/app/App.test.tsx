@@ -156,9 +156,12 @@ describe("patch finished popup", () => {
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
    await user.tab();
-   expect((await screen.findByRole("dialog")).textContent).toContain("Disc already modded");
-   expect(screen.getByRole("button", { name: "Patch ISO", hidden: true }).hasAttribute("disabled")).toBe(true);
-   await user.click(screen.getByRole("button", { name: "OK" }));
+   await screen.findByRole("button", { name: "Update ISO" });
+   expect(screen.queryByRole("dialog")).toBeNull();
+   expect(screen.queryByRole("button", { name: "Patch ISO" })).toBeNull();
+   await user.click(screen.getByRole("button", { name: "Update ISO" }));
+   expect((await screen.findByRole("dialog")).textContent).toContain("Update modded game?");
+   await user.click(screen.getByRole("button", { name: "Cancel" }));
    expect(screen.queryByRole("dialog")).toBeNull();
    await user.clear(screen.getByLabelText("disc path"));
    await user.type(screen.getByLabelText("disc path"), "/mock/clean.iso");
@@ -331,3 +334,73 @@ test("a failed background size refresh still opens the disc-error popup", async 
   expect(screen.getByRole("dialog", { name: "Unable to open disc" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Patch ISO", hidden: true }).hasAttribute("disabled")).toBe(true);
 });
+
+ test("mod update loads saved features into Settings and updates the selected image in place", async () => {
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({ kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, modMetadata: { version: "0.10.0", options: { fourPlayerSpawns: true, betterLoot: false, randomCrownColours: true }, recovery: { formatVersion: 1 } } });
+   const update = vi.spyOn(MockBackend.prototype, "updateMod");
+   const picker = vi.spyOn(MockBackend.prototype, "chooseIso");
+   render(<App />);
+   const user = (await import("@testing-library/user-event")).default;
+   await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+   await user.tab();
+   await screen.findByRole("button", {name: "Update ISO"});
+   expect(screen.queryByRole("dialog")).toBeNull();
+   expect(screen.getByRole("switch", { name: "4-player enemy spawns", checked: true })).toBeTruthy();
+   await user.click(screen.getByRole("switch", { name: "4-player enemy spawns" }));
+   await user.click(screen.getByRole("switch", { name: "Match drops to crowns" }));
+   await waitFor(() => expect(screen.getByRole("button", {name: "Update ISO"}).hasAttribute("disabled")).toBe(false));
+   await user.click(screen.getByRole("button", {name: "Update ISO"}));
+   expect((await screen.findByRole("dialog")).textContent).toContain("v0.10.0");
+   await user.click(screen.getByRole("button", { name: "Update image" }));
+   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, null));
+   expect(picker).not.toHaveBeenCalled();
+   expect((await screen.findByRole("dialog")).textContent).toContain("/mock/modded.iso");
+ });
+
+ test("older mod asks for the original and cancelling does not update", async () => {
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "older mod", size: 0, outputSize: 0, copies: null });
+   const update = vi.spyOn(MockBackend.prototype, "updateMod");
+   vi.spyOn(MockBackend.prototype, "chooseIso").mockResolvedValue(null);
+   render(<App />);
+   const user = (await import("@testing-library/user-event")).default;
+   await user.type(screen.getByLabelText("disc path"), "/mock/older.iso");
+   await user.tab();
+   await user.click(await screen.findByRole("button", {name: "Update ISO"}));
+   await screen.findByRole("dialog");
+   await user.click(screen.getByRole("button", { name: "Update image" }));
+   await screen.findByRole("button", { name: "Update image" });
+   expect(update).not.toHaveBeenCalled();
+ });
+
+ test("disc information refreshes after an in-place update without reopening the update prompt", async () => {
+   const initial = { kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, discInfo: {console: "PS2", region: "USA", modded: true, modVersion: "0.10.0"}, modMetadata: {version: "0.10.0", options: {fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false}, recovery: {formatVersion: 1}} } as const;
+   const current = { ...initial, discInfo: {...initial.discInfo, modVersion: "0.11.1"}, modMetadata: {...initial.modMetadata, version: "0.11.1"} };
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce(initial).mockResolvedValue(current);
+   render(<App />);
+   const user = (await import("@testing-library/user-event")).default;
+   await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+   await user.tab();
+   await user.click(await screen.findByRole("button", {name: "Update ISO"}));
+   await screen.findByRole("dialog", {name: "Update modded game?"});
+   await user.click(screen.getByRole("button", { name: "Update image" }));
+   await screen.findByRole("dialog", {name: "Ready to play"});
+   await waitFor(() => expect(screen.getByText("Crown Mod v0.11.1")).toBeTruthy());
+   await user.click(screen.getByRole("button", { name: "OK" }));
+   expect(screen.queryByRole("dialog")).toBeNull();
+   await user.click(screen.getByRole("button", { name: "Update ISO" }));
+   expect(await screen.findByRole("dialog", {name: "Update modded game?"})).toBeTruthy();
+ });
+
+ test("Update ISO never starts the ordinary patch operation", async () => {
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, modMetadata: {version: "0.11.0", options: {fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false}, recovery: {formatVersion: 1}}});
+   const update = vi.spyOn(MockBackend.prototype, "updateMod").mockResolvedValue();
+   const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+   render(<App />);
+   const user = (await import("@testing-library/user-event")).default;
+   await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+   await user.tab();
+   await user.click(await screen.findByRole("button", {name: "Update ISO"}));
+   await user.click(await screen.findByRole("button", {name: "Update image"}));
+   expect(update).toHaveBeenCalledWith(false, false, false, null);
+   expect(patch).not.toHaveBeenCalled();
+ });

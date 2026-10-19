@@ -193,8 +193,17 @@ pub(crate) fn inspect_retail_planned_for_plan(
     iso: &[u8],
     plan: &crate::plan::PatchPlan,
 ) -> Result<(DiscReport, crate::crown::CrownPlan)> {
+    inspect_retail_planned_for_plan_with_progress(iso, plan, &mut |_, _| {})
+}
+
+pub(crate) fn inspect_retail_planned_for_plan_with_progress(
+    iso: &[u8],
+    plan: &crate::plan::PatchPlan,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
     let mut report = inspect_bytes(iso, &release.layout_in(iso)?)?;
+    progress(100, 1000);
     // All three retail releases carry identical tables. Copy counts alone do
     // not prove that an arbitrary/repacked table is safe to scale by row index.
     let fingerprints = [
@@ -224,7 +233,7 @@ pub(crate) fn inspect_retail_planned_for_plan(
             plan.crown_colour_seed.unwrap_or(0),
         )?
     };
-    let crowns = crowns.with_signature(release, plan)?;
+    progress(200, 1000);
     report.output_size = crowns.output_size;
     report.release = Some(release);
     report.boot_elf = if release.is_gamecube() {
@@ -232,5 +241,14 @@ pub(crate) fn inspect_retail_planned_for_plan(
     } else {
         Some(iso9660::find_file(iso, release.serial())?)
     };
+    // Capture after identifying the release, so executable hooks are included too.
+    let (mut regions, _) =
+        crate::patch::plan_regions(iso, &report, plan, &release.layout_in(iso)?)?;
+    regions.extend(crowns.regions.clone());
+    progress(250, 1000);
+    let crowns = crowns.with_recovery(iso, release, plan, &regions, &mut |d, t| {
+        progress(250 + 750 * d / t.max(1), 1000)
+    })?;
+    report.output_size = crowns.output_size;
     Ok((report, crowns))
 }

@@ -3,7 +3,9 @@
 //! it before the final rename. Input is always read-only and mmap-backed.
 
 use crate::container::{self, Format};
-use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned_for_plan, DiscReport};
+use crate::disc::{
+    count_copies, inspect_bytes, inspect_retail_planned_for_plan_with_progress, DiscReport,
+};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -266,7 +268,10 @@ fn patch_file_internal(
     let (report, crowns) = match layout {
         Some(layout) => (inspect_bytes(&mmap[..], layout)?, None),
         None => {
-            let (report, crowns) = inspect_retail_planned_for_plan(&mmap, plan)?;
+            let (report, crowns) =
+                inspect_retail_planned_for_plan_with_progress(&mmap, plan, &mut |d, t| {
+                    progress(scaled(Phase::Inspecting, d, t, 0, 1000))
+                })?;
             (report, Some(crowns))
         }
     };
@@ -390,7 +395,11 @@ fn verify_blocks(iso: &[u8], blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<(
 
 /// True when `unpacked` holds exactly the bytes of `patched`, followed by
 /// nothing but zeros (CISO pads its last block).
-fn same_image(patched: &Path, unpacked: &Path, progress: &mut dyn FnMut(u64, u64)) -> Result<bool> {
+pub(crate) fn same_image(
+    patched: &Path,
+    unpacked: &Path,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<bool> {
     use std::io::Read;
     let (mut a, mut b) = (File::open(patched)?, File::open(unpacked)?);
     let total = b.metadata()?.len();

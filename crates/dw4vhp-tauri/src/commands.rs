@@ -28,9 +28,44 @@ pub struct DiscStatusPayload {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mod_metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disc_info: Option<DiscInfoPayload>,
     size: u64,
     output_size: u64,
     copies: Option<[usize; 3]>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscInfoPayload {
+    console: &'static str,
+    region: &'static str,
+    modded: bool,
+    mod_version: Option<String>,
+}
+
+fn disc_info(
+    release: dw4vhp_core::release::Release,
+    modded: bool,
+    mod_version: Option<String>,
+) -> DiscInfoPayload {
+    use dw4vhp_core::release::Release;
+    DiscInfoPayload {
+        console: if release.is_gamecube() {
+            "GameCube"
+        } else {
+            "PS2"
+        },
+        region: match release {
+            Release::Usa | Release::GcUsa => "USA",
+            Release::Europe => "Europe",
+            Release::Japan | Release::GcJapan => "Japan",
+        },
+        modded,
+        mod_version,
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -163,6 +198,8 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 report.copies[2]
             ),
             reason: None,
+            mod_metadata: None,
+            disc_info: report.release.map(|release| disc_info(release, false, None)),
             size: report.size,
             output_size: report.output_size,
             copies: Some(report.copies),
@@ -184,6 +221,8 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 Error::WrongRevision { .. } | Error::CrownData(_) => "This disc image is not a supported original revision. Choose a clean, original copy of a supported release.".into(),
                 _ => error.to_string(),
             },
+            mod_metadata: None,
+            disc_info: None,
             size: 0,
             output_size: 0,
             copies: None,
@@ -218,7 +257,29 @@ pub async fn analyze(
     .await
     .map_err(|e| format!("analyze worker failed: {e}"))?;
 
-    let payload = verdict(&result);
+    let mut payload = verdict(&result);
+    if payload.reason == Some("already-modded") {
+        let metadata_path = std::path::PathBuf::from(&path);
+        let identity = tauri::async_runtime::spawn_blocking(move || {
+            dw4vhp_core::update::identify(&metadata_path)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        match identity {
+            Ok((release, metadata)) => {
+                payload.disc_info = Some(disc_info(
+                    release,
+                    true,
+                    metadata
+                        .as_ref()
+                        .and_then(|m| m["version"].as_str())
+                        .map(str::to_owned),
+                ));
+                payload.mod_metadata = metadata;
+            }
+            Err(error) => payload = verdict(&Err(error)),
+        }
+    }
     let state = app.state::<AppState>();
     let mut input = state.input.lock().expect("input lock");
     let mut report = state.report.lock().expect("report lock");
@@ -233,7 +294,8 @@ pub async fn analyze(
             *report = Some(clean);
         }
         Err(_) => {
-            *input = None;
+            *input =
+                (payload.reason == Some("already-modded")).then(|| std::path::PathBuf::from(&path));
             *report = None;
         }
     }
@@ -326,6 +388,64 @@ pub async fn start_patch(
     Ok(())
 }
 
+/// The selected modded image is replaced only after the new copy passes verification.
+#[tauri::command]
+pub async fn update_mod(
+    four_player_spawns: bool,
+    crown_drops: bool,
+    random_crown_colours: bool,
+    original: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let permit = app.state::<AppState>().begin_operation()?;
+    let input = app
+        .state::<AppState>()
+        .input
+        .lock()
+        .expect("input lock")
+        .clone()
+        .ok_or_else(|| "Select a modded image first.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        let plan = PatchPlan {
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            ..PatchPlan::default()
+        };
+        let original = original.map(std::path::PathBuf::from);
+        let result =
+            dw4vhp_core::update::update_image(&input, original.as_deref(), &plan, &mut |p| {
+                let _ = app.emit(
+                    "patch-progress",
+                    ProgressPayload {
+                        phase: phase_name(p.phase),
+                        done: p.done,
+                        total: p.total,
+                    },
+                );
+            });
+        match result {
+            Ok(outcome) => {
+                let _ = app.emit(
+                    "patch-done",
+                    PatchDonePayload {
+                        md5: outcome.md5,
+                        bytes: outcome.bytes,
+                        summary: PlanSummaryPayload::of(&outcome.summary),
+                    },
+                );
+            }
+            Err(error) => {
+                let _ = app.emit("patch-failed", error.to_string());
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("update worker failed: {e}"))?;
+    Ok(())
+}
+
 fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
     match phase {
         dw4vhp_core::writer::Phase::Inspecting => "inspecting",
@@ -340,6 +460,33 @@ fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn disc_details_cover_every_supported_release_and_unknown_legacy_versions() {
+        use dw4vhp_core::release::Release;
+        for (release, console, region) in [
+            (Release::Usa, "PS2", "USA"),
+            (Release::Europe, "PS2", "Europe"),
+            (Release::Japan, "PS2", "Japan"),
+            (Release::GcUsa, "GameCube", "USA"),
+            (Release::GcJapan, "GameCube", "Japan"),
+        ] {
+            let clean = disc_info(release, false, None);
+            assert_eq!(
+                (clean.console, clean.region, clean.modded),
+                (console, region, false)
+            );
+            assert!(clean.mod_version.is_none());
+            let legacy = disc_info(release, true, None);
+            assert!(legacy.modded && legacy.mod_version.is_none());
+            assert_eq!(
+                disc_info(release, true, Some("0.11.1".into()))
+                    .mod_version
+                    .as_deref(),
+                Some("0.11.1")
+            );
+        }
+    }
+
     #[test]
     fn already_modded_verdict_is_structured_and_explains_how_to_continue() {
         let result = verdict(&Err(Error::AlreadyModded {

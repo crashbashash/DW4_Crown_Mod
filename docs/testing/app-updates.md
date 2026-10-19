@@ -79,3 +79,23 @@ API behavior follows [GitHub's release API](https://docs.github.com/en/rest/rele
 MSI detection uses [MsiEnumRelatedProductsW](https://learn.microsoft.com/en-us/windows/win32/api/msi/nf-msi-msienumrelatedproductsw)
 and [MsiGetProductInfoW](https://learn.microsoft.com/en-us/windows/win32/api/msi/nf-msi-msigetproductinfow).
 The installer is launched using [Windows Installer's standard options](https://learn.microsoft.com/en-us/windows/win32/msi/standard-installer-command-line-options).
+
+
+## Linux older-version regression (2026-10-19)
+
+The Linux production selector and frontend tests cover installed v0.10.0 with a
+v0.11.0 stable release: the offer contains both versions, release notes and the
+GitHub release page. An installed v0.11.0 receives no offer for that same release.
+The production updater implementation is unchanged from the v0.10.0 tag.
+
+A new opt-in Linux network test uses the real production `fetch` function and
+Linux's `is_msi_install()` result, without opening a browser or installing anything:
+
+```sh
+cargo test --manifest-path crates/dw4vhp-tauri/Cargo.toml \
+  live_linux_older_build_detects_update -- --ignored --nocapture
+```
+
+The 2026-10-19 live recheck passed against GitHub: an installed v0.10.0
+received an offer for v0.11.0, including release notes and the browser update
+method used on Linux. No browser was opened and no installer was executed.

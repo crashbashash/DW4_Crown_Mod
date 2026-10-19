@@ -17,7 +17,7 @@ and click one button. It creates a new, modded copy of the game for you.
 3. Click **Patch ISO**.
 4. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
 
-Your original file is never changed.
+Patching a clean disc leaves your original file unchanged.
 
 ## What the mod does
 
@@ -50,8 +50,8 @@ Your original file is never changed.
 
   GameCube images can be a plain `.iso`, an NKit `.iso`, a `.ciso` or an `.rvz` (uncompressed or zstd).
 
-  The app detects your release automatically. It refuses discs that are unknown or
-  already modified.
+  The app detects your release automatically. Existing Crown Mod images can be
+  updated; unsupported or unrecognised images are refused.
 - Windows or Linux. Nothing else to install.
 - About **2.2 GB** of free disk space for the new file (more for `.ciso` and `.rvz`, which are unpacked while patching). The app shows the exact amount.
 
@@ -76,6 +76,16 @@ On Linux, update through your package manager or manually download the latest
 release. The **Update** button opens the GitHub release page.
 
 Choose **Later** to keep using the current version.
+
+## Updating your modded game
+
+Open your existing Crown Mod image in the app. Its console, region and mod
+version appear under Disc. Choose which optional features to keep, add or remove,
+then click **Update ISO** and confirm. The app verifies the rebuilt game
+before replacing the selected modded file.
+
+Older modded images need the matching original disc for their first update.
+After that, the updated image includes everything needed for future updates.
 
 ## Contributing and building from source
 

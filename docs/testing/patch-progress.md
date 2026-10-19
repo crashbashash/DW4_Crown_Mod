@@ -29,3 +29,9 @@ combinations and all three settings together, plus two USA GameCube RVZ builds
 with colours disabled/enabled alongside the other settings. Their output
 hashes match the earlier builds. A native desktop ISO run also displayed
 increasing percentages from 0 to 99 and then the **Ready to play** popup.
+
+Recovery metadata preparation reports the original-image checksum incrementally
+in 8 MiB chunks, followed by manifest capture and compression. This work now
+advances the preparation range before copying starts. In-place updates also
+report unpacking, clean-image restoration and its checksum verification before
+rebuilding, so their preparation does not remain at zero.

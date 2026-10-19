@@ -17,4 +17,5 @@ pub mod serial;
 pub mod signature;
 pub mod table;
 pub mod testkit;
+pub mod update;
 pub mod writer;

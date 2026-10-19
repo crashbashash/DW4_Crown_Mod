@@ -41,6 +41,7 @@ export class MockBackend implements Backend {
       seeded ?? {
         kind: "ok",
         text: `clean mock disc from ${path}`,
+        discInfo: { console: "PS2", region: "USA", modded: false, modVersion: null },
         size: 4_600_000_000, outputSize: 4_600_000_000,
         copies: [10, 580, 5],
       }
@@ -105,6 +106,10 @@ export class MockBackend implements Backend {
         serialStep: false,
       },
     });
+  }
+
+  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, _original: string | null): Promise<void> {
+    await this.startPatch("/mock/game.iso", true, fourPlayerSpawns, crownDrops, randomCrownColours);
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

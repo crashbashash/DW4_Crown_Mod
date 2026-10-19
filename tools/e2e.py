@@ -119,10 +119,26 @@ def main():
         record("output equal to input refused with popup; original unchanged")
 
         drive("fill", "disc path", str(output))
-        text_is("already")
+        text_is("Update ISO")
         assert not enabled(drive("snapshot"))
+        drive("click", "Update ISO")
+        text_is("Update modded game?")
+        drive("click", "Cancel")
+        assert md5(output) == args.expected_md5.lower()
+        record("cancelling a mod update preserves the selected image")
+
+        drive("fill", "disc path", str(iso))
+        wait(enabled)
+        drive("fill", "disc path", str(output))
+        text_is("Update ISO")
+        drive("click", "Update ISO")
+        text_is("Update modded game?")
+        drive("click", "Update image")
+        text_is("Ready to play")
+        assert md5(output) == args.expected_md5.lower()
+        assert md5(iso) == before
         drive("click", "OK")
-        record("already-modded ISO refused with popup")
+        record("native in-place update matches a fresh build and preserves the original")
 
         report = {"passed": checks, "originalMd5": before, "outputMd5": md5(output),
                   "output": str(output), "finalUi": drive("snapshot")}

@@ -1,6 +1,6 @@
 [package]
 name = "dw4vhp-tauri"
-version = "0.11.0"
+version = "0.11.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Desktop shell for the Digimon World 4 Crown Mod ISO patcher"
@@ -32,3 +32,23 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_ApplicationInstallationAndServicing", "Win32_System_SystemInformation"] }
+
+# Keep bulk disc work fast while debugging, including generic hashing code.
+# Debug symbols, debug assertions and overflow checks remain enabled.
+[profile.dev.package.md-5]
+opt-level = 3
+
+[profile.dev.package.sha1]
+opt-level = 3
+
+[profile.dev.package.digest]
+opt-level = 3
+
+[profile.dev.package.block-buffer]
+opt-level = 3
+
+[profile.dev.package.crypto-common]
+opt-level = 3
+
+[profile.dev.package.dw4vhp-core]
+opt-level = 2

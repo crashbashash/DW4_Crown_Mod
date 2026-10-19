@@ -17,6 +17,7 @@ export interface Backend {
   outputExists(output: string): Promise<boolean>;
   planSummary(): Promise<PlanSummary | null>;
   startPatch(output: string, overwrite: boolean, fourPlayerSpawns?: boolean, crownDrops?: boolean, randomCrownColours?: boolean): Promise<void>;
+  updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, original: string | null): Promise<void>;
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;

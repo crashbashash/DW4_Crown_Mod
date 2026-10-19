@@ -80,3 +80,16 @@ test("manual checks report the installed version when no update is available", a
   await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
   expect((await screen.findByRole("dialog")).textContent).toContain("You're up to date");
 });
+
+
+test("an older Linux build shows the newer version and release notes", async () => {
+  vi.spyOn(MockBackend.prototype, "checkUpdates").mockResolvedValue({ currentVersion: "0.10.0", update: {
+    currentVersion: "0.10.0", version: "0.11.0", method: "browser",
+    releases: [{ version: "0.11.0", notes: "Crowned river turrets and reduced plug drops." }],
+  } });
+  setup();
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog.textContent).toContain("DW4 Crown Mod 0.11.0 is available. You're using 0.10.0.");
+  expect(dialog.textContent).toContain("Crowned river turrets");
+  expect(screen.getByRole("button", { name: "Open GitHub release" })).toBeTruthy();
+});

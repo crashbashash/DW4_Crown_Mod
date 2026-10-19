@@ -437,6 +437,53 @@ mod tests {
         download(&asset, &path).unwrap();
         assert_eq!(std::fs::metadata(path).unwrap().len(), asset.size);
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_older_build_offers_newer_stable_release_and_current_does_not() {
+        let feed = || {
+            serde_json::from_value(serde_json::json!([
+                {"tag_name": "v0.10.0", "body": "Installed version"},
+                {"tag_name": "v0.11.0", "body": "Crowned river turrets and reduced plug drops."},
+                {"tag_name": "v0.12.0-beta.1", "prerelease": true}
+            ]))
+            .unwrap()
+        };
+        assert!(!is_msi_install());
+        let old = Version::parse("0.10.0").unwrap();
+        let prepared = prepare(feed(), &old, is_msi_install()).unwrap();
+        assert_eq!(prepared.offer.version, "0.11.0");
+        assert_eq!(prepared.offer.current_version, "0.10.0");
+        assert_eq!(prepared.offer.method, "browser");
+        assert_eq!(
+            prepared.page,
+            "https://github.com/crashbashash/DW4_Crown_Mod/releases/tag/v0.11.0"
+        );
+        assert_eq!(prepared.offer.releases.len(), 1);
+        assert!(prepare(feed(), &Version::parse("0.11.0").unwrap(), is_msi_install()).is_none());
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "live GitHub check using the Linux production update method"]
+    fn live_linux_older_build_detects_update() {
+        assert!(!is_msi_install());
+        let current = Version::parse("0.10.0").unwrap();
+        let prepared = fetch(&current, is_msi_install())
+            .unwrap()
+            .expect("a release newer than v0.10.0");
+        assert!(Version::parse(&prepared.offer.version).unwrap() > current);
+        assert_eq!(prepared.offer.current_version, "0.10.0");
+        assert_eq!(prepared.offer.method, "browser");
+        assert!(!prepared.offer.releases.is_empty());
+        assert!(prepared.installer.is_none());
+        eprintln!(
+            "Linux live check: {} -> {}; method={}; page={}; release notes={}",
+            prepared.offer.current_version,
+            prepared.offer.version,
+            prepared.offer.method,
+            prepared.page,
+            prepared.offer.releases.len()
+        );
+    }
     #[test]
     #[ignore = "live GitHub check; explicitly run when network is available"]
     fn live_public_release_check() {

@@ -42,6 +42,10 @@ export class TauriBackend implements Backend {
     await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours });
   }
 
+  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, original: string | null): Promise<void> {
+    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, original });
+  }
+
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {
     return listen<ProgressEvent>("patch-progress", (event) => handler(event.payload));
   }

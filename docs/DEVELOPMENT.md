@@ -181,3 +181,16 @@ repeated stage labels. The main Output panel contains no progress/status readout
 Success opens the friendly completion popup; failures open an error notice. Tests
 cover the compressed-image event sequence, completion/failure handoff and
 non-dismissal while busy.
+
+## Development-build disc performance
+
+Development builds optimize the core disc-processing crate and its hashing
+crates while retaining debug symbols, debug assertions and overflow checks.
+The profile overrides appear in both workspace roots: the core workspace and
+the separately built Tauri shell. Release profiles are unchanged.
+
+A 2026-10-19 local benchmark hashed the same 128 MiB input three times per
+algorithm. Median throughput increased from 61.5 to 647.1 MiB/s for MD5 (10.5x)
+and from 68.7 to 1981.9 MiB/s for SHA-1 (28.9x). Before/after digests matched.
+These are hashing measurements; complete patching also includes disc parsing,
+copying, compression and verification.

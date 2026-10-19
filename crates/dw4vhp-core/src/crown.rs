@@ -1005,9 +1005,55 @@ impl CrownPlan {
     }
     /// Append identification outside NDMW.AFS; preserve every resource offset and length.
     pub fn with_signature(
-        mut self,
+        self,
         release: crate::release::Release,
         plan: &crate::plan::PatchPlan,
+    ) -> Result<Self> {
+        self.finish_signature(release, crate::signature::metadata(release, plan))
+    }
+
+    /// Store the original bytes of every overwritten region outside all game files.
+    pub(crate) fn with_recovery(
+        mut self,
+        iso: &[u8],
+        release: crate::release::Release,
+        plan: &crate::plan::PatchPlan,
+        regions: &[WriteRegion],
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<Self> {
+        let recovery = crate::update::capture(iso, regions, progress)?;
+        let used: usize = self
+            .pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Source(r) => r.len(),
+                Piece::Bytes(b) => b.len(),
+            })
+            .sum();
+        let offset = self.output_size as usize;
+        let padding = offset
+            .checked_sub(self.append_offset + used)
+            .ok_or_else(|| bad("recovery overlaps archive"))?;
+        self.pieces.push(Piece::Bytes(vec![0; padding]));
+        let mut metadata = crate::signature::metadata(release, plan);
+        metadata["recovery"] = serde_json::json!({
+            "formatVersion": 1, "offset": offset, "length": recovery.len(),
+            "sha1": crate::update::digest(&recovery), "originalSize": iso.len(),
+            "regionCount": regions.len(), "archiveEnd": self.output_size,
+        });
+        self.pieces.push(Piece::Bytes(recovery));
+        self.output_size = offset as u64
+            + match self.pieces.last().unwrap() {
+                Piece::Bytes(b) => b.len() as u64,
+                _ => 0,
+            };
+        self.finish_signature(release, metadata)
+    }
+
+    fn finish_signature(
+        mut self,
+        release: crate::release::Release,
+        metadata: serde_json::Value,
     ) -> Result<Self> {
         let offset = a2048(self.output_size as usize);
         let used: usize = self
@@ -1022,9 +1068,8 @@ impl CrownPlan {
             .checked_sub(self.append_offset + used)
             .ok_or_else(|| bad("signature overlaps archive"))?;
         self.pieces.push(Piece::Bytes(vec![0; padding]));
-        self.pieces.push(Piece::Bytes(crate::signature::encode(
-            &crate::signature::metadata(release, plan),
-        )?));
+        self.pieces
+            .push(Piece::Bytes(crate::signature::encode(&metadata)?));
         self.output_size = offset as u64 + crate::signature::SIZE as u64;
         if release.is_gamecube() {
             need(

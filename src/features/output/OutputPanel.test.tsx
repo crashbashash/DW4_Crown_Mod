@@ -40,3 +40,13 @@ describe("OutputPanel", () => {
   });
 
 });
+
+ test("modded images replace Patch ISO with Update ISO and hide the separate output path", async () => {
+   const action = vi.fn();
+   setup({canPatch: false, status: {kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null}, onPatch: action});
+   expect(screen.queryByRole("button", {name: "Patch ISO"})).toBeNull();
+   expect(screen.queryByLabelText("output path")).toBeNull();
+   expect(screen.queryByRole("button", {name: "Save as…"})).toBeNull();
+   await userEvent.click(screen.getByRole("button", {name: "Update ISO"}));
+   expect(action).toHaveBeenCalledOnce();
+ });

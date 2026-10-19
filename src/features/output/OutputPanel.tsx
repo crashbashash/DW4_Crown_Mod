@@ -22,10 +22,11 @@ export function OutputPanel({
   onChooseOutput,
   onSetOutput,
 }: OutputPanelProps) {
+  const modded = status?.reason === "already-modded";
   return (
     <section className="panel">
-      <h2>Output</h2>
-      <div className="row">
+      <h2>{modded ? "Update" : "Output"}</h2>
+      {modded ? <p className="hint">Your selected image will be updated in place.</p> : <div className="row">
         <input
           className="path-field"
           type="text"
@@ -37,15 +38,15 @@ export function OutputPanel({
         <button type="button" onClick={onChooseOutput}>
           Save as…
         </button>
-      </div>
-      {refreshing ? <p className="hint" role="status">Updating output size…</p> : status?.kind === "ok" && (
+      </div>}
+      {refreshing && !modded ? <p className="hint" role="status">Updating output size…</p> : status?.kind === "ok" && (
         <p className="hint">
           The output copy needs {(status.outputSize / 1_000_000_000).toFixed(2)} GB of free space.
         </p>
       )}
       <div className="row patch-actions">
-        <button className="primary" type="button" onClick={onPatch} disabled={!canPatch || busy}>
-          Patch ISO
+        <button className="primary" type="button" onClick={onPatch} disabled={(!canPatch && !modded) || busy}>
+          {modded ? "Update ISO" : "Patch ISO"}
         </button>
       </div>
     </section>

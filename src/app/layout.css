@@ -87,3 +87,8 @@ main.app-main {
   .activity-progress-fill { transition: none; }
   .activity-progress-indicator { animation: none; width: 100%; opacity: 0.65; }
 }
+
+.disc-info { display: flex; flex-wrap: wrap; gap: 16px 28px; margin: 18px 0 0; }
+.disc-info div { min-width: 0; }
+.disc-info dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.disc-info dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }

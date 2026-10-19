@@ -45,13 +45,15 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     let signature = dw4vhp_core::signature::from_image(&patched)
         .unwrap()
         .unwrap();
+    let mut identity = signature.clone();
+    identity.as_object_mut().unwrap().remove("recovery");
     assert_eq!(
-        signature,
+        identity,
         dw4vhp_core::signature::metadata(release, &PatchPlan::default())
     );
     // Preserve the independent pre-signature golden checksum: remove only the
     // footer and reverse the volume-size update in this hashing view.
-    let unsigned_len = patched.len() - dw4vhp_core::signature::SIZE;
+    let unsigned_len = signature["recovery"]["archiveEnd"].as_u64().unwrap() as usize;
     let mut head = patched[..64 * 2048].to_vec();
     for sector in 16..64 {
         let at = sector * 2048;
@@ -95,11 +97,11 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         }
         assert_eq!(count, 665);
     }
-    let crowns = dw4vhp_core::crown::CrownPlan::build(&original)
-        .unwrap()
-        .with_signature(release, &PatchPlan::default())
-        .unwrap();
-    crowns.verify(&original, &patched).unwrap();
+    let crowns = dw4vhp_core::crown::CrownPlan::build(&original).unwrap();
+    // Verify the historical archive independently of the new recovery footer.
+    let mut archive_view = patched[..unsigned_len].to_vec();
+    archive_view[..head.len()].copy_from_slice(&head);
+    crowns.verify(&original, &archive_view).unwrap();
     ranges.extend(
         crowns
             .regions

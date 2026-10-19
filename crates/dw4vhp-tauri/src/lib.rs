@@ -22,6 +22,7 @@ pub fn run() {
             commands::analyze,
             commands::plan_summary,
             commands::start_patch,
+            commands::update_mod,
             commands::default_output,
             commands::output_exists,
             agent::agent_reply,
@@ -35,6 +36,7 @@ pub fn run() {
         commands::analyze,
         commands::plan_summary,
         commands::start_patch,
+        commands::update_mod,
         commands::default_output,
         commands::output_exists,
     ]);

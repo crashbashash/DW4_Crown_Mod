@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscStatus } from "../bindings";
+import { UpdateModDialog } from "../features/disc/UpdateModDialog";
 import { AnalyzingDialog } from "../features/disc/AnalyzingDialog";
 import { DiscPicker } from "../features/disc/DiscPicker";
 import { useDisc } from "../features/disc/useDisc";
@@ -39,18 +40,34 @@ function AppInner() {
   const [fourPlayerSpawns, setFourPlayerSpawns] = useState(false);
   const [crownDrops, setCrownDrops] = useState(false);
   const [randomCrownColours, setRandomCrownColours] = useState(false);
-  const disc = useDisc(backend, fourPlayerSpawns, crownDrops);
+  const appliedOptionsEpoch = useRef<number | null>(null);
+  const applyDetectedOptions = useCallback((status: DiscStatus, epoch: number) => {
+    if (appliedOptionsEpoch.current === epoch) return;
+    appliedOptionsEpoch.current = epoch;
+    if (status.reason === "already-modded") {
+      const options = status.modMetadata?.options;
+      setFourPlayerSpawns(options?.fourPlayerSpawns ?? false);
+      setCrownDrops(options?.betterLoot ?? false);
+      setRandomCrownColours(options?.randomCrownColours ?? false);
+    }
+  }, []);
+  const disc = useDisc(backend, fourPlayerSpawns, crownDrops, applyDetectedOptions);
+  const replaceDiscStatus = disc.replaceStatus;
   const wide = useMediaQuery("(min-width: 900px)");
 
   const [updating, setUpdating] = useState(false);
   const [dismissedDiscStatus, setDismissedDiscStatus] = useState<DiscStatus | null>(null);
-  const discError = disc.status !== null && disc.status.kind !== "ok" && disc.status !== dismissedDiscStatus ? disc.status : null;
+  const [updateRequestedFor, setUpdateRequestedFor] = useState<DiscStatus | null>(null);
+  const selectedStatus = disc.status ?? disc.identifiedStatus;
+  const discError = disc.status !== null && disc.status.kind !== "ok" && disc.status !== dismissedDiscStatus
+    && (disc.status.reason !== "already-modded" || updateRequestedFor === disc.status) ? disc.status : null;
   const [overwritePath, setOverwritePath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [patchProgress, setPatchProgress] = useState(0);
   const [patchError, setPatchError] = useState<string | null>(null);
   const [donePopup, setDonePopup] = useState<string | null>(null);
   const outputRef = useRef<string | null>(null);
+  const pendingModUpdate = useRef<{ path: string; status: DiscStatus; spawns: boolean; drops: boolean } | null>(null);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
@@ -70,10 +87,21 @@ function AppInner() {
         setPatchProgress(100);
         setDonePopup(outputRef.current ?? "");
         setBusy(false);
+        const updated = pendingModUpdate.current;
+        pendingModUpdate.current = null;
+        if (updated) {
+          void backend.analyze(updated.path, updated.spawns, updated.drops).catch((error: unknown): DiscStatus => ({
+            kind: "unknown", text: String(error), size: 0, outputSize: 0, copies: null,
+          })).then(status => {
+            replaceDiscStatus(updated.status, status);
+            setDismissedDiscStatus(status);
+          });
+        }
       }),
     );
     ups.push(
       backend.onPatchFailed((message) => {
+        pendingModUpdate.current = null;
         setBusy(false);
         setPatchError(message);
       }),
@@ -81,7 +109,7 @@ function AppInner() {
     return () => {
       for (const up of ups) void up.then((unlisten) => unlisten());
     };
-  }, [backend]);
+  }, [backend, replaceDiscStatus]);
 
   // An ISO dropped onto the window is a chosen disc.
   useEffect(() => {
@@ -133,6 +161,29 @@ function AppInner() {
     }
   };
 
+  const updateMod = async (spawns: boolean, drops: boolean, colours: boolean) => {
+    const status = discError;
+    if (!status || !disc.inputPath || busy) return;
+    setBusy(true);
+    setPatchProgress(0);
+    setPatchError(null);
+    try {
+      const original = status.modMetadata?.recovery ? null : await backend.chooseIso();
+      if (!status.modMetadata?.recovery && original === null) {
+        setBusy(false);
+        return;
+      }
+      outputRef.current = disc.inputPath;
+      setDismissedDiscStatus(status);
+      pendingModUpdate.current = { path: disc.inputPath, status, spawns, drops };
+      await backend.updateMod(spawns, drops, colours, original);
+    } catch (error) {
+      pendingModUpdate.current = null;
+      setBusy(false);
+      setPatchError(String(error));
+    }
+  };
+
   const chooseOutput = async () => {
     const path = await backend.chooseOutput(
       disc.outputPath?.split("/").pop() ?? "game [CrownMod].iso",
@@ -172,6 +223,7 @@ function AppInner() {
             <DiscPicker
               key={disc.inputPath ?? ""}
               inputPath={disc.inputPath}
+              info={selectedStatus?.discInfo}
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
@@ -180,11 +232,18 @@ function AppInner() {
           <div className="col">
             <OutputPanel
               outputPath={disc.outputPath}
-              busy={busy || updating}
+              busy={busy || updating || disc.checking}
               canPatch={canPatch}
-              status={disc.status}
+              status={selectedStatus}
               refreshing={disc.refreshing}
-              onPatch={() => void startPatch()}
+              onPatch={() => {
+                if (disc.status?.reason === "already-modded") {
+                  setDismissedDiscStatus(null);
+                  setUpdateRequestedFor(disc.status);
+                } else {
+                  void startPatch();
+                }
+              }}
               onChooseOutput={() => void chooseOutput()}
               onSetOutput={setOutput}
             />
@@ -196,7 +255,9 @@ function AppInner() {
       </div>
       {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}
       {!busy && !disc.analyzing && discError !== null && (
-        <MessageDialog title={discError.reason === "already-modded" ? "Disc already modded" : "Unable to open disc"} message={discError.text} onClose={() => setDismissedDiscStatus(discError)} />
+        discError.reason === "already-modded" ? (
+          <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod(fourPlayerSpawns, crownDrops, randomCrownColours)} />
+        ) : <MessageDialog title="Unable to open disc" message={discError.text} onClose={() => setDismissedDiscStatus(discError)} />
       )}
       {!busy && !disc.analyzing && patchError !== null && (
         <MessageDialog title="Unable to patch disc" message={patchError} onClose={() => setPatchError(null)} />
