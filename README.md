@@ -89,6 +89,11 @@ before replacing the selected modded file.
 Older modded images need the matching original disc for their first update.
 After that, the updated image includes everything needed for future updates.
 
+## Roadmap
+
+- **Xbox support** — bring Crown Mod to the original Xbox release.
+- **Tougher enemy AI** — make enemies more challenging through their behaviour.
+
 ## Contributing and building from source
 
 See the [development guide](docs/DEVELOPMENT.md) for build steps, tests and project
