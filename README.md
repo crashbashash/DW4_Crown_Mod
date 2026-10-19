@@ -43,11 +43,12 @@ on Normal difficulty:
 
 | Original game | Crown Mod — four-player spawns and random crown colours |
 | --- | --- |
-| ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing blue and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
+| ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
 
 This encounter has **two enemies in the original game and five with four-player
 spawns enabled**. Random crown colours change the icons only; the colours do not
-indicate different enemy stats or drops. Click either image for the full-size view.
+indicate different enemy stats or drops. Colours can repeat; this example shows
+all five available colours. Click either image for the full-size view.
 
 Gameplay captured from the GameCube version in Dolphin.
 
