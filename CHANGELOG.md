@@ -2,13 +2,8 @@
 
 ## v0.11.1
 
-- Show the selected disc’s console, region and Crown Mod version.
-- Update existing Crown Mod disc images and add or remove optional features.
-- Older modded images request the matching original disc for their first update.
-- Newly created images record their Crown Mod version and selected options, allowing DigiAtlas to identify them.
-- Improve detection of previously modded images while retaining support for older builds.
-- Preserve version information when converting GameCube images to CISO or RVZ.
-- Fix patching progress staying at 0% during preparation.
+- Added the ability to update existing modded games.
+- General UI fixes and improvements.
 
 ## v0.11.0
 
