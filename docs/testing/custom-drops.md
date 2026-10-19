@@ -10,12 +10,16 @@ party-size profiles.
 | --- | ---: | ---: | ---: |
 | Equipment or ability chips | 50% | 50% | 50% |
 | x-data | 15% | 20% | 25% |
-| Stat / elemental plugs | 2% | 4% | 6% |
+| Stat / elemental plugs | 1% | 2% | 3% |
 | BIT or consumables | 23% | 16% | 14% |
-| Nothing | 10% | 10% | 5% |
+| Nothing | 11% | 12% | 8% |
 
 These are category probabilities, not independent rolls. One ordinary loot roll
 selects at most one item. More enemy spawns naturally produce more total rewards.
+
+Plug rates are halved from the initial 2% / 4% / 6% profile. Equipment, x-data,
+BIT and consumable probabilities stay unchanged; the removed chance becomes
+no drop. Guaranteed/scripted rewards retain their existing exemptions.
 
 ## Item pools and first-version exceptions
 
@@ -63,30 +67,46 @@ difficulty, including small equipment weights.
 
 - Frontend: typecheck, production build, tests and lint pass.
 - Rust workspace tests and strict Clippy pass; native strict Clippy/build pass.
-- The [full release/container matrix](resource-options.md) completed 24 full disc
+- The initial profile's [full release/container matrix](resource-options.md) completed 24 full disc
   builds: all four option combinations on all five supported raw releases, plus
   USA/Japanese GameCube CISO and RVZ builds with both switches enabled.
-- Independent USA audits compare both enabled ISOs against their corresponding
+- Independent USA audits of the initial profile compared both enabled ISOs against their corresponding
   drops-off builds: 217 generator packs change, 755 archive entries stay identical.
-  All 2,142 eligible table/difficulty combinations have exact category rates.
+  All 2,142 eligible table/difficulty combinations had that profile's exact category rates.
   All 2,715 destructible/gimmick generators in the changed packs stay unchanged.
   Original shared loot objects, quest/empty/guaranteed table references, party
   spawn counts, stats, executable and unrelated data remain intact.
 - The real native GUI, with only custom drops enabled, produced the same solo
   output fingerprint through its overwrite-and-patch flow. The GUI was reopened
   and its controls checked.
-- The published USA v0.9 output is still reproduced byte-for-byte with optional
-  patches off and the historical practice-Speed multiplier selected.
+- Initial-profile validation reproduced the published USA v0.9 output byte-for-byte
+  with optional patches off and the historical practice-Speed multiplier selected,
+  before the later default river-turret changes.
 - Synthetic graph tests cover a crate sharing an enemy's entire loot graph and a
   single table shared by all difficulties. Exhaustive roll tests cover all three
   rate distributions; donor tests cover missing categories and plug fallbacks.
+- The current half-rate plug profile exhausts every retail roll outcome and
+  independently checks the full distributions: plugs 1% / 2% / 3%, no drop
+  11% / 12% / 8%, and the same equipment, x-data and consumable probabilities.
+- All five USA PS2 resource-option combinations passed again with half-rate
+  plugs, including combined spawn/drop settings and random crowns. Every output
+  retained all 1,995 enemy-table blocks and the predicted output size; the clean
+  input remained unchanged. The native release app was rebuilt successfully.
 
-USA ISO fingerprints (current half-Speed practice balance):
+Historical USA ISO fingerprints (initial plug rates, before river turret changes):
 
 | Custom drops | Four-player spawns | Output bytes | MD5 |
 | --- | --- | ---: | --- |
 | On | Off | 2,183,974,912 | `8a5f52880805febb25be46c1cc1de1ac` |
 | On | On | 2,184,189,952 | `923cdc2a1893624b9290ed9c196a3242` |
+
+Historical USA ISO fingerprints with half-rate plugs and the earlier 10×
+river missile damage, before the final 3× damage and +5 crown placement:
+
+| Custom drops | Four-player spawns | Output bytes | MD5 |
+| --- | --- | ---: | --- |
+| On | Off | 2,183,981,056 | `37e95d3165556cbc92dc0c4b8f18d6f1` |
+| On | On | 2,184,196,096 | `2af56a40a6cb3bb35ca78f588560cbb1` |
 
 These are disc-data and application tests. New loot spawning and gameplay balance
 have not been verified in a running emulator.

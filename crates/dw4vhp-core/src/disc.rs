@@ -173,6 +173,20 @@ pub(crate) fn inspect_retail_planned_with_options(
     four_player_spawns: bool,
     crown_drops: bool,
 ) -> Result<(DiscReport, crate::crown::CrownPlan)> {
+    inspect_retail_planned_for_plan(
+        iso,
+        &crate::plan::PatchPlan {
+            four_player_spawns,
+            crown_drops,
+            ..crate::plan::PatchPlan::default()
+        },
+    )
+}
+
+pub(crate) fn inspect_retail_planned_for_plan(
+    iso: &[u8],
+    plan: &crate::plan::PatchPlan,
+) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
     let mut report = inspect_bytes(iso, &release.layout_in(iso)?)?;
     // All three retail releases carry identical tables. Copy counts alone do
@@ -188,9 +202,21 @@ pub(crate) fn inspect_retail_planned_with_options(
         }
     }
     let crowns = if release.is_gamecube() {
-        crate::crown::CrownPlan::build_gcm_with_options(iso, four_player_spawns, crown_drops)?
+        crate::crown::CrownPlan::build_gcm_with_options(
+            iso,
+            plan.four_player_spawns,
+            plan.crown_drops,
+            plan.random_crown_colours,
+            plan.crown_colour_seed.unwrap_or(0),
+        )?
     } else {
-        crate::crown::CrownPlan::build_with_options(iso, four_player_spawns, crown_drops)?
+        crate::crown::CrownPlan::build_with_options(
+            iso,
+            plan.four_player_spawns,
+            plan.crown_drops,
+            plan.random_crown_colours,
+            plan.crown_colour_seed.unwrap_or(0),
+        )?
     };
     report.output_size = crowns.output_size;
     report.release = Some(release);

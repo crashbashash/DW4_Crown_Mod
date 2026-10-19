@@ -98,6 +98,10 @@ Other tests:
   `DW4_ROWGROUP_SNAPSHOT`. They check the engine's enemy grouping utilities.
 - **Frontend:** `npm test`, `npm run typecheck`, `npm run lint`.
 
+The [river turret checks](testing/river-turrets.md) cover missile-only boat
+damage, colour rolls, crown lifecycle and Lua branch relocation. They include
+an optional real-pack audit and a reference Lua 4 runtime harness.
+
 The [four-player spawn and practice Speed checks](testing/four-player-spawns.md)
 describe the optional spawn transform, its preserved data and current validation.
 

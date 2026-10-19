@@ -52,7 +52,7 @@ export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crow
       >
         <span className="setting-copy">
           <span className="setting-title" id="random-crown-colours-label">Random crown colours</span>
-          <span className="setting-description" id="random-crown-colours-description">Randomise the crown colour of each enemy spawn. Bosses keep yellow.</span>
+          <span className="setting-description" id="random-crown-colours-description">Randomise enemy and river turret crown colours. Bosses keep yellow.</span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
       </Switch>

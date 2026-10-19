@@ -113,9 +113,9 @@ impl Library {
     }
 }
 const TARGETS: [[u32; 4]; 3] = [
-    [5000, 1500, 200, 2300],
-    [5000, 2000, 400, 1600],
-    [5000, 2500, 600, 1400],
+    [5000, 1500, 100, 2300],
+    [5000, 2000, 200, 1600],
+    [5000, 2500, 300, 1400],
 ];
 
 /// Largest-remainder allocation preserves authored relative weights and produces
@@ -386,7 +386,12 @@ mod tests {
             item(b"insItem", 4, 11),
             item(b"conItem", 0, 13),
         ];
-        for (difficulty, target) in TARGETS.iter().enumerate() {
+        let expected = [
+            [5000, 1500, 100, 2300, 1100],
+            [5000, 2000, 200, 1600, 1200],
+            [5000, 2500, 300, 1400, 800],
+        ];
+        for (difficulty, expected) in expected.iter().enumerate() {
             let out = rebalance(
                 &entries,
                 b"nZ1gobr1",
@@ -408,8 +413,7 @@ mod tests {
                 }
                 actual[group] += 1;
             }
-            assert_eq!(&actual[..4], target);
-            assert_eq!(actual[4], if difficulty == 2 { 500 } else { 1000 });
+            assert_eq!(&actual, expected);
             assert_eq!(
                 out.iter()
                     .filter(|i| i.group().unwrap() == 0)
@@ -471,7 +475,7 @@ mod tests {
         let out = rebalance(&own, b"vZ1gobr1", 2, &Library::default(), &global).unwrap();
         assert!(out
             .iter()
-            .any(|i| i.name == b"insItem" && i.id == 9 && i.rate == 600));
+            .any(|i| i.name == b"insItem" && i.id == 9 && i.rate == 300));
         assert!(out
             .iter()
             .any(|i| i.name == b"insItem" && i.id == 3 && i.rate == 2500));

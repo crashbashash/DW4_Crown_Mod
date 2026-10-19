@@ -3,7 +3,7 @@
 //! it before the final rename. Input is always read-only and mmap-backed.
 
 use crate::container::{self, Format};
-use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned_with_options, DiscReport};
+use crate::disc::{count_copies, inspect_bytes, inspect_retail_planned_for_plan, DiscReport};
 use crate::elf::{difficulty_region, ElfInfo};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -266,11 +266,7 @@ fn patch_file_internal(
     let (report, crowns) = match layout {
         Some(layout) => (inspect_bytes(&mmap[..], layout)?, None),
         None => {
-            let (report, crowns) = inspect_retail_planned_with_options(
-                &mmap,
-                plan.four_player_spawns,
-                plan.crown_drops,
-            )?;
+            let (report, crowns) = inspect_retail_planned_for_plan(&mmap, plan)?;
             (report, Some(crowns))
         }
     };

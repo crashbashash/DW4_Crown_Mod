@@ -29,17 +29,13 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     let outcome = patch_file(
         &path,
         &output,
-        // Pin the published v0.9 disc separately from the newer practice-speed adjustment.
-        &PatchPlan {
-            practice_speed_mult: 1.0,
-            ..PatchPlan::default()
-        },
+        &PatchPlan::default(),
         &PatchOptions { overwrite: false },
         &mut |_| {},
     )
     .unwrap();
-    // Independent Python prototype outputs, preserving the ISO terminator
-    // reserved bytes (the prototype wrote its size into all descriptors).
+    // Current default-build fingerprints. The river's modified scripts are
+    // separately checked by the real-pack and reference-Lua audits.
     assert_eq!(outcome.md5, output_md5);
     assert_eq!(outcome.bytes, report.output_size);
     assert!(outcome.bytes > original.len() as u64);
@@ -53,7 +49,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     let mut ranges = Vec::new();
     let shipped_hashes = [
         "56885ddab3be87476c0810abf6b6f152",
-        "42df4de8f3afc8f032a16e293cc1e3ab",
+        "c2cdbb0ca237b6619d55374bd4ed86e5",
         "3ce7d29cd12e93d05eb201356b231288",
     ];
     for ((block, offset), hash) in report
@@ -127,7 +123,7 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "9ba8432d2237330a687d4ac1a0203d68",
+        "dd1c73561a824c1a2512f9c3f4078e38",
     );
 }
 #[test]
@@ -136,7 +132,7 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "0dfd365ae96ef0ab30e326b5096e0f46",
+        "e6abfe8b81f2234a88228776e93f0186",
     );
 }
 #[test]
@@ -145,6 +141,6 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "4a6815c3c7e5e4ee7f793b04b82eda52",
+        "f2cefb65e40ea022487f009a783c96e9",
     );
 }

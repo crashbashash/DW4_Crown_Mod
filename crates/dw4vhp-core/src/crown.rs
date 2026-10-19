@@ -2,6 +2,7 @@
 //! private mutable scene roots, and a private two-word visibility mask.
 //! No executable offsets or external game metadata are used. Original geometry,
 //! original IDs and pool contents remain intact. Archive order is preserved.
+//! The river model pack also receives missile damage and turret crown scripts.
 use crate::{
     error::{Error, Result},
     gcm, iso9660,
@@ -10,6 +11,7 @@ use crate::{
 use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod drops;
+mod river;
 mod spawns;
 
 pub const CAPACITY: u32 = 64;
@@ -695,7 +697,7 @@ pub struct CrownPlan {
     append_offset: usize,
 }
 /// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
-/// expanded. Returns the recipe for the new archive and its length. It knows
+/// expanded and the river turret scripts updated. Returns the recipe for the new archive and its length. It knows
 /// nothing about the disc filesystem, so ISO9660 and GameCube images share it.
 pub(crate) fn rebuild_afs(
     iso: &[u8],
@@ -703,6 +705,8 @@ pub(crate) fn rebuild_afs(
     size: usize,
     four_player_spawns: bool,
     crown_drops: bool,
+    random_crown_colours: bool,
+    colour_seed: u32,
 ) -> Result<(Vec<Piece>, usize)> {
     let afs = iso
         .get(base..base + size)
@@ -734,6 +738,7 @@ pub(crate) fn rebuild_afs(
     let mut crown_packs = 0;
     let mut spawn_packs = 0;
     let mut drop_packs = 0;
+    let mut river_packs = 0;
     let mut library = drops::Library::default();
     if crown_drops {
         for &(off, len) in &entries {
@@ -755,7 +760,19 @@ pub(crate) fn rebuild_afs(
         let data = &afs[off..off + len];
         let edits = if memchr::memmem::find(data, b"i_rareicon").is_some() {
             crown_packs += 1;
-            expand(data)?
+            let edits = expand(data)?;
+            if memchr::memmem::find(data, b"g_numepodz01\0").is_some() {
+                river_packs += 1;
+                let expanded = materialize(data, &edits)?;
+                let edits = river::expand(&expanded, random_crown_colours, colour_seed)
+                    .map_err(|e| bad(&format!("river archive entry {i}: {e}")))?;
+                vec![Edit {
+                    range: 0..data.len(),
+                    bytes: materialize(&expanded, &edits)?,
+                }]
+            } else {
+                edits
+            }
         } else if (four_player_spawns || crown_drops)
             && memchr::memmem::find(data, b"beGeneraterData\0").is_some()
         {
@@ -821,6 +838,7 @@ pub(crate) fn rebuild_afs(
         }
     }
     need(crown_packs == 85, "expected 85 crown model packs")?;
+    need(river_packs == 1, "expected one Numenume River model pack")?;
     need(
         !four_player_spawns || spawn_packs > 0,
         "no four-player spawn profiles found",
@@ -868,17 +886,27 @@ pub(crate) fn rebuild_afs(
 
 impl CrownPlan {
     pub fn build(iso: &[u8]) -> Result<Self> {
-        Self::build_with_options(iso, false, false)
+        Self::build_with_options(iso, false, false, false, 0)
     }
     pub(crate) fn build_with_options(
         iso: &[u8],
         four_player_spawns: bool,
         crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
     ) -> Result<Self> {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
-        let (pieces, cursor) = rebuild_afs(iso, base, size, four_player_spawns, crown_drops)?;
+        let (pieces, cursor) = rebuild_afs(
+            iso,
+            base,
+            size,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+        )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
         need(append_offset == iso.len(), "unexpected trailing ISO data")?;
@@ -929,16 +957,26 @@ impl CrownPlan {
     /// GameCube twin of [`CrownPlan::build`]: the rebuilt archive is appended
     /// after the last byte of the image and the FST entry repointed at it.
     pub fn build_gcm(disc: &[u8]) -> Result<Self> {
-        Self::build_gcm_with_options(disc, false, false)
+        Self::build_gcm_with_options(disc, false, false, false, 0)
     }
     pub(crate) fn build_gcm_with_options(
         disc: &[u8],
         four_player_spawns: bool,
         crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
     ) -> Result<Self> {
         let file = gcm::find_file(disc, "ndmw.afs")?;
         let (base, size) = (file.offset as usize, file.size as usize);
-        let (pieces, cursor) = rebuild_afs(disc, base, size, four_player_spawns, crown_drops)?;
+        let (pieces, cursor) = rebuild_afs(
+            disc,
+            base,
+            size,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+        )?;
         let append_offset = disc.len();
         need(
             append_offset.is_multiple_of(4),

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.11.0
+
+- Halve Better Loot plug drops to 1% / 2% / 3% on Normal / Hard / Very Hard.
+  Other item-category rates stay unchanged; the difference becomes no drop.
+- Crown Numenume River missile turrets and multiply their missile damage to the
+  shared boat by three. Position crowns close to the turret barrels; other river
+  hits retain their normal damage.
+- Include river turret crowns in the random crown colours option.
+
 ## v0.10.0
 
 - Added optional four-player enemy spawn counts for smaller parties.

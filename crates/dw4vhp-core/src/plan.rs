@@ -67,7 +67,7 @@ pub struct PatchPlan {
     pub four_player_spawns: bool,
     /// Rebalance enemy loot categories while preserving scripted rewards.
     pub crown_drops: bool,
-    /// Randomise the icon argument on each enemy spawn, preserving boss yellow.
+    /// Randomise enemy and river turret crowns on generation, preserving boss yellow.
     pub random_crown_colours: bool,
     /// Optional reproducible private colour RNG seed; normally chosen per patch.
     pub crown_colour_seed: Option<u32>,

@@ -4,8 +4,14 @@ The optional **Random crown colours** setting starts disabled. When enabled,
 each ordinary crowned enemy rolls its icon colour when it spawns: green, blue,
 pink, white or yellow. Two enemies of the same type can have different colours;
 colours may repeat and remain fixed for that enemy's lifetime. Boss families
-keep yellow. Existing uncrowned enemies and props stay uncrowned, including
+keep yellow. Other uncrowned enemies and props stay uncrowned, including
 the tutorial's otherwise unbuffed Kokatorimon.
+
+Numenume River's eight missile turrets are also crowned. Their cosmetic colour
+is chosen when each turret is generated and stays fixed until destruction.
+They use a private Lua generator rather than the enemy icon hook, because
+turrets have no enemy-table rarity row. It consumes no game RNG calls. See
+[river turrets](river-turrets.md) for their damage and lifecycle checks.
 
 This option changes the displayed icon only. It does not remap enemy rows,
 change HP, stats, critical/stun values, or choose different drop tables. It works
