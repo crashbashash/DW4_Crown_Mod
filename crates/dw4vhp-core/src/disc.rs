@@ -77,6 +77,12 @@ pub fn inspect(path: &Path, layout: &Layout) -> Result<DiscReport> {
 /// 3. more than 100 rows carry a crown, then [`Error::AlreadyModded`],
 ///    otherwise the report is returned.
 pub fn inspect_bytes(iso: &[u8], layout: &Layout) -> Result<DiscReport> {
+    if let Some(signature) = crate::signature::from_image(iso)? {
+        return Err(Error::AlreadyCrownMod {
+            version: signature["version"].as_str().unwrap().to_owned(),
+        });
+    }
+
     let authored = EnemyTable::read(iso, layout)?;
 
     let blocks = authored.blocks();
@@ -218,6 +224,7 @@ pub(crate) fn inspect_retail_planned_for_plan(
             plan.crown_colour_seed.unwrap_or(0),
         )?
     };
+    let crowns = crowns.with_signature(release, plan)?;
     report.output_size = crowns.output_size;
     report.release = Some(release);
     report.boot_elf = if release.is_gamecube() {

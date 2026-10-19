@@ -109,6 +109,13 @@ fn check(key: &str, expected_release: Release, expected_format: Format) -> bool 
         // Safety: the completed output is read-only throughout verification.
         let image = unsafe { Mmap::map(&file).unwrap() };
         assert_eq!(release::detect(&image).unwrap(), expected_release);
+        let signature = dw4vhp_core::signature::from_image(&image).unwrap().unwrap();
+        assert_eq!(signature["options"]["fourPlayerSpawns"], four_player_spawns);
+        assert_eq!(signature["options"]["betterLoot"], crown_drops);
+        assert_eq!(
+            signature["options"]["randomCrownColours"],
+            random_crown_colours
+        );
         let layout = expected_release.layout_in(&image).unwrap();
         for (block, offset) in blocks
             .iter()

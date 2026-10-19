@@ -14,6 +14,7 @@ pub mod region;
 pub mod release;
 pub mod rowgroup;
 pub mod serial;
+pub mod signature;
 pub mod table;
 pub mod testkit;
 pub mod writer;

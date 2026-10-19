@@ -4,6 +4,9 @@ use thiserror::Error;
 /// not just the fault, as required by spec §6.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("this disc is already Crown Mod v{version} — use your original disc image")]
+    AlreadyCrownMod { version: String },
+
     #[error(
         "this disc container could not be read: {0} — use an unmodified GameCube .iso, .ciso or \
          .rvz of the original game"

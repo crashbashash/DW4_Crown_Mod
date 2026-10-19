@@ -75,6 +75,10 @@ fn roundtrip(format: Format, name: &str) {
         *byte = (i * 31 % 251) as u8;
     }
     head[0x500000..0x500100].fill(7);
+    let metadata =
+        dw4vhp_core::signature::metadata(Release::GcUsa, &dw4vhp_core::plan::PatchPlan::default());
+    head.resize(head.len().div_ceil(2048) * 2048, 0);
+    head.extend(dw4vhp_core::signature::encode(&metadata).unwrap());
     std::fs::write(&raw, &head).unwrap();
 
     let packed = dir.path().join(name);
@@ -85,6 +89,10 @@ fn roundtrip(format: Format, name: &str) {
     let back = std::fs::read(&out).unwrap();
     assert_eq!(&back[..head.len()], &head[..]);
     assert!(back[head.len()..].iter().all(|&b| b == 0));
+    assert_eq!(
+        dw4vhp_core::signature::from_image(&back).unwrap(),
+        Some(metadata)
+    );
 }
 
 #[test]

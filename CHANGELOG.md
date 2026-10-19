@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Embed a versioned Crown Mod signature with release and patch options in new images.
+- Detect signed builds before the enemy-table scan; retain legacy detection for unsigned builds.
+- Preserve signature metadata through GameCube CISO/RVZ conversion.
+
 ## v0.11.0
 
 - Halve Better Loot plug drops to 1% / 2% / 3% on Normal / Hard / Very Hard.

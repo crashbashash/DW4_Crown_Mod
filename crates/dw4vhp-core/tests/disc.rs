@@ -44,3 +44,22 @@ fn a_disc_with_crowns_already_written_is_already_modded() {
     assert!(matches!(err, Error::AlreadyModded { .. }), "{err:?}");
     drop(dir);
 }
+
+#[test]
+fn signature_is_checked_before_tables_and_legacy_images_still_use_the_scan() {
+    let block = dw4vhp_core::signature::encode(&dw4vhp_core::signature::metadata(
+        dw4vhp_core::release::Release::Usa,
+        &dw4vhp_core::plan::PatchPlan::default(),
+    ))
+    .unwrap();
+    // This is too short to contain even the table. A signature refusal proves
+    // the expensive/legacy scan was never entered.
+    let error = dw4vhp_core::disc::inspect_bytes(&block, &Layout::retail()).unwrap_err();
+    assert!(matches!(error, Error::AlreadyCrownMod { .. }));
+    let (directory, path, layout) = testkit::modded_disc_tempfile();
+    assert!(matches!(
+        inspect(&path, &layout),
+        Err(Error::AlreadyModded { .. })
+    ));
+    drop(directory);
+}

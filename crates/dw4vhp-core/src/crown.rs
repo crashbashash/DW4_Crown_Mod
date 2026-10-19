@@ -1003,6 +1003,45 @@ impl CrownPlan {
             append_offset,
         })
     }
+    /// Append identification outside NDMW.AFS; preserve every resource offset and length.
+    pub fn with_signature(
+        mut self,
+        release: crate::release::Release,
+        plan: &crate::plan::PatchPlan,
+    ) -> Result<Self> {
+        let offset = a2048(self.output_size as usize);
+        let used: usize = self
+            .pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Source(r) => r.len(),
+                Piece::Bytes(b) => b.len(),
+            })
+            .sum();
+        let padding = offset
+            .checked_sub(self.append_offset + used)
+            .ok_or_else(|| bad("signature overlaps archive"))?;
+        self.pieces.push(Piece::Bytes(vec![0; padding]));
+        self.pieces.push(Piece::Bytes(crate::signature::encode(
+            &crate::signature::metadata(release, plan),
+        )?));
+        self.output_size = offset as u64 + crate::signature::SIZE as u64;
+        if release.is_gamecube() {
+            need(
+                self.output_size <= u32::MAX as u64,
+                "signed image exceeds GameCube format limit",
+            )?;
+        } else {
+            let sectors = u32::try_from(self.output_size / 2048)
+                .map_err(|_| bad("signed image exceeds ISO format limit"))?;
+            for r in &mut self.regions {
+                if r.offset >= 16 * 2048 && r.offset < 64 * 2048 && r.offset % 2048 == 80 {
+                    r.bytes = [sectors.to_le_bytes(), sectors.to_be_bytes()].concat();
+                }
+            }
+        }
+        Ok(self)
+    }
     pub fn append(
         &self,
         iso: &[u8],

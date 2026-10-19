@@ -946,6 +946,7 @@ dependencies = [
  "md-5",
  "memchr",
  "memmap2",
+ "serde_json",
  "sha1",
  "tempfile",
  "thiserror 2.0.21",

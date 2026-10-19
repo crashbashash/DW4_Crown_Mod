@@ -170,14 +170,16 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
         Err(error) => DiscStatusPayload {
             kind: match error {
                 Error::AlreadyModded { .. }
+                | Error::AlreadyCrownMod { .. }
                 | Error::WrongRevision { .. }
                 | Error::NotThisDisc
                 | Error::CrownData(_) => "refused",
                 _ => "unknown",
             },
-            reason: matches!(error, Error::AlreadyModded { .. }).then_some("already-modded"),
+            reason: matches!(error, Error::AlreadyModded { .. } | Error::AlreadyCrownMod { .. }).then_some("already-modded"),
             text: match error {
                 Error::AlreadyModded { .. } => "This disc is already modded. Choose a clean, original disc image.".into(),
+                Error::AlreadyCrownMod { version } => format!("This disc is already Crown Mod v{version}. Choose a clean, original disc image."),
                 Error::NotThisDisc | Error::FileNotFound { .. } | Error::ElfNotFound => "This file is not a supported disc image, or it is incomplete. Choose a clean Digimon World 4 or Digimon World X disc from a supported release.".into(),
                 Error::WrongRevision { .. } | Error::CrownData(_) => "This disc image is not a supported original revision. Choose a clean, original copy of a supported release.".into(),
                 _ => error.to_string(),
@@ -347,6 +349,15 @@ mod tests {
         assert_eq!(result.reason, Some("already-modded"));
         assert!(result.text.contains("already modded") && result.text.contains("original"));
         assert!(!result.text.contains("600"));
+    }
+    #[test]
+    fn signed_mod_uses_the_already_modded_dialog_with_its_version() {
+        let result = verdict(&Err(Error::AlreadyCrownMod {
+            version: "0.11.0".into(),
+        }));
+        assert_eq!(result.kind, "refused");
+        assert_eq!(result.reason, Some("already-modded"));
+        assert!(result.text.contains("Crown Mod v0.11.0") && result.text.contains("original"));
     }
     #[test]
     fn invalid_disc_message_covers_both_supported_consoles() {

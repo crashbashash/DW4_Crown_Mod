@@ -34,15 +34,40 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         &mut |_| {},
     )
     .unwrap();
-    // Current default-build fingerprints. The river's modified scripts are
-    // separately checked by the real-pack and reference-Lua audits.
-    assert_eq!(outcome.md5, output_md5);
+    // The pre-signature default-build fingerprints remain an independent
+    // oracle after reversing only the footer/volume-length metadata below.
     assert_eq!(outcome.bytes, report.output_size);
     assert!(outcome.bytes > original.len() as u64);
     let out_file = File::open(&output).unwrap();
     // Safety: completed output is read-only and no longer being patched.
     let patched = unsafe { Mmap::map(&out_file).unwrap() };
-    assert_eq!(format!("{:x}", Md5::digest(&patched)), output_md5);
+    assert_eq!(format!("{:x}", Md5::digest(&patched)), outcome.md5);
+    let signature = dw4vhp_core::signature::from_image(&patched)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        signature,
+        dw4vhp_core::signature::metadata(release, &PatchPlan::default())
+    );
+    // Preserve the independent pre-signature golden checksum: remove only the
+    // footer and reverse the volume-size update in this hashing view.
+    let unsigned_len = patched.len() - dw4vhp_core::signature::SIZE;
+    let mut head = patched[..64 * 2048].to_vec();
+    for sector in 16..64 {
+        let at = sector * 2048;
+        if head[at] == 255 {
+            break;
+        }
+        if head[at] == 1 || head[at] == 2 {
+            let sectors = (unsigned_len / 2048) as u32;
+            head[at + 80..at + 88]
+                .copy_from_slice(&[sectors.to_le_bytes(), sectors.to_be_bytes()].concat());
+        }
+    }
+    let mut legacy = Md5::new();
+    legacy.update(&head);
+    legacy.update(&patched[head.len()..unsigned_len]);
+    assert_eq!(format!("{:x}", legacy.finalize()), output_md5);
 
     let layout = release.layout();
     let offsets = [layout.hp_off, layout.stat_off, layout.byte_off];
@@ -70,7 +95,10 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         }
         assert_eq!(count, 665);
     }
-    let crowns = dw4vhp_core::crown::CrownPlan::build(&original).unwrap();
+    let crowns = dw4vhp_core::crown::CrownPlan::build(&original)
+        .unwrap()
+        .with_signature(release, &PatchPlan::default())
+        .unwrap();
     crowns.verify(&original, &patched).unwrap();
     ranges.extend(
         crowns
@@ -91,7 +119,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     assert!(original[cursor..] == patched[cursor..original.len()]);
     assert!(matches!(
         inspect_retail(&output),
-        Err(Error::AlreadyModded { .. })
+        Err(Error::AlreadyCrownMod { .. })
     ));
     let second_output = tmp.path().join("twice.iso");
     assert!(matches!(
@@ -102,7 +130,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
             &PatchOptions { overwrite: false },
             &mut |_| {}
         ),
-        Err(Error::AlreadyModded { .. })
+        Err(Error::AlreadyCrownMod { .. })
     ));
     assert!(!second_output.exists());
     assert_eq!(
@@ -111,9 +139,9 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         "original must be unchanged"
     );
     eprintln!(
-        "PASS: {} {} → {output_md5}; all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive verified",
+        "PASS: {} {} → {actual} (legacy {output_md5}); all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive and signature verified",
         release.label(),
-        release.serial()
+        release.serial(), actual = outcome.md5
     );
 }
 

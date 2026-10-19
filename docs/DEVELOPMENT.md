@@ -55,6 +55,11 @@ tagged releases. The release workflow waits for both platform builds, uploads al
 assets to a draft, and publishes only after upload completes. The Linux builds are launch-tested. The Windows builds are built but
 never run in CI. Like all release assets, they are unsigned.
 
+## Image identification
+
+New outputs carry the [versioned image signature](image-signature.md), including patch
+options. Detection checks it first and retains the game-data scan for older images.
+
 ## Testing against real discs
 
 Point these environment variables at clean local images:
