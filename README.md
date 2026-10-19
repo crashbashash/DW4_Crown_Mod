@@ -86,13 +86,14 @@ version appear under Disc. Choose which optional features to keep, add or remove
 then click **Update ISO** and confirm. The app verifies the rebuilt game
 before replacing the selected modded file.
 
-Older modded images need the matching original disc for their first update.
-After that, the updated image includes everything needed for future updates.
+Images created before Crown Mod v0.11.1 need the matching original disc for their
+first update. After that, the updated image includes everything needed for future
+updates.
 
 ## Roadmap
 
-- **Xbox support** — bring Crown Mod to the original Xbox release.
-- **Tougher enemy AI** — make enemies more challenging through their behaviour.
+- [ ] **Xbox support** — bring Crown Mod to the original Xbox release.
+- [ ] **Tougher enemy AI** — make enemies more challenging through their behaviour.
 
 ## Contributing and building from source
 
