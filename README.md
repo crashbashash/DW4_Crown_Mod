@@ -8,11 +8,9 @@
 | --- | --- |
 | ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
 
-**Crown Mod** is a difficulty mod for **Digimon World 4** on PS2 and GameCube. It makes enemies much
-tougher, and marks the strongest ones with a yellow crown so you can spot them.
+**Crown Mod** makes **Digimon World 4** harder on PS2 and GameCube.
 
-You don't need any modding knowledge. Open the app, pick your own copy of the game,
-and click one button. It creates a new, modded copy of the game for you.
+Open the app and choose your own copy of the game to create a new, modded copy.
 
 ## Quick start
 
