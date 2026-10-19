@@ -36,6 +36,21 @@ Patching a clean disc leaves your original file unchanged.
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.
 
+## In game
+
+The first bridge in **Goblin Pass**, playing solo with the same World 2-ready save
+on Normal difficulty:
+
+| Original game | Crown Mod — four-player spawns and random crown colours |
+| --- | --- |
+| ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing blue and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
+
+This encounter has **two enemies in the original game and five with four-player
+spawns enabled**. Random crown colours change the icons only; the colours do not
+indicate different enemy stats or drops. Click either image for the full-size view.
+
+Gameplay captured from the GameCube version in Dolphin.
+
 ## What you need
 
 - A clean copy of Digimon World 4, as an `.iso` file (PS2 or GameCube), or a GameCube `.ciso` or `.rvz`. These releases work:
@@ -92,8 +107,8 @@ After that, the updated image includes everything needed for future updates.
 See the [development guide](docs/DEVELOPMENT.md) for build steps, tests and project
 layout. Release notes and checksums are in the [changelog](CHANGELOG.md).
 
-This repository never contains game data. No disc images or extracted game files are
-committed, and the app reads everything it needs from your own disc.
+No disc images or extracted game files are committed, and the app reads everything
+it needs from your own disc.
 
 ## Licence
 
