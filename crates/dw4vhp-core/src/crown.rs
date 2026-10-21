@@ -11,7 +11,11 @@ use crate::{
 use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod drops;
+pub mod graft;
+mod lua_names;
 mod practice;
+mod random;
+pub use random::Options as RandomOptions;
 mod river;
 mod spawns;
 
@@ -105,12 +109,18 @@ fn ident(b: &[u8], p: usize) -> Option<&str> {
     std::str::from_utf8(&rest[..len]).ok()
 }
 fn classes(b: &[u8]) -> Result<Vec<Class>> {
+    class_table(b).map(|(classes, _, _)| classes)
+}
+/// The class table, and the offsets where it starts and ends.
+fn class_table(b: &[u8]) -> Result<(Vec<Class>, usize, usize)> {
     let mut best = Vec::new();
+    let (mut best_start, mut best_end) = (0, 0);
     for p in memchr::memmem::find_iter(&b[..b.len().min(0x8000)], b"\0igObject\0") {
         let start = p + 1;
         let limit = b.len().min(start + 0x8000);
         let mut cur = start;
         let mut out = Vec::new();
+        let mut end_of_table = 0;
         while let Some(name) = ident(b, cur) {
             let pad = (cur + name.len() + 2) & !1;
             let mut fields = Vec::new();
@@ -136,24 +146,106 @@ fn classes(b: &[u8]) -> Result<Vec<Class>> {
             if next.is_none() && fields.is_empty() {
                 break;
             }
+            let end = pad + 6 * fields.len();
             out.push(Class {
                 name: name.into(),
                 fields,
             });
             match next {
                 Some(q) => cur = q,
-                None => break,
+                None => {
+                    end_of_table = end;
+                    break;
+                }
             }
         }
         if out.len() > best.len() {
             best = out;
+            best_start = start;
+            best_end = end_of_table;
         }
     }
     need(
         best.len() == u32at(b, 12)? as usize,
         "type directory count mismatch",
     )?;
-    Ok(best)
+    Ok((best, best_start, best_end))
+}
+/// A class definition with the hierarchy facts the pack keeps in a table of its own: one
+/// 24-byte record per class, `[name size, 1, 0, own fields, parent class, field slots]`.
+#[derive(Clone)]
+struct ClassDef {
+    class: Class,
+    parent: Option<String>,
+    slots: u32,
+}
+/// The hierarchy record of every class of the pack.
+fn class_defs(b: &[u8]) -> Result<Vec<ClassDef>> {
+    let (classes, start, _) = class_table(b)?;
+    let table = start
+        .checked_sub(24 * classes.len())
+        .ok_or_else(|| bad("class records before the file start"))?;
+    let mut out = Vec::new();
+    for (i, class) in classes.iter().enumerate() {
+        let at = table + 24 * i;
+        need(
+            u32at(b, at + 4)? == 1 && u32at(b, at + 8)? == 0 && u32at(b, at + 12)? as usize == class.fields.len(),
+            "class record does not match its class",
+        )?;
+        let parent = u32at(b, at + 16)?;
+        out.push(ClassDef {
+            class: class.clone(),
+            parent: (parent != u32::MAX)
+                .then(|| classes.get(parent as usize).map(|c| c.name.clone()))
+                .map(|c| c.ok_or_else(|| bad("class parent out of range")))
+                .transpose()?,
+            slots: u32at(b, at + 20)?,
+        });
+    }
+    Ok(out)
+}
+/// Append classes (parents before children) to a pack, so it can hold objects of those classes.
+fn add_classes(b: &[u8], add: &[ClassDef]) -> Result<Vec<u8>> {
+    let (classes, start, end) = class_table(b)?;
+    need(end > start && !add.is_empty(), "no class table end")?;
+    let k = add.len();
+    let mut names: Vec<&str> = classes.iter().map(|c| c.name.as_str()).collect();
+    let (mut records, mut entries) = (Vec::new(), Vec::new());
+    // Records go in front of the first class entry, so the entries move 24 bytes per class.
+    let mut at = end + 24 * k;
+    for d in add {
+        need(!names.contains(&d.class.name.as_str()), "class already defined")?;
+        let parent = match &d.parent {
+            Some(p) => names
+                .iter()
+                .position(|n| n == p)
+                .ok_or_else(|| bad("class parent is not defined"))? as u32,
+            None => u32::MAX,
+        };
+        let pad = (at + d.class.name.len() + 2) & !1;
+        for v in [(pad - at) as u32, 1, 0, d.class.fields.len() as u32, parent, d.slots] {
+            records.extend(v.to_le_bytes());
+        }
+        entries.extend(d.class.name.as_bytes());
+        entries.resize(entries.len() + pad - at - d.class.name.len(), 0);
+        for &(t, o, s) in &d.class.fields {
+            entries.extend(t.to_le_bytes());
+            entries.extend(o.to_le_bytes());
+            entries.extend(s.to_le_bytes());
+        }
+        at = end + 24 * k + entries.len();
+        names.push(&d.class.name);
+    }
+    let added = records.len() + entries.len();
+    let mut out = b[..start].to_vec();
+    out.extend(records);
+    out.extend(&b[start..end]);
+    out.extend(entries);
+    out.extend(&b[end..]);
+    put(&mut out, 12, (classes.len() + k) as u32);
+    // Header word 2 is the byte size of the type directory: the class records and entries.
+    put(&mut out, 8, u32at(b, 8)? + added as u32);
+    Ok(out)
 }
 fn record(b: &[u8], p: usize, classes: &[Class]) -> Result<Record> {
     let class = u32at(b, p)? as usize;
@@ -364,6 +456,8 @@ struct Builder<'p, 'a> {
     mapping: Vec<u16>,
     object_count: u32,
     edits: Vec<Edit>,
+    /// Bytes inserted at the end of existing memory blocks: (offset in the pool, bytes).
+    grows: Vec<(usize, Vec<u8>)>,
 }
 impl<'p, 'a> Builder<'p, 'a> {
     fn new(p: &'p Pack<'a>) -> Self {
@@ -375,7 +469,39 @@ impl<'p, 'a> Builder<'p, 'a> {
             mapping: vec![],
             object_count: 0,
             edits: vec![],
+            grows: vec![],
         }
+    }
+    /// Where blocks were grown, as (offset in the pool, length), in pool order.
+    fn grown(&self) -> Vec<(usize, usize)> {
+        let mut g = self.grows.iter().map(|(at, e)| (*at, e.len())).collect::<Vec<_>>();
+        g.sort_unstable();
+        g
+    }
+    /// Append `extra` to an existing memory block in place, keeping its ID, so the object
+    /// that owns it keeps the same block (the engine never sees a replacement).
+    fn grow_mem(&mut self, block: u32, extra: Vec<u8>) -> Result<()> {
+        need(extra.len() % 4 == 0, "unaligned block growth")?;
+        let range = self
+            .p
+            .memory
+            .get(block as usize)
+            .and_then(|r| r.clone())
+            .ok_or_else(|| bad("missing block to grow"))?;
+        let idx = *self.p.mapping.get(block as usize).ok_or_else(|| bad("missing block entry"))? as usize;
+        let dir = &self.p.dirs[idx];
+        need(
+            self.p.classes[dir.class].name == "igMemoryDirEntry",
+            "wrong memory directory class",
+        )?;
+        let size = dir.val(self.p.b, 7)? as usize;
+        need(size == range.len(), "block size differs from its directory entry")?;
+        self.edits.push(Edit {
+            range: dir.range.clone(),
+            bytes: dir.patch(self.p.b, &[(7, (size + extra.len()) as u32)])?,
+        });
+        self.grows.push((range.end - self.p.pool, extra));
+        Ok(())
     }
     fn add(&mut self, dir: Vec<u8>, payload: Vec<u8>, memory: bool) -> Result<u32> {
         let id = self.p.ids.len() + self.mapping.len();
@@ -451,7 +577,14 @@ impl<'p, 'a> Builder<'p, 'a> {
         });
         let object_bytes = self.objects.len();
         let mut objects = self.objects;
-        objects.extend(&self.p.b[self.p.pool..]);
+        let mut pool = self.p.b[self.p.pool..].to_vec();
+        let mut grown = 0;
+        self.grows.sort_by(|a, b| b.0.cmp(&a.0));
+        for (at, extra) in &self.grows {
+            grown += extra.len();
+            pool.splice(*at..*at, extra.iter().copied());
+        }
+        objects.extend(pool);
         objects.extend(&self.pool);
         self.edits.push(Edit {
             range: self.p.pool..self.p.b.len(),
@@ -463,7 +596,7 @@ impl<'p, 'a> Builder<'p, 'a> {
             (1, self.mapping.len()),
             (4, object_bytes),
             (5, self.object_count as usize),
-            (6, self.pool.len()),
+            (6, self.pool.len() + grown),
         ] {
             self.edits.push(Edit {
                 range: word * 4..word * 4 + 4,
@@ -708,6 +841,8 @@ pub(crate) fn rebuild_afs(
     crown_drops: bool,
     random_crown_colours: bool,
     colour_seed: u32,
+    graft: Option<&graft::Spec>,
+    random: Option<RandomOptions>,
 ) -> Result<(Vec<Piece>, usize)> {
     let afs = iso
         .get(base..base + size)
@@ -731,6 +866,18 @@ pub(crate) fn rebuild_afs(
         first >= 16 + 8 * count && first <= size,
         "invalid archive prefix",
     )?;
+    let mut random = match random {
+        Some(options) => {
+            let layout = crate::release::detect(iso)?.layout_in(iso)?;
+            Some(random::Randomiser::scan(
+                afs,
+                &entries,
+                crate::table::EnemyTable::read(iso, &layout)?,
+                options,
+            )?)
+        }
+        None => None,
+    };
     let mut prefix = afs[..first].to_vec();
     let mut pieces = Vec::new();
     let mut cursor = first;
@@ -819,6 +966,84 @@ pub(crate) fn rebuild_afs(
         } else {
             Vec::new()
         };
+        let edits = match graft {
+            Some(g)
+                if i == g.model_entry
+                    || g.generator_entries.contains(&i)
+                    || g.lua_edits.iter().any(|e| e.entry == i) =>
+            {
+                let current = if i == g.model_entry && !g.expand_model_pack {
+                    data.to_vec()
+                } else {
+                    materialize(data, &edits)?
+                };
+                let mut bytes = current;
+                if i == g.model_entry && !g.models.is_empty() {
+                    let sources = std::iter::once((g.source_entry, &g.models))
+                        .chain(g.extra_sources.iter().map(|(e, m)| (*e, m)));
+                    for (src_entry, models) in sources {
+                        // Models the stage already carries need no copy.
+                        let mut missing = Vec::new();
+                        for m in models {
+                            if !graft::resident(&bytes, m)? {
+                                missing.push(m.clone());
+                            }
+                        }
+                        if missing.is_empty() {
+                            continue;
+                        }
+                        let (soff, slen) = *entries
+                            .get(src_entry)
+                            .ok_or_else(|| bad("graft source entry outside archive"))?;
+                        let source = afs
+                            .get(soff..soff + slen)
+                            .ok_or_else(|| bad("graft source outside archive"))?;
+                        let (more, report) = graft::graft(&bytes, source, &missing)
+                            .map_err(|e| bad(&format!("graft {missing:?} into entry {i} from {src_entry}: {e}")))?;
+                        eprintln!("graft entry {i} <- {src_entry}: {report:?}");
+                        bytes = materialize(&bytes, &more)?;
+                    }
+                } else if g.generator_entries.contains(&i) {
+                    let (out, n) = graft::retarget(&bytes, &g.rows, &g.spread, &g.only_generators, &g.generator_models)
+                        .map_err(|e| bad(&format!("retarget entry {i}: {e}")))?;
+                    need(n > 0, "no generator rows were retargeted")?;
+                    eprintln!("retarget entry {i}: {n} generators");
+                    bytes = out;
+                }
+                for e in g.lua_edits.iter().filter(|e| e.entry == i) {
+                    let more = lua_names::rename_in_pack(&bytes, &e.scripts, &e.names)
+                        .map_err(|err| bad(&format!("Lua rename in entry {i}: {err}")))?;
+                    eprintln!("lua rename entry {i}: {:?}", e.names);
+                    bytes = materialize(&bytes, &more)?;
+                }
+                vec![Edit {
+                    range: 0..data.len(),
+                    bytes,
+                }]
+            }
+            _ => edits,
+        };
+        let edits = match random.as_mut() {
+            Some(r) if r.is_stage(i) || r.plans_for(i) => {
+                let current = match edits.as_slice() {
+                    [e] if e.range == (0..data.len()) => e.bytes.clone(),
+                    _ => materialize(data, &edits)?,
+                };
+                let bytes = if r.is_stage(i) {
+                    r.stage(i, current, afs, &entries)
+                        .map_err(|e| bad(&format!("randomise entry {i}: {e}")))?
+                } else {
+                    r.retarget(i, &current)
+                        .map_err(|e| bad(&format!("randomise entry {i}: {e}")))?
+                        .unwrap_or(current)
+                };
+                vec![Edit {
+                    range: 0..data.len(),
+                    bytes,
+                }]
+            }
+            _ => edits,
+        };
         if !edits.is_empty() {
             let mut q = 0;
             let mut newlen = len;
@@ -900,12 +1125,25 @@ pub(crate) fn rebuild_afs(
         put(&mut prefix, pos, relocated as u32);
     }
     pieces.insert(0, Piece::Bytes(prefix));
+    if let Some(r) = &random {
+        for line in &r.log {
+            eprintln!("{line}");
+        }
+    }
     Ok((pieces, cursor))
 }
 
 impl CrownPlan {
     pub fn build(iso: &[u8]) -> Result<Self> {
-        Self::build_with_options(iso, false, false, false, 0)
+        Self::build_with_options(iso, false, false, false, 0, None, None)
+    }
+    /// Experimental: the usual crown expansion plus an enemy model graft.
+    pub fn build_graft(iso: &[u8], spec: &graft::Spec) -> Result<Self> {
+        Self::build_with_options(iso, false, false, false, 0, Some(spec), None)
+    }
+    /// Experimental: the usual crown expansion plus the enemy randomiser.
+    pub fn build_random(iso: &[u8], options: RandomOptions) -> Result<Self> {
+        Self::build_with_options(iso, false, false, false, 0, None, Some(options))
     }
     pub(crate) fn build_with_options(
         iso: &[u8],
@@ -913,6 +1151,8 @@ impl CrownPlan {
         crown_drops: bool,
         random_crown_colours: bool,
         colour_seed: u32,
+        graft: Option<&graft::Spec>,
+        random: Option<RandomOptions>,
     ) -> Result<Self> {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
@@ -925,6 +1165,8 @@ impl CrownPlan {
             crown_drops,
             random_crown_colours,
             colour_seed,
+            graft,
+            random,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
@@ -995,6 +1237,8 @@ impl CrownPlan {
             crown_drops,
             random_crown_colours,
             colour_seed,
+            None,
+            None,
         )?;
         let append_offset = disc.len();
         need(
@@ -1105,6 +1349,17 @@ impl CrownPlan {
             }
         }
         Ok(self)
+    }
+    /// Experimental: write the complete patched image (original bytes, appended archive, in-place regions).
+    pub fn write_image(&self, iso: &[u8], out: &mut std::fs::File) -> Result<()> {
+        use std::io::{Seek, SeekFrom};
+        out.write_all(iso)?;
+        self.append(iso, out, &mut |_, _| {})?;
+        for r in &self.regions {
+            out.seek(SeekFrom::Start(r.offset))?;
+            out.write_all(&r.bytes)?;
+        }
+        Ok(())
     }
     pub fn append(
         &self,

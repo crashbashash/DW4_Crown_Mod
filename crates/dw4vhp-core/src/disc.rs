@@ -231,6 +231,8 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_drops,
             plan.random_crown_colours,
             plan.crown_colour_seed.unwrap_or(0),
+            None,
+            None,
         )?
     };
     progress(200, 1000);
