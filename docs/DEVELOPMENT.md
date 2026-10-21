@@ -147,7 +147,7 @@ afterward.
 Run the full UI test on a freshly launched app:
 
 ```sh
-python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 c70d2447e87b65fa9663e49d9ae31a42 --expected-size 2179143680
+python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 73ac2e226a8a3fa504de9740ed9d446c --expected-size 2179188736
 ```
 
 The test checks invalid and already-modded inputs, patching, overwrite cancellation

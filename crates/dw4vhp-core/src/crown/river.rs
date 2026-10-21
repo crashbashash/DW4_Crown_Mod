@@ -1,7 +1,7 @@
 //! Numenume River's missile damage and cosmetic turret crowns. These objects
 //! use scripted durability and the shared boat, not the 649-row enemy table.
 use super::*;
-mod lua;
+pub(super) mod lua;
 use lua::{call, conditional, signed, unsigned, Chunk, BIAS};
 
 const TURRET: &str = "g_numepodz01";

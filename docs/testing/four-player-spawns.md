@@ -4,8 +4,25 @@ The spawn option is off by default. It changes enemy generator totals and
 concurrent-enemy caps to each generator's authored fourth-player-count profile.
 It does not change the selected enemy row, HP, attack, defence, Speed, experience,
 per-kill drops, real party size, stage scripts or destructible counts.
-Scripted encounter choices still follow the actual party size; this option does
-not reproduce every script branch of a real four-player party.
+Scripted encounter choices still follow the actual party size, with one
+exception: the practice stage's farewell enemies (below). This option does not
+reproduce every other script branch of a real four-player party.
+
+## Practice-stage farewell pair
+
+After the rocks-and-bushes lesson, the practice script (`NDMW.AFS` entry 607,
+the one Lua chunk containing `GENE-a05`, `GENE-b06`, `GBOX-02` and
+`SYSgetPlayerNinzu`) chooses the last enemies from the real party size.
+Retail compares `SYSgetPlayerNinzu() <= 2` (GENE-a03/a04 or b03/b04) and
+`>= 3` (GENE-a05/a06 or b05/b06). The a06/b06 generators spawn the
+Kokatorimon (rows 644/645), so with fewer than three joined players it never
+appears, and the generator counts above cannot change that.
+
+With the spawn option on, the four comparison operands become `<= 0` and `>= 1`
+so any party takes the three-or-more branch. Nothing else in the chunk changes:
+same length, same instructions, no new IDs. Flag 382 still picks the a or b
+group. The build refuses to continue if the chunk is missing, appears more than
+once or does not have the retail operands `2, 3, 2, 3`.
 
 The ordinary generator spawn path passes the selected enemy row and that row's
 HPMAX to the enemy model. The per-party profiles hold two count fields and two
@@ -72,8 +89,8 @@ in the changelog remain unchanged.
 
 | Four-player spawns | Bytes | MD5 |
 | --- | ---: | --- |
-| Off | 2,179,143,680 | `c70d2447e87b65fa9663e49d9ae31a42` |
-| On | 2,179,340,288 | `6177531ab79f21308eb62b30270d711f` |
+| Off | 2,179,188,736 | `73ac2e226a8a3fa504de9740ed9d446c` |
+| On | 2,179,385,344 | `77575af67890466e297ca083b20d01ec` |
 
 The common patched stat block has MD5 `c2cdbb0ca237b6619d55374bd4ed86e5`.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.2
+
+- The four-player spawn setting now spawns the Kokatorimon in the practice stage.
+
 ## v0.11.1
 
 - Added the ability to update existing modded games.

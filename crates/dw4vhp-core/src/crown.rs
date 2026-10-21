@@ -11,6 +11,7 @@ use crate::{
 use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod drops;
+mod practice;
 mod river;
 mod spawns;
 
@@ -739,6 +740,7 @@ pub(crate) fn rebuild_afs(
     let mut spawn_packs = 0;
     let mut drop_packs = 0;
     let mut river_packs = 0;
+    let mut practice_packs = 0;
     let mut library = drops::Library::default();
     if crown_drops {
         for &(off, len) in &entries {
@@ -770,6 +772,19 @@ pub(crate) fn rebuild_afs(
                     range: 0..data.len(),
                     bytes: materialize(&expanded, &edits)?,
                 }]
+            } else if four_player_spawns && practice::candidate(data) {
+                let expanded = materialize(data, &edits)?;
+                let more = practice::expand(&expanded)
+                    .map_err(|e| bad(&format!("practice archive entry {i}: {e}")))?;
+                if more.is_empty() {
+                    edits
+                } else {
+                    practice_packs += 1;
+                    vec![Edit {
+                        range: 0..data.len(),
+                        bytes: materialize(&expanded, &more)?,
+                    }]
+                }
             } else {
                 edits
             }
@@ -842,6 +857,10 @@ pub(crate) fn rebuild_afs(
     need(
         !four_player_spawns || spawn_packs > 0,
         "no four-player spawn profiles found",
+    )?;
+    need(
+        !four_player_spawns || practice_packs == 1,
+        "expected one practice graduation script",
     )?;
     need(
         !crown_drops || drop_packs > 0,
