@@ -17,7 +17,7 @@ describe("base-mode native commands", () => {
    expect(invoke).toHaveBeenCalledExactlyOnceWith("start_patch", {
      output: "out.iso",
      overwrite: false,
-     fourPlayerSpawns: false, crownDrops: false, randomCrownColours: false,
+     fourPlayerSpawns: false, crownDrops: false, randomCrownColours: false, randomEnemies: false, enemySeed: null,
    });
   });
 
@@ -27,7 +27,7 @@ describe("base-mode native commands", () => {
    expect(invoke).toHaveBeenLastCalledWith("analyze", { path: "clean.iso", fourPlayerSpawns: true, crownDrops: false });
    await backend.startPatch("out.iso", false, true);
    expect(invoke).toHaveBeenLastCalledWith("start_patch", {
-     output: "out.iso", overwrite: false, fourPlayerSpawns: true, crownDrops: false, randomCrownColours: false,
+     output: "out.iso", overwrite: false, fourPlayerSpawns: true, crownDrops: false, randomCrownColours: false, randomEnemies: false, enemySeed: null,
    });
   });
 });
@@ -37,7 +37,7 @@ test("forwards custom loot independently of spawn counts", async () => {
   await backend.analyze("clean.iso", false, true);
   expect(invoke).toHaveBeenLastCalledWith("analyze", { path: "clean.iso", fourPlayerSpawns: false, crownDrops: true });
   await backend.startPatch("out.iso", false, false, true);
-  expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, fourPlayerSpawns: false, crownDrops: true, randomCrownColours: false });
+  expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, fourPlayerSpawns: false, crownDrops: true, randomCrownColours: false, randomEnemies: false, enemySeed: null });
 });
 
 test("update acceptance names only the offered version, never a webview-supplied installer URL", async () => {
@@ -50,5 +50,5 @@ test("update acceptance names only the offered version, never a webview-supplied
 
  test("passes per-spawn cosmetic colours independently from spawn counts and loot", async () => {
    await new TauriBackend().startPatch("out.iso", false, false, false, true);
-   expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, fourPlayerSpawns: false, crownDrops: false, randomCrownColours: true });
+   expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, fourPlayerSpawns: false, crownDrops: false, randomCrownColours: true, randomEnemies: false, enemySeed: null });
  });

@@ -16,8 +16,8 @@ const REGISTERED: [&str; 5] = [
 /// handling (`ahp_`, `aim_`), movement (`mch_`), shapes (`shp_`) and Machinedramon's whip
 /// triggers (`wh1_`, `wh2_`). The boss-only `ded_` and
 /// `wht_` scripts are left behind: no donor is a boss.
-const MODEL_SCRIPTS: [&str; 11] = [
-    "hit_", "mag_", "cal_", "bck_", "hck_", "ahp_", "aim_", "mch_", "shp_", "wh1_", "wh2_",
+pub(super) const MODEL_SCRIPTS: [&str; 12] = [
+    "hit_", "mag_", "cal_", "bck_", "hck_", "ahp_", "aim_", "mch_", "shp_", "wh1_", "wh2_", "bht_",
 ];
 /// Classes of the effect infos a stage registers by name for the attacks of its enemies
 /// (`x_026eblst01a`, `y_027emagc01a`, ...): the starter that delivers the attack and its
@@ -183,6 +183,10 @@ pub struct Report {
     pub block_bytes: usize,
     pub registered: usize,
     pub scripts: usize,
+    /// Effect and bullet switches the destination's effect tree had no matching node for.
+    pub unattached: Vec<String>,
+    /// Own effects hung in the nearest matching node of a differently shaped effect tree.
+    pub approximate: Vec<String>,
 }
 
 /// Memory blocks that are tables of IDs: the position, normal and UV stream blocks of a mesh.
@@ -197,7 +201,9 @@ fn block_words(p: &Pack, block: u32) -> Result<Vec<u32>> {
         .get(block as usize)
         .and_then(|x| x.as_ref())
         .ok_or_else(|| bad("ID table is not a memory block"))?;
-    (0..r.len() / 4).map(|i| u32at(p.b, r.start + 4 * i)).collect()
+    (0..r.len() / 4)
+        .map(|i| u32at(p.b, r.start + 4 * i))
+        .collect()
 }
 
 fn object_list(name: &str) -> bool {
@@ -258,8 +264,16 @@ pub(super) fn closure(p: &Pack, roots: &[u32]) -> Result<(BTreeSet<u32>, HashMap
         if !seen.insert(id) {
             continue;
         }
-        let Some(idx) = p.ids.get(id as usize).copied().ok_or_else(|| bad("ID out of range"))? else {
-            need(p.memory[id as usize].is_some(), "reference to an unknown ID")?;
+        let Some(idx) = p
+            .ids
+            .get(id as usize)
+            .copied()
+            .ok_or_else(|| bad("ID out of range"))?
+        else {
+            need(
+                p.memory[id as usize].is_some(),
+                "reference to an unknown ID",
+            )?;
             continue;
         };
         let r = &p.objects[idx];
@@ -303,11 +317,17 @@ pub(super) fn closure(p: &Pack, roots: &[u32]) -> Result<(BTreeSet<u32>, HashMap
 
 /// Refuse a copy when a block that is not an ID table still looks like one: its words are
 /// IDs of things outside the copy, which would silently point at unrelated destination data.
-pub(super) fn check_blocks(p: &Pack, ids: &BTreeSet<u32>, tables: &HashMap<u32, usize>) -> Result<()> {
+pub(super) fn check_blocks(
+    p: &Pack,
+    ids: &BTreeSet<u32>,
+    tables: &HashMap<u32, usize>,
+) -> Result<()> {
     // Bit masks hold flags, which can coincide with record IDs.
     let mut flags = BTreeSet::new();
     for &id in ids {
-        let Some(idx) = p.ids.get(id as usize).copied().flatten() else { continue };
+        let Some(idx) = p.ids.get(id as usize).copied().flatten() else {
+            continue;
+        };
         let r = &p.objects[idx];
         if p.classes[r.class].name == "igBitMask" {
             for (n, memory) in ref_slots(p, r) {
@@ -344,7 +364,9 @@ pub(super) fn check_blocks(p: &Pack, ids: &BTreeSet<u32>, tables: &HashMap<u32, 
             && used.iter().all(|&w| w >= 4096 && known(w))
             && used.iter().any(|w| !ids.contains(w))
         {
-            return Err(bad(&format!("block {id} looks like an ID table outside the copy")));
+            return Err(bad(&format!(
+                "block {id} looks like an ID table outside the copy"
+            )));
         }
     }
     Ok(())
@@ -354,7 +376,9 @@ pub(super) fn check_blocks(p: &Pack, ids: &BTreeSet<u32>, tables: &HashMap<u32, 
 pub(super) fn parent_group(p: &Pack, child: u32) -> Result<(u32, u32)> {
     let mut found = Vec::new();
     for id in 0..p.ids.len() as u32 {
-        let Some(idx) = p.ids[id as usize] else { continue };
+        let Some(idx) = p.ids[id as usize] else {
+            continue;
+        };
         let r = &p.objects[idx];
         if p.classes[r.class].name != "igGroup" {
             continue;
@@ -369,7 +393,10 @@ pub(super) fn parent_group(p: &Pack, child: u32) -> Result<(u32, u32)> {
             }
         }
     }
-    need(found.len() == 1, "expected one scene-graph parent for the model switch")?;
+    need(
+        found.len() == 1,
+        "expected one scene-graph parent for the model switch",
+    )?;
     Ok(found[0])
 }
 
@@ -390,7 +417,10 @@ fn group_children(p: &Pack, name: &[u8]) -> Result<u32> {
         .filter_map(|(n, _)| r.val(p.b, n).ok())
         .filter(|&v| v != NULL && p.class(v, "igNodeList").is_ok())
         .collect::<Vec<_>>();
-    need(lists.len() == 1, "expected one child list on the scene group")?;
+    need(
+        lists.len() == 1,
+        "expected one child list on the scene group",
+    )?;
     Ok(lists[0])
 }
 
@@ -417,15 +447,271 @@ pub(super) enum ModelScene {
 }
 
 pub(super) fn model_scene(sp: &Pack, model: &str) -> Result<ModelScene> {
-    let info = find_named(sp, "beAction2Info", model)?.ok_or_else(|| bad("source lacks action info"))?;
+    let info =
+        find_named(sp, "beAction2Info", model)?.ok_or_else(|| bad("source lacks action info"))?;
     let switch = sp.val(info, 7)?;
     sp.class(switch, "igSwitch")?;
     if let Ok((group, _)) = parent_group(sp, switch) {
         let name = name_of(sp, sp.rec(group)?).ok_or_else(|| bad("unnamed scene group"))?;
         return Ok(ModelScene::Group(name.to_vec()));
     }
-    let id = find_named(sp, "igSceneInfo", model)?.ok_or_else(|| bad("model switch has no scene"))?;
+    let id =
+        find_named(sp, "igSceneInfo", model)?.ok_or_else(|| bad("model switch has no scene"))?;
     Ok(ModelScene::Info(id))
+}
+
+/// The effect number each enemy model owns: its bullets and magic are `x_NNNe...` models and
+/// `y_NNNe...` effects (Infermon is 026). Read off which models every stage using the number
+/// carries (`probe_numbers`).
+pub(super) const EFFECT_NUMBERS: [(&str, &str); 29] = [
+    ("e_goburi", "001"),
+    ("e_cockatri", "002"),
+    ("e_nume", "003"),
+    ("e_ogre", "004"),
+    ("e_scum", "005"),
+    ("e_blosso", "006"),
+    ("e_mammos", "007"),
+    ("e_mecha1", "008"),
+    ("e_tyrano", "010"),
+    ("e_mummy", "011"),
+    ("e_minotaru", "012"),
+    ("e_pharaoh", "013"),
+    ("e_mecha2", "014"),
+    ("e_anomalo", "016"),
+    ("e_otama", "018"),
+    ("e_geko", "019"),
+    ("e_maridevi", "020"),
+    ("e_mecha3", "021"),
+    ("e_tonogeko", "022"),
+    ("e_diabolo", "024"),
+    ("e_impdra", "025"),
+    ("e_infermo", "026"),
+    ("e_megadra", "027"),
+    ("e_rare", "028"),
+    ("e_mecha5", "029"),
+    ("e_ldknight", "032"),
+    ("e_skulgrey", "015"),
+    ("e_torta", "017"),
+    ("e_mecha4", "023"),
+];
+
+/// Enemy projectiles (`x_026eblst01a`, ...) are models of their own with their own hit data,
+/// registered by the stage that has an enemy using them. The bullet models of `models` that
+/// `sp` registers and `dp` (when given) lacks.
+fn companion_models(sp: &Pack, dp: Option<&Pack>, models: &[String]) -> Result<Vec<String>> {
+    let prefixes: Vec<String> = models
+        .iter()
+        .filter_map(|m| EFFECT_NUMBERS.iter().find(|(n, _)| n == m))
+        .map(|(_, number)| format!("x_{number}e"))
+        .collect();
+    let root = u32at(sp.b, sp.table + 8 + 2 * sp.ids.len())?;
+    sp.class(root, "igInfoList")?;
+    let mut out = BTreeSet::new();
+    for id in sp.array(root)? {
+        let r = sp.rec(id)?;
+        if sp.classes[r.class].name != "beModelCtrlInfo" {
+            continue;
+        }
+        let Some(name) = name_of(sp, r).map(|n| String::from_utf8_lossy(n).into_owned()) else {
+            continue;
+        };
+        if prefixes.iter().any(|p| name.starts_with(p.as_str()))
+            && dp.is_none_or(|d| {
+                find_named(d, "beModelCtrlInfo", &name)
+                    .ok()
+                    .flatten()
+                    .is_none()
+            })
+        {
+            out.insert(name);
+        }
+    }
+    Ok(out.into_iter().collect())
+}
+
+/// Where a bullet or effect hangs in the stage's effect tree: the node to copy, and the path
+/// of child indexes from the tree's named top node (`EF01`, `EF02`) down to the shared
+/// `PromotedAttr` node whose child list receives it.
+struct Attach {
+    unit: u32,
+    top: (String, Vec<u8>),
+    path: Vec<usize>,
+}
+
+/// The nodes whose child list holds `child`: (node, child list).
+fn node_holders(p: &Pack, child: u32) -> Vec<(u32, u32)> {
+    let mut found = Vec::new();
+    for id in 0..p.ids.len() as u32 {
+        let Some(idx) = p.ids[id as usize] else {
+            continue;
+        };
+        let r = &p.objects[idx];
+        for (n, memory) in ref_slots(p, r) {
+            if memory {
+                continue;
+            }
+            let Ok(v) = r.val(p.b, n) else { continue };
+            if v != NULL
+                && p.class(v, "igNodeList").is_ok()
+                && p.array(v).is_ok_and(|a| a.contains(&child))
+            {
+                found.push((id, v));
+            }
+        }
+    }
+    found
+}
+
+fn is_promoted(p: &Pack, id: u32) -> bool {
+    p.rec(id).is_ok_and(|r| {
+        p.classes[r.class].name == "igAttrSet" && name_of(p, r) == Some(b"PromotedAttr")
+    })
+}
+
+/// Climb from a model's switch to the effect tree's top node. `None` for a switch that is not
+/// drawn through a `PromotedAttr` under a top named `EF..`, or hangs in several places.
+fn attach_point(sp: &Pack, switch: u32) -> Result<Option<Attach>> {
+    let mut chain = vec![switch];
+    let mut index = Vec::new();
+    loop {
+        need(chain.len() < 16, "scene nesting too deep")?;
+        let holders = node_holders(sp, *chain.last().unwrap());
+        match holders.len() {
+            0 => break,
+            1 => {
+                let (holder, list) = holders[0];
+                index.push(
+                    sp.array(list)?
+                        .iter()
+                        .position(|&c| c == *chain.last().unwrap())
+                        .unwrap(),
+                );
+                chain.push(holder);
+            }
+            _ => return Ok(None),
+        }
+    }
+    let Some(i) = (1..chain.len()).find(|&i| is_promoted(sp, chain[i])) else {
+        return Ok(None);
+    };
+    let top = sp.rec(*chain.last().unwrap())?;
+    let name = name_of(sp, top).unwrap_or_default().to_vec();
+    if !name.starts_with(b"EF0") {
+        return Ok(None);
+    }
+    Ok(Some(Attach {
+        unit: chain[i - 1],
+        top: (sp.classes[top.class].name.clone(), name),
+        path: index[i..].iter().rev().copied().collect(),
+    }))
+}
+
+/// The child list of the node in `dp` that `at` names, if the stage has the same tree shape
+/// and the node carries the same render state.
+fn attach_target(sp: &Pack, dp: &Pack, at: &Attach) -> Result<Option<(u32, bool)>> {
+    let tops = (0..dp.ids.len() as u32)
+        .filter(|&id| {
+            dp.rec(id).is_ok_and(|r| {
+                dp.classes[r.class].name == at.top.0 && name_of(dp, r) == Some(at.top.1.as_slice())
+            }) && node_holders(dp, id).is_empty()
+        })
+        .collect::<Vec<_>>();
+    if tops.len() != 1 {
+        return Ok(None);
+    }
+    let child_list = |p: &Pack, id: u32| -> Result<Option<u32>> {
+        let r = p.rec(id)?;
+        let lists = ref_slots(p, r)
+            .filter(|&(_, memory)| !memory)
+            .filter_map(|(n, _)| r.val(p.b, n).ok())
+            .filter(|&v| v != NULL && p.class(v, "igNodeList").is_ok())
+            .collect::<Vec<_>>();
+        Ok((lists.len() == 1).then(|| lists[0]))
+    };
+    // Follow the source's path; where the destination's tree is shallower or shaped
+    // differently, settle for the deepest shared node on the way.
+    let mut node = tops[0];
+    let mut deepest = None;
+    let mut exact = true;
+    for &i in &at.path {
+        let next = match child_list(dp, node)? {
+            Some(list) => dp.array(list)?.get(i).copied(),
+            None => None,
+        };
+        let Some(next) = next else {
+            exact = false;
+            break;
+        };
+        node = next;
+        if is_promoted(dp, node) {
+            deepest = Some(node);
+        }
+    }
+    let Some(found) = deepest else {
+        return Ok(None);
+    };
+    // The shared node must set up rendering the same way as the one the source used.
+    if exact && found == node {
+        let mut src = sp.rec(node_holders(sp, at.unit)[0].0)?.clone();
+        let dst = dp.rec(node)?;
+        let slots = ref_slots(sp, &src).map(|(n, _)| n).collect::<BTreeSet<_>>();
+        src.fields.retain(|n, _| !slots.contains(n));
+        for (n, range) in &src.fields {
+            if dst
+                .fields
+                .get(n)
+                .is_none_or(|d| dp.b[d.clone()] != sp.b[range.clone()])
+            {
+                exact = false;
+            }
+        }
+    } else {
+        exact = false;
+    }
+    Ok(child_list(dp, found)?.map(|list| (list, exact)))
+}
+
+/// The scene nodes of bullets and effects that must be copied with the models: the switches
+/// of the companion bullet models and of the `beParticleCtrl2Info` effects missing from `dp`,
+/// each flagged when it belongs to one of `models` (by effect number) rather than to another
+/// enemy of the source stage.
+fn effect_switches(
+    sp: &Pack,
+    dp: Option<&Pack>,
+    models: &[String],
+    bullets: &[&String],
+) -> Result<Vec<(u32, bool, String)>> {
+    let numbers: Vec<String> = models
+        .iter()
+        .filter_map(|m| EFFECT_NUMBERS.iter().find(|(n, _)| n == m))
+        .map(|(_, number)| format!("_{number}e"))
+        .collect();
+    let mut out = Vec::new();
+    for m in bullets {
+        if let Some(info) = find_named(sp, "beAction2Info", m)? {
+            out.push((sp.val(info, 7)?, true, m.to_string()));
+        }
+    }
+    let have: BTreeSet<(String, String)> = match dp {
+        Some(d) => effect_infos(d)?
+            .into_iter()
+            .map(|(c, n, _)| (c, n))
+            .collect(),
+        None => BTreeSet::new(),
+    };
+    for (class, name, id) in effect_infos(sp)? {
+        if class == "beParticleCtrl2Info" && !have.contains(&(class, name.clone())) {
+            if let Ok(switch) = sp.val(id, 7) {
+                out.push((
+                    switch,
+                    numbers.iter().any(|n| name.contains(n.as_str())),
+                    name.clone(),
+                ));
+            }
+        }
+    }
+    out.retain(|&(s, _, _)| s != NULL && sp.class(s, "igSwitch").is_ok());
+    Ok(out)
 }
 
 /// Copy the named models' record subgraphs, scripts included, from `src` into `dst`.
@@ -435,18 +721,43 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     let mut roots = Vec::new();
     let mut infos = Vec::new();
     let mut scripts = Vec::new();
-    for m in models {
+    let companions = companion_models(&sp, Some(&dp), models)?;
+    let all: Vec<(&String, bool)> = models
+        .iter()
+        .map(|m| (m, true))
+        .chain(
+            companions
+                .iter()
+                .filter(|c| !models.contains(c))
+                .map(|c| (c, false)),
+        )
+        .collect();
+    for &(m, strict) in &all {
         for class in REGISTERED {
             need(
                 find_named(&dp, class, m)?.is_none(),
                 "destination already carries the model",
             )?;
-            let id = find_named(&sp, class, m)?
-                .ok_or_else(|| bad(&format!("source lacks {class} {m}")))?;
-            roots.push(id);
-            infos.push(id);
+            match find_named(&sp, class, m)? {
+                Some(id) => {
+                    roots.push(id);
+                    infos.push(id);
+                }
+                None if strict => return Err(bad(&format!("source lacks {class} {m}"))),
+                None => {}
+            }
         }
-        if let ModelScene::Info(id) = model_scene(&sp, m)? {
+        // A bullet is drawn however its source stage draws it; one the destination cannot
+        // hang in the same way is registered without a scene node.
+        let scene = if strict {
+            Some(model_scene(&sp, m)?)
+        } else {
+            model_scene(&sp, m).ok().filter(|s| match s {
+                ModelScene::Info(_) => group_children(&dp, b"EM01").is_err(),
+                ModelScene::Group(name) => group_children(&dp, name).is_ok(),
+            })
+        };
+        if let Some(ModelScene::Info(id)) = scene {
             need(
                 find_named(&dp, "igSceneInfo", m)?.is_none(),
                 "destination already carries the model's scene",
@@ -471,11 +782,43 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         }
     }
     // Effects the source stage registers that this stage lacks.
-    let have: BTreeSet<(String, String)> = effect_infos(&dp)?.into_iter().map(|(c, n, _)| (c, n)).collect();
+    let have: BTreeSet<(String, String)> = effect_infos(&dp)?
+        .into_iter()
+        .map(|(c, n, _)| (c, n))
+        .collect();
     for (class, name, id) in effect_infos(&sp)? {
         if !have.contains(&(class, name)) {
             roots.push(id);
             infos.push(id);
+        }
+    }
+    let mut report = Report::default();
+    let mut attached: Vec<(u32, u32)> = Vec::new();
+    let bullets: Vec<&String> = all
+        .iter()
+        .filter(|(_, strict)| !strict)
+        .map(|(m, _)| *m)
+        .collect();
+    for (switch, own, name) in effect_switches(&sp, Some(&dp), models, &bullets)? {
+        let Some(at) = attach_point(&sp, switch)? else {
+            if own {
+                report.unattached.push(format!("{name} (no tree)"));
+            }
+            continue;
+        };
+        if attached.iter().any(|&(u, _)| u == at.unit) {
+            continue;
+        }
+        if let Some((list, exact)) = attach_target(&sp, &dp, &at)? {
+            roots.push(at.unit);
+            attached.push((at.unit, list));
+            if own && !exact {
+                report.approximate.push(name);
+            }
+        } else {
+            if own {
+                report.unattached.push(format!("{name} (no match)"));
+            }
         }
     }
     let (ids, owners) = closure(&sp, &roots)?;
@@ -488,13 +831,19 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         .collect();
     need(
         dp.ids.len() + ids.len() < u16::MAX as usize,
-        "grafted pack exceeds 16-bit directory index",
+        &format!(
+            "grafted pack exceeds 16-bit directory index ({} objects, {} more needed, {} allowed)",
+            dp.ids.len(),
+            ids.len(),
+            u16::MAX
+        ),
     )?;
     let find_class = |p: &Pack, name: &str| p.classes.iter().position(|c| c.name == name);
-    let dst_object_dir = find_class(&dp, "igObjectDirEntry").ok_or_else(|| bad("no object directory"))?;
-    let dst_memory_dir = find_class(&dp, "igMemoryDirEntry").ok_or_else(|| bad("no memory directory"))?;
+    let dst_object_dir =
+        find_class(&dp, "igObjectDirEntry").ok_or_else(|| bad("no object directory"))?;
+    let dst_memory_dir =
+        find_class(&dp, "igMemoryDirEntry").ok_or_else(|| bad("no memory directory"))?;
     let mut builder = Builder::new(&dp);
-    let mut report = Report::default();
     for &s in &ids {
         let entry = &sp.dirs[sp.mapping[s as usize] as usize];
         let issued = if let Some(idx) = sp.ids[s as usize] {
@@ -514,7 +863,9 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
             report.object_bytes += payload.len();
             builder.add(dir, payload, false)?
         } else {
-            let range = sp.memory[s as usize].clone().ok_or_else(|| bad("missing block"))?;
+            let range = sp.memory[s as usize]
+                .clone()
+                .ok_or_else(|| bad("missing block"))?;
             let mut bytes = sp.b[range].to_vec();
             if let Some(&count) = owners.get(&s) {
                 for i in 0..count {
@@ -566,25 +917,53 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         report.scripts = scripts.len();
         let template = dp.val(lua, 4)?;
         let block = builder.mem(words(&entries), template)?;
-        builder.modify(lua, &[(2, entries.len() as u32), (3, entries.len() as u32), (4, block)])?;
+        builder.modify(
+            lua,
+            &[
+                (2, entries.len() as u32),
+                (3, entries.len() as u32),
+                (4, block),
+            ],
+        )?;
     }
     // Draw registration: the enemy model switches hang under a scene group of the stage.
     let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for m in models {
-        let ModelScene::Group(name) = model_scene(&sp, m)? else { continue };
-        let info = find_named(&sp, "beAction2Info", m)?.ok_or_else(|| bad("source lacks action info"))?;
+    for &(m, strict) in &all {
+        let scene = if strict {
+            Some(model_scene(&sp, m)?)
+        } else {
+            model_scene(&sp, m).ok()
+        };
+        let Some(ModelScene::Group(name)) = scene else {
+            continue;
+        };
+        if !strict && group_children(&dp, &name).is_err() {
+            continue;
+        }
+        let info =
+            find_named(&sp, "beAction2Info", m)?.ok_or_else(|| bad("source lacks action info"))?;
         let switch = sp.val(info, 7)?;
         children
             .entry(group_children(&dp, &name)?)
             .or_default()
             .push(map[&switch]);
     }
+    for &(unit, list) in &attached {
+        children.entry(list).or_default().push(map[&unit]);
+    }
     for (list, added) in children {
         let mut entries = dp.array(list)?;
         entries.extend(added);
         let template = dp.val(list, 4)?;
         let block = builder.mem(words(&entries), template)?;
-        builder.modify(list, &[(2, entries.len() as u32), (3, entries.len() as u32), (4, block)])?;
+        builder.modify(
+            list,
+            &[
+                (2, entries.len() as u32),
+                (3, entries.len() as u32),
+                (4, block),
+            ],
+        )?;
     }
     let grows = builder.grown();
     let edits = builder.finish(template)?;
@@ -632,14 +1011,20 @@ fn verify(
                 sp.classes[sr.class].name == v.classes[dr.class].name,
                 "copied object changed class",
             )?;
-            need(sr.fields.len() == dr.fields.len(), "copied object changed shape")?;
+            need(
+                sr.fields.len() == dr.fields.len(),
+                "copied object changed shape",
+            )?;
             let slots = ref_slots(sp, sr).map(|(n, _)| n).collect::<BTreeSet<_>>();
             for (n, range) in &sr.fields {
                 let (a, b) = (&sp.b[range.clone()], &v.b[dr.fields[n].clone()]);
                 if slots.contains(n) {
                     let x = u32at(sp.b, range.start)?;
                     let want = if x == NULL { NULL } else { map[&x] };
-                    need(u32at(v.b, dr.fields[n].start)? == want, "copied reference differs")?;
+                    need(
+                        u32at(v.b, dr.fields[n].start)? == want,
+                        "copied reference differs",
+                    )?;
                 } else {
                     need(a == b, "copied field differs")?;
                 }
@@ -647,21 +1032,26 @@ fn verify(
         } else {
             let (sr, dr) = (
                 sp.memory[s as usize].clone().unwrap(),
-                v.memory[d as usize].clone().ok_or_else(|| bad("copied block missing"))?,
+                v.memory[d as usize]
+                    .clone()
+                    .ok_or_else(|| bad("copied block missing"))?,
             );
             need(sr.len() == dr.len(), "copied block changed size")?;
             if let Some(&count) = owners.get(&s) {
                 for i in 0..count {
                     let x = u32at(sp.b, sr.start + 4 * i)?;
                     let want = if x == NULL { NULL } else { map[&x] };
-                    need(u32at(v.b, dr.start + 4 * i)? == want, "copied list element differs")?;
+                    need(
+                        u32at(v.b, dr.start + 4 * i)? == want,
+                        "copied list element differs",
+                    )?;
                 }
                 need(
                     sp.b[sr.start + 4 * count..sr.end] == v.b[dr.start + 4 * count..dr.end],
                     "copied list tail differs",
                 )?;
             } else {
-                need(&sp.b[sr] == &v.b[dr], "copied block differs")?;
+                need(sp.b[sr] == v.b[dr], "copied block differs")?;
             }
         }
     }
@@ -717,8 +1107,12 @@ pub(super) fn retarget(
             Some(first) if first.contains_key(&row) => {
                 // The name, not the pack, picks the model, so every tier agrees.
                 let name = name_of(&p, r).unwrap_or_default();
-                let hash = name.iter().fold(0xcbf29ce4u32, |h, &c| (h ^ c as u32).wrapping_mul(0x01000193));
-                spread[(hash >> 8) as usize % spread.len()].get(&row).copied()
+                let hash = name.iter().fold(0xcbf29ce4u32, |h, &c| {
+                    (h ^ c as u32).wrapping_mul(0x01000193)
+                });
+                spread[(hash >> 8) as usize % spread.len()]
+                    .get(&row)
+                    .copied()
             }
             _ => rows.get(&row).copied(),
         };
@@ -746,7 +1140,8 @@ impl Spec {
         let group = |m: &str| crate::rowgroup::ROW_GROUPS.iter().find(|g| g.model == m);
         let (from, to) = (group("e_ogre").unwrap(), group(donor).unwrap());
         for (k, &row) in from.rows.iter().enumerate() {
-            spec.rows.insert(row as u32, to.rows[k.min(to.rows.len() - 1)] as u32);
+            spec.rows
+                .insert(row as u32, to.rows[k.min(to.rows.len() - 1)] as u32);
         }
         spec.only_generators = vec!["GENE-00".into()];
         if follow_script {
@@ -764,19 +1159,30 @@ impl Spec {
     /// As [`Self::abyss_intro`], but whole families move: every Ogremon spawn becomes `intro`
     /// and every Goburimon spawn (the crown generators included) becomes `goburi`, both
     /// `(source entry, model)`. Tests an intro whose model is also spawned elsewhere.
-    pub fn abyss_intro_families(intro: (usize, &str), goburi: (usize, &str), follow_script: bool) -> Self {
+    pub fn abyss_intro_families(
+        intro: (usize, &str),
+        goburi: (usize, &str),
+        follow_script: bool,
+    ) -> Self {
         let mut spec = Self::abyss_intro(intro.0, intro.1, follow_script);
         spec.only_generators.clear();
-        let group = |m: &str| crate::rowgroup::ROW_GROUPS.iter().find(|g| g.model == m).unwrap();
+        let group = |m: &str| {
+            crate::rowgroup::ROW_GROUPS
+                .iter()
+                .find(|g| g.model == m)
+                .unwrap()
+        };
         let (from, to) = (group("e_goburi"), group(goburi.1));
         for (k, &row) in from.rows.iter().enumerate() {
-            spec.rows.insert(row as u32, to.rows[k.min(to.rows.len() - 1)] as u32);
+            spec.rows
+                .insert(row as u32, to.rows[k.min(to.rows.len() - 1)] as u32);
         }
         if goburi != intro {
             if goburi.0 == intro.0 {
                 spec.models.push(goburi.1.to_string());
             } else {
-                spec.extra_sources.push((goburi.0, vec![goburi.1.to_string()]));
+                spec.extra_sources
+                    .push((goburi.0, vec![goburi.1.to_string()]));
             }
         }
         spec
@@ -795,15 +1201,60 @@ pub struct IntroStage {
 }
 
 pub const INTRO_STAGES: &[IntroStage] = &[
-    IntroStage { model_entry: 257, generators: &[261, 262, 263], script: "matg05.lua", sites: &[("GENE-06", "e_pharaoh")] },
-    IntroStage { model_entry: 614, generators: &[615, 616, 617], script: "first.lua", sites: &[("GENE-21", "e_goburi"), ("GENE-22", "e_nume")] },
-    IntroStage { model_entry: 621, generators: &[622, 623, 624], script: "first.lua", sites: &[("GENE-00", "e_ogre")] },
-    IntroStage { model_entry: 635, generators: &[636, 637, 638], script: "first.lua", sites: &[("GENE-018", "e_cockatri")] },
-    IntroStage { model_entry: 642, generators: &[643, 644, 645], script: "first.lua", sites: &[("GENE-49", "e_mummy"), ("GENE-50", "e_tyrano")] },
-    IntroStage { model_entry: 649, generators: &[652, 653, 654], script: "first.lua", sites: &[("GENE-00", "e_arachne")] },
-    IntroStage { model_entry: 679, generators: &[680, 681, 682], script: "first.lua", sites: &[("GENE-89", "e_otama"), ("GENE-90", "e_geko")] },
-    IntroStage { model_entry: 709, generators: &[710, 711, 712], script: "first.lua", sites: &[("GENE-54", "e_infermo"), ("GENE-55", "e_megadra")] },
-    IntroStage { model_entry: 723, generators: &[724, 725, 726], script: "first.lua", sites: &[("GENE-01", "e_impdra")] },
+    IntroStage {
+        model_entry: 257,
+        generators: &[261, 262, 263],
+        script: "matg05.lua",
+        sites: &[("GENE-06", "e_pharaoh")],
+    },
+    IntroStage {
+        model_entry: 614,
+        generators: &[615, 616, 617],
+        script: "first.lua",
+        sites: &[("GENE-21", "e_goburi"), ("GENE-22", "e_nume")],
+    },
+    IntroStage {
+        model_entry: 621,
+        generators: &[622, 623, 624],
+        script: "first.lua",
+        sites: &[("GENE-00", "e_ogre")],
+    },
+    IntroStage {
+        model_entry: 635,
+        generators: &[636, 637, 638],
+        script: "first.lua",
+        sites: &[("GENE-018", "e_cockatri")],
+    },
+    IntroStage {
+        model_entry: 642,
+        generators: &[643, 644, 645],
+        script: "first.lua",
+        sites: &[("GENE-49", "e_mummy"), ("GENE-50", "e_tyrano")],
+    },
+    IntroStage {
+        model_entry: 649,
+        generators: &[652, 653, 654],
+        script: "first.lua",
+        sites: &[("GENE-00", "e_arachne")],
+    },
+    IntroStage {
+        model_entry: 679,
+        generators: &[680, 681, 682],
+        script: "first.lua",
+        sites: &[("GENE-89", "e_otama"), ("GENE-90", "e_geko")],
+    },
+    IntroStage {
+        model_entry: 709,
+        generators: &[710, 711, 712],
+        script: "first.lua",
+        sites: &[("GENE-54", "e_infermo"), ("GENE-55", "e_megadra")],
+    },
+    IntroStage {
+        model_entry: 723,
+        generators: &[724, 725, 726],
+        script: "first.lua",
+        sites: &[("GENE-01", "e_impdra")],
+    },
 ];
 
 impl Spec {
@@ -839,7 +1290,8 @@ impl Spec {
             let donor = names
                 .get(orig)
                 .ok_or_else(|| bad(&format!("no donor picked for {orig}")))?;
-            spec.generator_models.insert(generator.to_string(), donor.clone());
+            spec.generator_models
+                .insert(generator.to_string(), donor.clone());
         }
         if follow_script {
             spec.lua_edits.push(LuaEdit {
@@ -849,7 +1301,10 @@ impl Spec {
             });
         }
         if let Some(target) = warp {
-            need(stage.model_entry != 614, "the Goblin Pass is entered from the gate")?;
+            need(
+                stage.model_entry != 614,
+                "the Goblin Pass is entered from the gate",
+            )?;
             spec.lua_edits.push(LuaEdit {
                 entry: 614,
                 scripts: vec!["matz02.lua".into()],
@@ -928,16 +1383,18 @@ impl Profile {
 
     /// Why `dp` cannot take the copy: a class laid out differently, or no scene group to hang it on.
     pub(super) fn misfit(&self, dp: &Pack) -> Option<String> {
-        if let Some(c) = self
-            .classes
-            .iter()
-            .find(|c| dp.classes.iter().any(|d| d.name == c.class.name && d.fields != c.class.fields))
-        {
+        if let Some(c) = self.classes.iter().find(|c| {
+            dp.classes
+                .iter()
+                .any(|d| d.name == c.class.name && d.fields != c.class.fields)
+        }) {
             return Some(format!("class {} is laid out differently", c.class.name));
         }
         let grouped = group_children(dp, b"EM01").is_ok();
         match &self.scene {
-            ModelScene::Group(name) if group_children(dp, name).is_err() => Some("no enemy group".into()),
+            ModelScene::Group(name) if group_children(dp, name).is_err() => {
+                Some("no enemy group".into())
+            }
             ModelScene::Info(_) if grouped => Some("stage has an enemy group".into()),
             _ => None,
         }
@@ -947,10 +1404,17 @@ impl Profile {
 /// Run every source-side check [`graft`] makes, and refuse hit scripts that touch the
 /// kill-count quest counters (those stages count kills in the model's own script).
 pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
+    let (roots, ram) = model_roots(sp, model)?;
+    profile_of(sp, model, roots, ram)
+}
+
+/// The records [`graft`] copies for a donor model in `sp`, and the model's RAM budget.
+pub(super) fn model_roots(sp: &Pack, model: &str) -> Result<(Vec<u32>, u32)> {
     let mut roots = Vec::new();
     let mut ram = 0;
     for class in REGISTERED {
-        let id = find_named(sp, class, model)?.ok_or_else(|| bad(&format!("source lacks {class} {model}")))?;
+        let id = find_named(sp, class, model)?
+            .ok_or_else(|| bad(&format!("source lacks {class} {model}")))?;
         if class == "beModelCtrlInfo" {
             ram = sp.val(sp.val(id, 6)?, 2)?;
         }
@@ -979,6 +1443,37 @@ pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
     for (_, _, id) in effect_infos(sp)? {
         roots.push(id);
     }
+    let bullets = companion_models(sp, None, &[model.to_string()])?;
+    for m in &bullets {
+        for class in REGISTERED {
+            if let Some(id) = find_named(sp, class, m)? {
+                roots.push(id);
+            }
+        }
+    }
+    let mut units = BTreeSet::new();
+    for (switch, _, _) in effect_switches(
+        sp,
+        None,
+        &[model.to_string()],
+        &bullets.iter().collect::<Vec<_>>(),
+    )? {
+        if let Some(at) = attach_point(sp, switch)? {
+            units.insert(at.unit);
+        }
+    }
+    roots.extend(units);
+    for bullet in companion_models(sp, None, &[model.to_string()])? {
+        for prefix in MODEL_SCRIPTS {
+            if let Some(id) = find_named(sp, "beLuaData", &format!("{prefix}{bullet}.lua"))? {
+                roots.push(id);
+            }
+        }
+    }
+    Ok((roots, ram))
+}
+
+fn profile_of(sp: &Pack, model: &str, mut roots: Vec<u32>, ram: u32) -> Result<Profile> {
     let scene = model_scene(sp, model)?;
     if let ModelScene::Info(id) = scene {
         roots.push(id);
@@ -1014,4 +1509,22 @@ pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
 /// Whether the pack has an `igGroup` with this name.
 pub(super) fn has_group(p: &Pack, name: &[u8]) -> bool {
     group_children(p, name).is_ok()
+}
+
+/// The scene nodes [`graft`] would hang for a model's bullets and effects in an identical stage.
+#[cfg(test)]
+pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
+    let bullets = companion_models(sp, None, &[model.to_string()])?;
+    let mut units = Vec::new();
+    for (switch, _, _) in effect_switches(
+        sp,
+        None,
+        &[model.to_string()],
+        &bullets.iter().collect::<Vec<_>>(),
+    )? {
+        if let Some(at) = attach_point(sp, switch)? {
+            units.push(at.unit);
+        }
+    }
+    Ok(units)
 }

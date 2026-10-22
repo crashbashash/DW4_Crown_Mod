@@ -57,16 +57,25 @@ fn main() {
                 (e.parse().expect("entry"), m)
             })
             .collect();
-        let families = env::var("DW4_FAMILIES").unwrap_or_else(|_| "e_goburi,e_blosso,e_ogre".into());
+        let families =
+            env::var("DW4_FAMILIES").unwrap_or_else(|_| "e_goburi,e_blosso,e_ogre".into());
         let families: Vec<&str> = families.split(',').collect();
-        CrownPlan::build_graft(&iso, &Spec::abyss_stress_families(&models, &families)).expect("build list plan")
+        CrownPlan::build_graft(&iso, &Spec::abyss_stress_families(&models, &families))
+            .expect("build list plan")
     } else if let Some(n) = args.get(3).and_then(|a| a.strip_prefix("stress")) {
         let n: usize = n.parse().expect("stress<N>");
-        CrownPlan::build_graft(&iso, &Spec::abyss_stress_families(&STRESS[..n], &["e_goburi"])).expect("build stress plan")
+        CrownPlan::build_graft(
+            &iso,
+            &Spec::abyss_stress_families(&STRESS[..n], &["e_goburi"]),
+        )
+        .expect("build stress plan")
     } else if let Some(m) = args.get(3).and_then(|a| a.strip_prefix("intro:")) {
         // intro:<source entry>:<model>[:lua]
         let mut it = m.split(':');
-        let entry: usize = it.next().and_then(|e| e.parse().ok()).expect("source entry");
+        let entry: usize = it
+            .next()
+            .and_then(|e| e.parse().ok())
+            .expect("source entry");
         let model = it.next().expect("model");
         let spec = Spec::abyss_intro(entry, model, it.next() == Some("lua"));
         CrownPlan::build_graft(&iso, &spec).expect("build intro plan")
@@ -74,7 +83,10 @@ fn main() {
         // stage:<model entry>:<warp target|->:<lua|nolua>:<orig>=<src>/<donor>[,<orig>=<src>/<donor>...]
         let f: Vec<&str> = m.splitn(4, ':').collect();
         let entry: usize = f[0].parse().expect("model entry");
-        let stage = INTRO_STAGES.iter().find(|s| s.model_entry == entry).expect("unknown stage");
+        let stage = INTRO_STAGES
+            .iter()
+            .find(|s| s.model_entry == entry)
+            .expect("unknown stage");
         let warp = (f[1] != "-").then_some(f[1]);
         let picks: Vec<(&str, usize, &str)> = f[3]
             .split(',')

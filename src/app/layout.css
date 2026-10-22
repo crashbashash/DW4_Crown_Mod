@@ -45,6 +45,8 @@ main.app-main {
 .setting-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .setting-title { font-weight: 500; }
 .setting-description { color: var(--muted); font-size: 13px; }
+.setting-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge-experimental { padding: 1px 8px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .switch-track {
   display: flex;
   align-items: center;
@@ -60,6 +62,11 @@ main.app-main {
 .setting-row[data-selected] .switch-thumb { transform: translateX(16px); background: var(--accent-fg); }
 .setting-row[data-hovered] .switch-track { border-color: var(--muted); }
 .setting-row[data-disabled] { opacity: 0.45; cursor: default; }
+.setting-submenu { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 0 12px; padding: 12px 0 12px 16px; border-left: 2px solid var(--border-strong); }
+.setting-field { display: flex; flex-direction: column; gap: 4px; }
+.seed-field { flex: 1 1 140px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.seed-value { font-variant-numeric: tabular-nums; }
+.field-error { margin: 0; color: var(--danger); font-size: 13px; }
 .setting-row[data-focus-visible] { outline: none; }
 .setting-row[data-focus-visible] .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 600px) {

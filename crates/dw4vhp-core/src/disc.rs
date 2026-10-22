@@ -216,6 +216,18 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             return Err(Error::NotThisDisc);
         }
     }
+    let random = if plan.random_enemies {
+        Some(crate::crown::RandomOptions {
+            seed: u64::from(plan.enemy_seed.ok_or_else(|| {
+                Error::CrownData("enemy seed must be resolved before planning".into())
+            })?),
+            donors: crate::crown::RANDOM_DONORS,
+            warp: None,
+            only: None,
+        })
+    } else {
+        None
+    };
     let crowns = if release.is_gamecube() {
         crate::crown::CrownPlan::build_gcm_with_options(
             iso,
@@ -223,6 +235,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_drops,
             plan.random_crown_colours,
             plan.crown_colour_seed.unwrap_or(0),
+            random,
         )?
     } else {
         crate::crown::CrownPlan::build_with_options(
@@ -232,7 +245,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.random_crown_colours,
             plan.crown_colour_seed.unwrap_or(0),
             None,
-            None,
+            random,
         )?
     };
     progress(200, 1000);

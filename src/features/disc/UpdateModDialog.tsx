@@ -14,6 +14,9 @@ export function UpdateModDialog({ status, path, onCancel, onConfirm }: {
         <Dialog>
           <Heading slot="title">Update modded game?</Heading>
           <p>{status.modMetadata ? `This image contains Crown Mod v${status.modMetadata.version}.` : "This image is already modded; its version and options are unknown."} Update it to v{packageInfo.version} using the selected settings?</p>
+          {status.modMetadata?.options.randomEnemies === true && (
+            <p>Its enemies are randomised with seed {status.modMetadata.randomEnemies?.seed ?? status.modMetadata.options.enemySeed ?? "unknown"}.</p>
+          )}
           <p>The verified update will replace this image in place: {path}</p>
           {!status.modMetadata?.recovery && <p>This older build needs your original disc image for its first update. You will be asked to select it next.</p>}
           <div className="row">

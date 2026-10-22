@@ -81,6 +81,8 @@ export class MockBackend implements Backend {
     _fourPlayerSpawns = false,
     _crownDrops = false,
     _randomCrownColours = false,
+    _randomEnemies = false,
+    _enemySeed: number | null = null,
   ): Promise<void> {
     for (let i = 1; i <= 3; i++) {
       this.emit<ProgressEvent>("patch-progress", { phase: "copying", done: i, total: 3 });
@@ -108,8 +110,8 @@ export class MockBackend implements Backend {
     });
   }
 
-  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, _original: string | null): Promise<void> {
-    await this.startPatch("/mock/game.iso", true, fourPlayerSpawns, crownDrops, randomCrownColours);
+  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, _original: string | null): Promise<void> {
+    await this.startPatch("/mock/game.iso", true, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed);
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

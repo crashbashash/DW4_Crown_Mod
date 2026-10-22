@@ -106,7 +106,7 @@ describe("overwrite confirmation", () => {
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: confirm ? "Overwrite" : "Cancel" }));
     if (confirm) {
-      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, true, true, false);
+      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, true, true, false, false, null);
       expect(await screen.findByRole("dialog", { name: "Patching your game" })).toBeTruthy();
     } else {
       expect(patch).not.toHaveBeenCalled();
@@ -288,8 +288,84 @@ test.each(["success", "failure"] as const)("patching uses only the modal until %
    await user.click(screen.getByRole("switch",{name:"Random crown colours"}));
    expect(analyze.mock.calls.length).toBe(before);
    await user.click(screen.getByRole("button",{name:"Patch ISO"}));
-   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso",false,false,false,true));
+   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso",false,false,false,true,false,null));
  });
+
+test("random enemies fills in a seed when switched on, shows it in a submenu and patches with it", async () => {
+  const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  expect(screen.queryByLabelText("Enemy seed")).toBeNull();
+  expect(screen.getByText("Experimental")).toBeTruthy();
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  const field = screen.getByLabelText("Enemy seed") as HTMLInputElement;
+  expect(field.value).toMatch(/^\d{1,10}$/);
+  const seed = Number(field.value);
+  // Switching off hides the submenu, switching on again keeps the seed.
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  expect(screen.queryByLabelText("Enemy seed")).toBeNull();
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe(String(seed));
+  await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, false, true, seed));
+});
+
+test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patching", async () => {
+  const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  const field = screen.getByLabelText("Enemy seed") as HTMLInputElement;
+  await user.clear(field);
+  await user.type(field, "12x");
+  expect((await screen.findByRole("alert")).textContent).toContain("whole number");
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
+  await user.clear(field);
+  await user.type(field, "4294967296");
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
+  await user.clear(field);
+  await user.type(field, "1234");
+  expect(screen.queryByRole("alert")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "New seed" }));
+  expect(field.value).toMatch(/^\d{1,10}$/);
+  await user.clear(field);
+  await user.type(field, "1234");
+  await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, false, true, 1234));
+});
+
+test("a loaded Crown Mod image shows its enemy seed and loads it into Settings", async () => {
+  vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({
+    kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null,
+    discInfo: { console: "PS2", region: "USA", modded: true, modVersion: "0.11.2" },
+    modMetadata: {
+      version: "0.11.2",
+      options: { fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false, randomEnemies: true, enemySeed: 4242 },
+      randomEnemies: { seed: 4242, rulesVersion: 1, stages: 72, generators: 2431, planDigest: "576d752829afc678" },
+      recovery: { formatVersion: 1 },
+    },
+  });
+  const update = vi.spyOn(MockBackend.prototype, "updateMod");
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+  await user.tab();
+  await screen.findByRole("button", { name: "Update ISO" });
+  expect(screen.getByText("Enemy seed").nextElementSibling?.textContent).toBe("4242");
+  expect(screen.getByRole("switch", { name: "Random enemies", checked: true })).toBeTruthy();
+  expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe("4242");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Update ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Update ISO" }));
+  expect((await screen.findByRole("dialog")).textContent).toContain("seed 4242");
+  await user.click(screen.getByRole("button", { name: "Update image" }));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(false, false, false, true, 4242, null));
+});
 
 test("settings refresh output size in the background and only the latest choice enables patching", async () => {
   type Verdict = Awaited<ReturnType<MockBackend["analyze"]>>;
@@ -352,7 +428,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.click(screen.getByRole("button", {name: "Update ISO"}));
    expect((await screen.findByRole("dialog")).textContent).toContain("v0.10.0");
    await user.click(screen.getByRole("button", { name: "Update image" }));
-   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, null));
+   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, false, null, null));
    expect(picker).not.toHaveBeenCalled();
    expect((await screen.findByRole("dialog")).textContent).toContain("/mock/modded.iso");
  });
@@ -401,6 +477,6 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.tab();
    await user.click(await screen.findByRole("button", {name: "Update ISO"}));
    await user.click(await screen.findByRole("button", {name: "Update image"}));
-   expect(update).toHaveBeenCalledWith(false, false, false, null);
+   expect(update).toHaveBeenCalledWith(false, false, false, false, null, null);
    expect(patch).not.toHaveBeenCalled();
  });

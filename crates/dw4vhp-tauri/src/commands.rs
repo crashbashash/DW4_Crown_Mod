@@ -327,19 +327,25 @@ pub async fn plan_summary(app: AppHandle) -> Result<PlanSummaryPayload, String> 
 ///
 /// Returns `Err` synchronously only when no disc has been analysed yet.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_patch(
     output: String,
     overwrite: bool,
     four_player_spawns: Option<bool>,
     crown_drops: Option<bool>,
     random_crown_colours: Option<bool>,
+    random_enemies: Option<bool>,
+    enemy_seed: Option<u32>,
     app: AppHandle,
 ) -> Result<(), String> {
     let permit = app.state::<AppState>().begin_operation()?;
+    let random_enemies = random_enemies.unwrap_or(false);
     let plan = PatchPlan {
         four_player_spawns: four_player_spawns.unwrap_or(false),
         crown_drops: crown_drops.unwrap_or(false),
         random_crown_colours: random_crown_colours.unwrap_or(false),
+        random_enemies,
+        enemy_seed: enemy_seed.filter(|_| random_enemies),
         ..PatchPlan::default()
     };
     let input = {
@@ -394,6 +400,8 @@ pub async fn update_mod(
     four_player_spawns: bool,
     crown_drops: bool,
     random_crown_colours: bool,
+    random_enemies: Option<bool>,
+    enemy_seed: Option<u32>,
     original: Option<String>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -407,10 +415,13 @@ pub async fn update_mod(
         .ok_or_else(|| "Select a modded image first.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let _permit = permit;
+        let random_enemies = random_enemies.unwrap_or(false);
         let plan = PatchPlan {
             four_player_spawns,
             crown_drops,
             random_crown_colours,
+            random_enemies,
+            enemy_seed: enemy_seed.filter(|_| random_enemies),
             ..PatchPlan::default()
         };
         let original = original.map(std::path::PathBuf::from);

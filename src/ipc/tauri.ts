@@ -38,12 +38,12 @@ export class TauriBackend implements Backend {
     return invoke<PlanSummary | null>("plan_summary");
   }
 
-  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false): Promise<void> {
-    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours });
+  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false, randomEnemies = false, enemySeed: number | null = null): Promise<void> {
+    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed });
   }
 
-  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, original: string | null): Promise<void> {
-    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, original });
+  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, original: string | null): Promise<void> {
+    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, original });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

@@ -292,6 +292,11 @@ pub fn update_image(
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
     }
+    if plan.random_enemies && plan.enemy_seed.is_none() {
+        plan.enemy_seed = previous.1["options"]["enemySeed"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok());
+    }
     let raw_out = work.path().join("rebuilt.iso");
     let mut outcome = patch_file(
         &baseline,

@@ -4,6 +4,8 @@ import type { DiscStatus } from "../../bindings";
 export interface DiscPickerProps {
   inputPath: string | null;
   info?: DiscStatus["discInfo"];
+  /** What the selected image says about its own build, when it is a Crown Mod image. */
+  modMetadata?: DiscStatus["modMetadata"];
   onPick: () => void;
   /** A typed path, committed on Enter or blur (not per keystroke). */
   onCommitDiscPath: (path: string) => void;
@@ -13,6 +15,7 @@ export interface DiscPickerProps {
 export function DiscPicker({
   inputPath,
   info,
+  modMetadata,
   onPick,
   onCommitDiscPath,
 }: DiscPickerProps) {
@@ -51,6 +54,9 @@ export function DiscPicker({
         <div><dt>Console</dt><dd>{info.console}</dd></div>
         <div><dt>Region</dt><dd>{info.region}</dd></div>
         <div><dt>Mod</dt><dd>{info.modded ? info.modVersion ? `Crown Mod v${info.modVersion}` : "Modded · version unknown" : "Unmodified"}</dd></div>
+        {info.modded && modMetadata?.options.randomEnemies === true && (
+          <div><dt>Enemy seed</dt><dd className="seed-value">{modMetadata.randomEnemies?.seed ?? modMetadata.options.enemySeed ?? "unknown"}</dd></div>
+        )}
       </dl>}
       <p className="hint">{inputPath === null ? "Choose a disc with Browse, or drag and drop it onto this window." : "You can also drag and drop a disc onto this window."}</p>
     </section>

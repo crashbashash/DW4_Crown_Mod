@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.12.0
+
+- Added an experimental Random enemies option for PS2 and GameCube. Regular enemies in every
+  stage are swapped for other enemies with matching stats. Bosses stay as they are.
+
 ## v0.11.2
 
 - The four-player spawn setting now spawns the Kokatorimon in the practice stage.

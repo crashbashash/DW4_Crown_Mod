@@ -71,6 +71,10 @@ pub struct PatchPlan {
     pub random_crown_colours: bool,
     /// Optional reproducible private colour RNG seed; normally chosen per patch.
     pub crown_colour_seed: Option<u32>,
+    /// Replace the regular enemies of every stage with other enemy models.
+    pub random_enemies: bool,
+    /// Optional reproducible enemy seed; normally chosen per patch and recorded in the image.
+    pub enemy_seed: Option<u32>,
     pub serial: Option<String>,
 }
 
@@ -95,6 +99,8 @@ impl Default for PatchPlan {
             crown_drops: false,
             random_crown_colours: false,
             crown_colour_seed: None,
+            random_enemies: false,
+            enemy_seed: None,
             serial: None,
         }
     }

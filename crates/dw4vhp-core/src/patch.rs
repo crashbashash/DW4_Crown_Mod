@@ -134,19 +134,20 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
-    let resolved;
-    let plan = if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
+    let mut resolved = plan.clone();
+    if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
         let mut seed = [0u8; 4];
         getrandom::fill(&mut seed)
             .map_err(|e| Error::CrownData(format!("could not seed crown colours: {e}")))?;
-        resolved = PatchPlan {
-            crown_colour_seed: Some(u32::from_le_bytes(seed)),
-            ..plan.clone()
-        };
-        &resolved
-    } else {
-        plan
-    };
+        resolved.crown_colour_seed = Some(u32::from_le_bytes(seed));
+    }
+    if plan.random_enemies && plan.enemy_seed.is_none() {
+        let mut seed = [0u8; 4];
+        getrandom::fill(&mut seed)
+            .map_err(|e| Error::CrownData(format!("could not seed enemies: {e}")))?;
+        resolved.enemy_seed = Some(u32::from_le_bytes(seed));
+    }
+    let plan = &resolved;
     match container::detect(input)? {
         Format::Raw => patch_file_internal(input, output, plan, opts, None, progress),
         format => patch_container(format, input, output, plan, opts, progress),
@@ -252,7 +253,10 @@ fn patch_file_internal(
         total: 10000,
     });
     if layout.is_some()
-        && (plan.four_player_spawns || plan.crown_drops || plan.random_crown_colours)
+        && (plan.four_player_spawns
+            || plan.crown_drops
+            || plan.random_crown_colours
+            || plan.random_enemies)
     {
         return Err(Error::CrownData(
             "optional enemy resources require complete retail archives".into(),

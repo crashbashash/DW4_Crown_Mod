@@ -11,7 +11,22 @@ export interface DiscStatus {
   };
   modMetadata?: {
     version: string;
-    options: { fourPlayerSpawns: boolean; betterLoot: boolean; randomCrownColours: boolean };
+    options: {
+      fourPlayerSpawns: boolean;
+      betterLoot: boolean;
+      randomCrownColours: boolean;
+      /** Present on images built with the enemy randomiser. */
+      randomEnemies?: boolean;
+      enemySeed?: number | null;
+    };
+    /** What the enemy randomiser did, when the image has random enemies. */
+    randomEnemies?: {
+      seed: number;
+      rulesVersion: number;
+      stages: number;
+      generators: number;
+      planDigest: string;
+    };
     recovery?: { formatVersion: number };
   };
   size: number;

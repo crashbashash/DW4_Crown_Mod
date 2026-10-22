@@ -16,6 +16,7 @@ mod lua_names;
 mod practice;
 mod random;
 pub use random::Options as RandomOptions;
+pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
 mod river;
 mod spawns;
 
@@ -189,7 +190,9 @@ fn class_defs(b: &[u8]) -> Result<Vec<ClassDef>> {
     for (i, class) in classes.iter().enumerate() {
         let at = table + 24 * i;
         need(
-            u32at(b, at + 4)? == 1 && u32at(b, at + 8)? == 0 && u32at(b, at + 12)? as usize == class.fields.len(),
+            u32at(b, at + 4)? == 1
+                && u32at(b, at + 8)? == 0
+                && u32at(b, at + 12)? as usize == class.fields.len(),
             "class record does not match its class",
         )?;
         let parent = u32at(b, at + 16)?;
@@ -214,7 +217,10 @@ fn add_classes(b: &[u8], add: &[ClassDef]) -> Result<Vec<u8>> {
     // Records go in front of the first class entry, so the entries move 24 bytes per class.
     let mut at = end + 24 * k;
     for d in add {
-        need(!names.contains(&d.class.name.as_str()), "class already defined")?;
+        need(
+            !names.contains(&d.class.name.as_str()),
+            "class already defined",
+        )?;
         let parent = match &d.parent {
             Some(p) => names
                 .iter()
@@ -223,7 +229,14 @@ fn add_classes(b: &[u8], add: &[ClassDef]) -> Result<Vec<u8>> {
             None => u32::MAX,
         };
         let pad = (at + d.class.name.len() + 2) & !1;
-        for v in [(pad - at) as u32, 1, 0, d.class.fields.len() as u32, parent, d.slots] {
+        for v in [
+            (pad - at) as u32,
+            1,
+            0,
+            d.class.fields.len() as u32,
+            parent,
+            d.slots,
+        ] {
             records.extend(v.to_le_bytes());
         }
         entries.extend(d.class.name.as_bytes());
@@ -474,28 +487,39 @@ impl<'p, 'a> Builder<'p, 'a> {
     }
     /// Where blocks were grown, as (offset in the pool, length), in pool order.
     fn grown(&self) -> Vec<(usize, usize)> {
-        let mut g = self.grows.iter().map(|(at, e)| (*at, e.len())).collect::<Vec<_>>();
+        let mut g = self
+            .grows
+            .iter()
+            .map(|(at, e)| (*at, e.len()))
+            .collect::<Vec<_>>();
         g.sort_unstable();
         g
     }
     /// Append `extra` to an existing memory block in place, keeping its ID, so the object
     /// that owns it keeps the same block (the engine never sees a replacement).
     fn grow_mem(&mut self, block: u32, extra: Vec<u8>) -> Result<()> {
-        need(extra.len() % 4 == 0, "unaligned block growth")?;
+        need(extra.len().is_multiple_of(4), "unaligned block growth")?;
         let range = self
             .p
             .memory
             .get(block as usize)
             .and_then(|r| r.clone())
             .ok_or_else(|| bad("missing block to grow"))?;
-        let idx = *self.p.mapping.get(block as usize).ok_or_else(|| bad("missing block entry"))? as usize;
+        let idx = *self
+            .p
+            .mapping
+            .get(block as usize)
+            .ok_or_else(|| bad("missing block entry"))? as usize;
         let dir = &self.p.dirs[idx];
         need(
             self.p.classes[dir.class].name == "igMemoryDirEntry",
             "wrong memory directory class",
         )?;
         let size = dir.val(self.p.b, 7)? as usize;
-        need(size == range.len(), "block size differs from its directory entry")?;
+        need(
+            size == range.len(),
+            "block size differs from its directory entry",
+        )?;
         self.edits.push(Edit {
             range: dir.range.clone(),
             bytes: dir.patch(self.p.b, &[(7, (size + extra.len()) as u32)])?,
@@ -579,7 +603,7 @@ impl<'p, 'a> Builder<'p, 'a> {
         let mut objects = self.objects;
         let mut pool = self.p.b[self.p.pool..].to_vec();
         let mut grown = 0;
-        self.grows.sort_by(|a, b| b.0.cmp(&a.0));
+        self.grows.sort_by_key(|g| std::cmp::Reverse(g.0));
         for (at, extra) in &self.grows {
             grown += extra.len();
             pool.splice(*at..*at, extra.iter().copied());
@@ -826,6 +850,8 @@ pub(crate) enum Piece {
 /// A small, self-contained archive rebuild recipe; original bulk data stays mmap-backed.
 pub struct CrownPlan {
     pieces: Vec<Piece>,
+    /// What the enemy randomiser did, when it ran: recorded in the image signature.
+    random: Option<serde_json::Value>,
     pub regions: Vec<WriteRegion>,
     pub output_size: u64,
     append_offset: usize,
@@ -833,6 +859,7 @@ pub struct CrownPlan {
 /// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
 /// expanded and the river turret scripts updated. Returns the recipe for the new archive and its length. It knows
 /// nothing about the disc filesystem, so ISO9660 and GameCube images share it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_afs(
     iso: &[u8],
     base: usize,
@@ -843,7 +870,7 @@ pub(crate) fn rebuild_afs(
     colour_seed: u32,
     graft: Option<&graft::Spec>,
     random: Option<RandomOptions>,
-) -> Result<(Vec<Piece>, usize)> {
+) -> Result<(Vec<Piece>, usize, Option<serde_json::Value>)> {
     let afs = iso
         .get(base..base + size)
         .ok_or_else(|| bad("NDMW.AFS outside image"))?;
@@ -998,14 +1025,24 @@ pub(crate) fn rebuild_afs(
                         let source = afs
                             .get(soff..soff + slen)
                             .ok_or_else(|| bad("graft source outside archive"))?;
-                        let (more, report) = graft::graft(&bytes, source, &missing)
-                            .map_err(|e| bad(&format!("graft {missing:?} into entry {i} from {src_entry}: {e}")))?;
+                        let (more, report) =
+                            graft::graft(&bytes, source, &missing).map_err(|e| {
+                                bad(&format!(
+                                    "graft {missing:?} into entry {i} from {src_entry}: {e}"
+                                ))
+                            })?;
                         eprintln!("graft entry {i} <- {src_entry}: {report:?}");
                         bytes = materialize(&bytes, &more)?;
                     }
                 } else if g.generator_entries.contains(&i) {
-                    let (out, n) = graft::retarget(&bytes, &g.rows, &g.spread, &g.only_generators, &g.generator_models)
-                        .map_err(|e| bad(&format!("retarget entry {i}: {e}")))?;
+                    let (out, n) = graft::retarget(
+                        &bytes,
+                        &g.rows,
+                        &g.spread,
+                        &g.only_generators,
+                        &g.generator_models,
+                    )
+                    .map_err(|e| bad(&format!("retarget entry {i}: {e}")))?;
                     need(n > 0, "no generator rows were retargeted")?;
                     eprintln!("retarget entry {i}: {n} generators");
                     bytes = out;
@@ -1126,11 +1163,17 @@ pub(crate) fn rebuild_afs(
     }
     pieces.insert(0, Piece::Bytes(prefix));
     if let Some(r) = &random {
-        for line in &r.log {
-            eprintln!("{line}");
+        if std::env::var_os("DW4_RANDOM_LOG").is_some() {
+            for line in &r.log {
+                eprintln!("{line}");
+            }
         }
     }
-    Ok((pieces, cursor))
+    Ok((
+        pieces,
+        cursor,
+        random.as_ref().map(random::Randomiser::summary),
+    ))
 }
 
 impl CrownPlan {
@@ -1157,7 +1200,7 @@ impl CrownPlan {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
-        let (pieces, cursor) = rebuild_afs(
+        let (pieces, cursor, random) = rebuild_afs(
             iso,
             base,
             size,
@@ -1213,12 +1256,13 @@ impl CrownPlan {
             regions,
             output_size: output_size as u64,
             append_offset,
+            random,
         })
     }
     /// GameCube twin of [`CrownPlan::build`]: the rebuilt archive is appended
     /// after the last byte of the image and the FST entry repointed at it.
     pub fn build_gcm(disc: &[u8]) -> Result<Self> {
-        Self::build_gcm_with_options(disc, false, false, false, 0)
+        Self::build_gcm_with_options(disc, false, false, false, 0, None)
     }
     pub(crate) fn build_gcm_with_options(
         disc: &[u8],
@@ -1226,10 +1270,11 @@ impl CrownPlan {
         crown_drops: bool,
         random_crown_colours: bool,
         colour_seed: u32,
+        random: Option<RandomOptions>,
     ) -> Result<Self> {
         let file = gcm::find_file(disc, "ndmw.afs")?;
         let (base, size) = (file.offset as usize, file.size as usize);
-        let (pieces, cursor) = rebuild_afs(
+        let (pieces, cursor, random) = rebuild_afs(
             disc,
             base,
             size,
@@ -1238,7 +1283,7 @@ impl CrownPlan {
             random_crown_colours,
             colour_seed,
             None,
-            None,
+            random,
         )?;
         let append_offset = disc.len();
         need(
@@ -1264,6 +1309,7 @@ impl CrownPlan {
             regions,
             output_size: (append_offset + cursor) as u64,
             append_offset,
+            random,
         })
     }
     /// Append identification outside NDMW.AFS; preserve every resource offset and length.
@@ -1272,7 +1318,11 @@ impl CrownPlan {
         release: crate::release::Release,
         plan: &crate::plan::PatchPlan,
     ) -> Result<Self> {
-        self.finish_signature(release, crate::signature::metadata(release, plan))
+        let mut metadata = crate::signature::metadata(release, plan);
+        if let Some(random) = &self.random {
+            metadata["randomEnemies"] = random.clone();
+        }
+        self.finish_signature(release, metadata)
     }
 
     /// Store the original bytes of every overwritten region outside all game files.
@@ -1299,6 +1349,9 @@ impl CrownPlan {
             .ok_or_else(|| bad("recovery overlaps archive"))?;
         self.pieces.push(Piece::Bytes(vec![0; padding]));
         let mut metadata = crate::signature::metadata(release, plan);
+        if let Some(random) = &self.random {
+            metadata["randomEnemies"] = random.clone();
+        }
         metadata["recovery"] = serde_json::json!({
             "formatVersion": 1, "offset": offset, "length": recovery.len(),
             "sha1": crate::update::digest(&recovery), "originalSize": iso.len(),

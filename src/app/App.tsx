@@ -9,6 +9,7 @@ import { OverwriteDialog } from "../features/output/OverwriteDialog";
 import { PatchingDialog } from "../features/output/PatchingDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { newSeed, parseSeed } from "../features/settings/seed";
 import { UpdateCenter } from "../features/updates/UpdateCenter";
 import { MessageDialog } from "../components/MessageDialog";
 import { BackendProvider, useBackend } from "../ipc/context";
@@ -40,6 +41,8 @@ function AppInner() {
   const [fourPlayerSpawns, setFourPlayerSpawns] = useState(false);
   const [crownDrops, setCrownDrops] = useState(false);
   const [randomCrownColours, setRandomCrownColours] = useState(false);
+  const [randomEnemies, setRandomEnemies] = useState(false);
+  const [enemySeed, setEnemySeed] = useState("");
   const appliedOptionsEpoch = useRef<number | null>(null);
   const applyDetectedOptions = useCallback((status: DiscStatus, epoch: number) => {
     if (appliedOptionsEpoch.current === epoch) return;
@@ -49,6 +52,9 @@ function AppInner() {
       setFourPlayerSpawns(options?.fourPlayerSpawns ?? false);
       setCrownDrops(options?.betterLoot ?? false);
       setRandomCrownColours(options?.randomCrownColours ?? false);
+      const seed = status.modMetadata?.randomEnemies?.seed ?? options?.enemySeed;
+      setRandomEnemies(options?.randomEnemies ?? false);
+      if (options?.randomEnemies === true && typeof seed === "number") setEnemySeed(String(seed));
     }
   }, []);
   const disc = useDisc(backend, fourPlayerSpawns, crownDrops, applyDetectedOptions);
@@ -127,8 +133,15 @@ function AppInner() {
     };
   }, [backend, disc, busy, updating]);
 
+  const info = selectedStatus?.discInfo;
+  const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
   const analyzed = disc.status?.kind === "ok";
-  const canPatch = analyzed && disc.outputPath !== null;
+  const canPatch = analyzed && disc.outputPath !== null && (!randomEnemies || enemySeedValue !== null);
+
+  const changeRandomEnemies = (selected: boolean) => {
+    setRandomEnemies(selected);
+    if (selected && parseSeed(enemySeed) === null) setEnemySeed(newSeed());
+  };
 
   const runPatch = async (output: string, overwrite: boolean) => {
     outputRef.current = output;
@@ -136,7 +149,7 @@ function AppInner() {
     setPatchProgress(0);
     setPatchError(null);
     try {
-      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours);
+      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue);
     } catch (error) {
       setBusy(false);
       setPatchError(String(error));
@@ -161,7 +174,7 @@ function AppInner() {
     }
   };
 
-  const updateMod = async (spawns: boolean, drops: boolean, colours: boolean) => {
+  const updateMod = async (spawns: boolean, drops: boolean, colours: boolean, enemies: boolean, seed: number | null) => {
     const status = discError;
     if (!status || !disc.inputPath || busy) return;
     setBusy(true);
@@ -176,7 +189,7 @@ function AppInner() {
       outputRef.current = disc.inputPath;
       setDismissedDiscStatus(status);
       pendingModUpdate.current = { path: disc.inputPath, status, spawns, drops };
-      await backend.updateMod(spawns, drops, colours, original);
+      await backend.updateMod(spawns, drops, colours, enemies, seed, original);
     } catch (error) {
       pendingModUpdate.current = null;
       setBusy(false);
@@ -223,11 +236,12 @@ function AppInner() {
             <DiscPicker
               key={disc.inputPath ?? ""}
               inputPath={disc.inputPath}
-              info={selectedStatus?.discInfo}
+              info={info}
+              modMetadata={selectedStatus?.modMetadata}
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
-            <SettingsPanel fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} busy={busy || updating || disc.analyzing} />
+            <SettingsPanel fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || disc.analyzing} />
           </div>
           <div className="col">
             <OutputPanel
@@ -256,7 +270,7 @@ function AppInner() {
       {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}
       {!busy && !disc.analyzing && discError !== null && (
         discError.reason === "already-modded" ? (
-          <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod(fourPlayerSpawns, crownDrops, randomCrownColours)} />
+          <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod(fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue)} />
         ) : <MessageDialog title="Unable to open disc" message={discError.text} onClose={() => setDismissedDiscStatus(discError)} />
       )}
       {!busy && !disc.analyzing && patchError !== null && (

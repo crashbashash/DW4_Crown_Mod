@@ -7,16 +7,17 @@ use super::*;
 /// Lua 4.0.1 chunk signature, format flags and the test number `3.14159265358979323846e8`.
 fn header() -> Vec<u8> {
     let mut h = b"\x1bLua@\x01\x04\x04\x04\x20\x06\x09\x08".to_vec();
+    #[allow(clippy::excessive_precision)]
     h.extend(3.14159265358979323846e8_f64.to_le_bytes());
     h
 }
 
 /// A string constant: where its length prefix sits, and its text without the NUL.
-struct Constant {
+pub(super) struct Constant {
     at: usize,
     end: usize,
     depth: usize,
-    text: Vec<u8>,
+    pub(super) text: Vec<u8>,
 }
 
 struct Reader<'a> {
@@ -58,7 +59,9 @@ fn function(r: &mut Reader, depth: usize, out: &mut Vec<Constant>) -> Result<()>
     r.skip(4 * lines)?;
     for _ in 0..r.u32()? {
         let (at, end) = r.string()?.ok_or_else(|| bad("NULL Lua string constant"))?;
-        let text = r.b[at + 4..end].strip_suffix(&[0]).unwrap_or(&r.b[at + 4..end]);
+        let text = r.b[at + 4..end]
+            .strip_suffix(&[0])
+            .unwrap_or(&r.b[at + 4..end]);
         out.push(Constant {
             at,
             end,
@@ -75,7 +78,7 @@ fn function(r: &mut Reader, depth: usize, out: &mut Vec<Constant>) -> Result<()>
     r.skip(4 * code)
 }
 
-fn constants(chunk: &[u8]) -> Result<Vec<Constant>> {
+pub(super) fn constants(chunk: &[u8]) -> Result<Vec<Constant>> {
     let header = header();
     need(chunk.starts_with(&header), "not a Lua 4.0.1 chunk")?;
     let mut r = Reader {
@@ -142,11 +145,15 @@ pub(super) fn rename_in_pack(
         let sharers = (0..p.ids.len() as u32)
             .filter(|&i| {
                 p.ids[i as usize].is_some_and(|x| {
-                    p.classes[p.objects[x].class].name == "beLuaData" && p.val(i, 3).ok() == Some(object)
+                    p.classes[p.objects[x].class].name == "beLuaData"
+                        && p.val(i, 3).ok() == Some(object)
                 })
             })
             .count();
-        need(sharers == 1, &format!("Lua script {script} shares its data object"))?;
+        need(
+            sharers == 1,
+            &format!("Lua script {script} shares its data object"),
+        )?;
         let mem = p.val(object, 3)?;
         let size = p.val(object, 2)? as usize;
         let range = p
@@ -154,7 +161,10 @@ pub(super) fn rename_in_pack(
             .get(mem as usize)
             .and_then(|r| r.as_ref())
             .ok_or_else(|| bad("missing Lua memory"))?;
-        need(size == range.len(), "Lua data size differs from its memory block")?;
+        need(
+            size == range.len(),
+            "Lua data size differs from its memory block",
+        )?;
         let raw = &b[range.start..range.start + size];
         let found = constants(raw)?;
         for name in map.keys() {
@@ -175,7 +185,8 @@ pub(super) fn rename_in_pack(
     let out = materialize(b, &edits)?;
     let v = Pack::parse(&out)?;
     need(
-        p.mapping == v.mapping[..p.mapping.len()] && b[p.pool..] == out[v.pool..v.pool + b.len() - p.pool],
+        p.mapping == v.mapping[..p.mapping.len()]
+            && b[p.pool..] == out[v.pool..v.pool + b.len() - p.pool],
         "Lua rename changed original IDs or memory",
     )?;
     Ok(edits)
@@ -212,7 +223,10 @@ mod tests {
     }
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
@@ -227,7 +241,9 @@ mod tests {
     #[test]
     fn grows_and_shrinks() {
         let old = chunk(&["e_ogre"]);
-        let new = rename(&old, &map(&[("e_ogre", "e_infermo")])).unwrap().unwrap();
+        let new = rename(&old, &map(&[("e_ogre", "e_infermo")]))
+            .unwrap()
+            .unwrap();
         assert_eq!(new, chunk(&["e_infermo"]));
         assert_eq!(new.len(), old.len() + 3);
         assert_eq!(rename(&old, &map(&[("e_goburi", "e_x")])).unwrap(), None);

@@ -13,7 +13,10 @@ fn main() {
         if only.is_some() {
             println!("{}", g.model);
             for &r in g.rows {
-                println!("  {r:3} hp {:6} stat {:?} crit {} para {} rare {}", t.hp[r], t.stat[r], t.crit[r], t.para[r], t.rarity[r]);
+                println!(
+                    "  {r:3} hp {:6} stat {:?} crit {} para {} rare {}",
+                    t.hp[r], t.stat[r], t.crit[r], t.para[r], t.rarity[r]
+                );
             }
             continue;
         }
