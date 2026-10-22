@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.12.2
 
-- Size shared enemy model, actor, animation and scene pools for all generators assigned to them, fixing four-enemy bottlenecks such as seed 1520’s Tyrannomon in Goblin Pass. Crown resources grow with the enemy inventory.
-
-- Carry enemy and projectile sound banks and bindings, including hit/death sounds and Gekomon’s song. Resolve missing retail sound references from complete source packs.
-- Keep authored entrances, model-specific cutscenes and cleanup encounters intact. Preserve timed-quest kill-counter scripts when randomizing enemies.
-- Enemy randomizer rules are now version 4; seeds produce a new plan with these fixes.
+- Fix simultaneous spawn limits for randomized enemies, including Tyrannomon in Goblin Pass.
+- Fix missing enemy and projectile sounds, including hit/death sounds and Gekomon’s song.
+- Preserve scripted entrances. Cannon Numemon and falling MR01 on the Dry Lands train retain their original enemy types.
+- Protect encounters that rely on specific enemies for cutscenes, cleanup, freezing or other scripted actions.
+- Preserve timed-quest and kill-count progression when randomizing enemies.
+- Update enemy randomizer rules to version 4. Existing seeds may produce different enemy placements.
 
 ## v0.12.1
 
