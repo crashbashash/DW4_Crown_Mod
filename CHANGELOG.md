@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.12.1
+
+- The suggested output file name now includes the Random enemies seed, e.g. `[CrownMod] [Seed 1234]`.
+
 ## v0.12.0
 
 - Added an experimental Random enemies option for PS2 and GameCube. Regular enemies in every
