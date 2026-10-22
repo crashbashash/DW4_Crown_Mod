@@ -531,10 +531,11 @@ impl Randomiser {
             .collect::<Vec<_>>()
             .join(" ");
         self.log.push(format!(
-            "stage {entry}: {} generators over {} models ({tally}), intro {:?}",
+            "stage {entry}: {} generators over {} models ({tally}), intro {:?}; enemy generators {}",
             choice.len(),
             pool.len(),
-            names
+            names,
+            first.iter().filter(|g| family(g.row).is_some()).count()
         ));
         Ok(dst)
     }
@@ -601,6 +602,184 @@ mod tests {
 #[cfg(test)]
 mod probe {
     use super::*;
+
+    /// `DW4_RETAIL_USA_ISO=... cargo test probe_scripts -- --ignored --nocapture`
+    /// Every `xxx_<model>.lua` script of the stage packs, by prefix and model.
+    #[test]
+    #[ignore]
+    fn probe_scripts() {
+        let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+        let file = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        let base = file.lba as usize * 2048;
+        let afs = &iso[base..base + file.size as usize];
+        let n = u32at(afs, 4).unwrap() as usize;
+        let mut seen: BTreeMap<(String, String), BTreeSet<usize>> = BTreeMap::new();
+        for e in 0..n {
+            let (o, l) = (u32at(afs, 8 + 8 * e).unwrap() as usize, u32at(afs, 12 + 8 * e).unwrap() as usize);
+            if !(1_500_000..=12_000_000).contains(&l) || memchr::memmem::find(&afs[o..o + l], b"KIND_ENEMY\0").is_none() {
+                continue;
+            }
+            let Ok(p) = Pack::parse(&afs[o..o + l]) else { continue };
+            for id in 0..p.ids.len() as u32 {
+                let Some(i) = p.ids[id as usize] else { continue };
+                let r = &p.objects[i];
+                if p.classes[r.class].name != "beLuaData" {
+                    continue;
+                }
+                let Some(name) = graft::name_of(&p, r) else { continue };
+                let name = String::from_utf8_lossy(name).into_owned();
+                if let Some((prefix, rest)) = name.split_once('_') {
+                    if let Some(model) = rest.strip_suffix(".lua") {
+                        if (model.starts_with("e_") || model.starts_with("f_")) && prefix.len() == 3 {
+                            seen.entry((prefix.to_string(), model.to_string())).or_default().insert(e);
+                        }
+                    }
+                }
+            }
+        }
+        let mut by_prefix: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for ((prefix, model), entries) in &seen {
+            by_prefix.entry(prefix.clone()).or_default().push(format!("{model}x{}", entries.len()));
+        }
+        for (prefix, models) in by_prefix {
+            println!("{prefix}: {}", models.join(" "));
+        }
+    }
+
+    /// `DW4_RETAIL_USA_ISO=... cargo test probe_effects -- --ignored --nocapture`: effect infos stage A has that stage B lacks.
+    #[test]
+    #[ignore]
+    fn probe_effects() {
+        let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+        let file = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        let base = file.lba as usize * 2048;
+        let afs = &iso[base..base + file.size as usize];
+        let names = |entry: usize| {
+            let (o, l) = (u32at(afs, 8 + 8 * entry).unwrap() as usize, u32at(afs, 12 + 8 * entry).unwrap() as usize);
+            let sp = Pack::parse(&afs[o..o + l]).unwrap();
+            let root = u32at(sp.b, sp.table + 8 + 2 * sp.ids.len()).unwrap();
+            let mut out = BTreeSet::new();
+            for e in sp.array(root).unwrap() {
+                let r = sp.rec(e).unwrap();
+                let class = sp.classes[r.class].name.clone();
+                if ["beParticleCtrl2Info", "ParticleInfo", "beActionStarterInfo"].contains(&class.as_str()) {
+                    out.insert(format!("{class}:{}", graft::name_of(&sp, r).map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_default()));
+                }
+            }
+            out
+        };
+        let a: usize = std::env::var("DW4_A").unwrap().parse().unwrap();
+        let b: usize = std::env::var("DW4_B").unwrap().parse().unwrap();
+        let (sa, sb) = (names(a), names(b));
+        println!("only in {a}: {:?}", sa.difference(&sb).collect::<Vec<_>>());
+        println!("only in {b}: {:?}", sb.difference(&sa).collect::<Vec<_>>());
+    }
+
+    /// `DW4_RETAIL_USA_ISO=... DW4_PROBE_MODEL=e_infermo DW4_PROBE_ENTRY=387 cargo test probe_names -- --ignored --nocapture`
+    /// Which infos of the source stage does the model refer to by name, without owning them?
+    #[test]
+    #[ignore]
+    fn probe_names() {
+        let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+        let file = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        let base = file.lba as usize * 2048;
+        let afs = &iso[base..base + file.size as usize];
+        let model = std::env::var("DW4_PROBE_MODEL").unwrap();
+        let entry: usize = std::env::var("DW4_PROBE_ENTRY").unwrap().parse().unwrap();
+        let (o, l) = (u32at(afs, 8 + 8 * entry).unwrap() as usize, u32at(afs, 12 + 8 * entry).unwrap() as usize);
+        let sp = Pack::parse(&afs[o..o + l]).unwrap();
+        let mut roots = vec![];
+        for class in ["beModelCtrlInfo", "beAction2Info", "igAnimationDatabase", "beShadow01Info", "beHitLandDelivInfo"] {
+            roots.push(graft::find_named(&sp, class, &model).unwrap().unwrap());
+        }
+        for prefix in ["hit_", "mag_"] {
+            if let Some(id) = graft::find_named(&sp, "beLuaData", &format!("{prefix}{model}.lua")).unwrap() {
+                roots.push(id);
+            }
+        }
+        let (ids, _) = graft::closure(&sp, &roots).unwrap();
+        // every string the closure carries: string fields and Lua source constants
+        let mut words: BTreeSet<String> = BTreeSet::new();
+        for &id in &ids {
+            if let Some(i) = sp.ids[id as usize] {
+                let r = &sp.objects[i];
+                for (n, range) in &r.fields {
+                    let c = &sp.classes[r.class];
+                    if c.fields.iter().any(|&(t, nn, _)| nn == *n && t == 4) && range.len() > 4 {
+                        let t = String::from_utf8_lossy(&sp.b[range.start + 4..range.end]);
+                        words.insert(t.trim_end_matches('\0').to_string());
+                    }
+                }
+            } else if let Some(r) = sp.memory[id as usize].clone() {
+                for w in sp.b[r].split(|c| !(c.is_ascii_alphanumeric() || *c == b'_')) {
+                    if w.len() >= 4 {
+                        words.insert(String::from_utf8_lossy(w).into_owned());
+                    }
+                }
+            }
+        }
+        println!("{} ids, {} distinct strings", ids.len(), words.len());
+        let mut by: BTreeMap<String, usize> = BTreeMap::new();
+        for &id in &ids {
+            if let Some(i) = sp.ids[id as usize] {
+                *by.entry(sp.classes[sp.objects[i].class].name.clone()).or_default() += 1;
+            }
+        }
+        println!("classes: {by:?}");
+        let mut scripts = vec![];
+        for id in 0..sp.ids.len() as u32 {
+            if let Some(i) = sp.ids[id as usize] {
+                let r = &sp.objects[i];
+                if sp.classes[r.class].name == "beLuaData" {
+                    if let Some(n) = graft::name_of(&sp, r) {
+                        let n = String::from_utf8_lossy(n).into_owned();
+                        if n.contains(model.trim_start_matches("e_")) {
+                            scripts.push(n);
+                        }
+                    }
+                }
+            }
+        }
+        println!("scripts naming the model: {scripts:?}");
+        for name in &scripts {
+            if name.starts_with("hit_") {
+                continue;
+            }
+            let id = graft::find_named(&sp, "beLuaData", name).unwrap().unwrap();
+            let object = sp.val(id, 3).unwrap();
+            let (size, mem) = (sp.val(object, 2).unwrap() as usize, sp.val(object, 3).unwrap());
+            let range = sp.memory[mem as usize].clone().unwrap();
+            let code = &sp.b[range.start..range.start + size];
+            let words: Vec<String> = code
+                .split(|c| !(c.is_ascii_graphic() || *c == b' '))
+                .filter(|w| w.len() >= 3)
+                .map(|w| String::from_utf8_lossy(w).into_owned())
+                .collect();
+            println!("{name} ({size} B): {words:?}");
+        }
+        let root = u32at(sp.b, sp.table + 8 + 2 * sp.ids.len()).unwrap();
+        for e in sp.array(root).unwrap() {
+            if ids.contains(&e) {
+                continue;
+            }
+            let r = sp.rec(e).unwrap();
+            let name = graft::name_of(&sp, r).map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_default();
+            if !name.is_empty() && words.contains(&name) {
+                println!("  refers to {} {name}", sp.classes[r.class].name);
+            }
+        }
+        let mut effects: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for e in sp.array(root).unwrap() {
+            let r = sp.rec(e).unwrap();
+            let class = sp.classes[r.class].name.clone();
+            if ["beParticleCtrl2Info", "ParticleInfo", "beActionStarterInfo", "beHitLandModelInfo", "beSwitchCtrlInfo", "beTextureCtrlInfo"].contains(&class.as_str()) {
+                let name = graft::name_of(&sp, r).map(|n| String::from_utf8_lossy(n).into_owned()).unwrap_or_default();
+                effects.entry(class).or_default().push(name);
+            }
+        }
+        println!("effect infos in the stage: {effects:?}");
+        println!("strings: {:?}", words.iter().filter(|w| w.len() > 3).take(400).collect::<Vec<_>>());
+    }
 
     /// `DW4_RETAIL_USA_ISO=... cargo test probe_classes -- --ignored --nocapture`
     #[test]

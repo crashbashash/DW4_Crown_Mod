@@ -11,6 +11,39 @@ const REGISTERED: [&str; 5] = [
     "beShadow01Info",
     "beHitLandDelivInfo",
 ];
+/// The scripts a model carries, named `<prefix><model>.lua`: damage handling (`hit_`), magic
+/// (`mag_`), summons and sequence calls (`cal_`), bind end (`bck_`), hooks (`hck_`), attack
+/// handling (`ahp_`, `aim_`), movement (`mch_`), shapes (`shp_`) and Machinedramon's whip
+/// triggers (`wh1_`, `wh2_`). The boss-only `ded_` and
+/// `wht_` scripts are left behind: no donor is a boss.
+const MODEL_SCRIPTS: [&str; 11] = [
+    "hit_", "mag_", "cal_", "bck_", "hck_", "ahp_", "aim_", "mch_", "shp_", "wh1_", "wh2_",
+];
+/// Classes of the effect infos a stage registers by name for the attacks of its enemies
+/// (`x_026eblst01a`, `y_027emagc01a`, ...): the starter that delivers the attack and its
+/// particles. An enemy's attack looks them up by name, so a copied model needs them too.
+const EFFECT_CLASSES: [&str; 3] = ["beActionStarterInfo", "beParticleCtrl2Info", "ParticleInfo"];
+
+/// The named effect infos in the pack's root `igInfoList`: (class, name, id).
+fn effect_infos(p: &Pack) -> Result<Vec<(String, String, u32)>> {
+    let root = u32at(p.b, p.table + 8 + 2 * p.ids.len())?;
+    p.class(root, "igInfoList")?;
+    let mut out = Vec::new();
+    for id in p.array(root)? {
+        let r = p.rec(id)?;
+        let class = &p.classes[r.class].name;
+        if !EFFECT_CLASSES.contains(&class.as_str()) {
+            continue;
+        }
+        if let Some(name) = name_of(p, r).map(|n| String::from_utf8_lossy(n).into_owned()) {
+            if !name.is_empty() {
+                out.push((class.clone(), name, id));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Lists whose memory block holds plain values rather than object IDs.
 const RAW_LISTS: [&str; 6] = [
     "igVec3fList",
@@ -425,7 +458,7 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
             roots.push(id);
             infos.push(id);
         }
-        for prefix in ["hit_", "mag_"] {
+        for prefix in MODEL_SCRIPTS {
             let name = format!("{prefix}{m}.lua");
             need(
                 find_named(&dp, "beLuaData", &name)?.is_none(),
@@ -435,6 +468,14 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
                 roots.push(id);
                 scripts.push((name.into_bytes(), id));
             }
+        }
+    }
+    // Effects the source stage registers that this stage lacks.
+    let have: BTreeSet<(String, String)> = effect_infos(&dp)?.into_iter().map(|(c, n, _)| (c, n)).collect();
+    for (class, name, id) in effect_infos(&sp)? {
+        if !have.contains(&(class, name)) {
+            roots.push(id);
+            infos.push(id);
         }
     }
     let (ids, owners) = closure(&sp, &roots)?;
@@ -915,7 +956,7 @@ pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
         }
         roots.push(id);
     }
-    for prefix in ["hit_", "mag_"] {
+    for prefix in MODEL_SCRIPTS {
         let name = format!("{prefix}{model}.lua");
         if let Some(id) = find_named(sp, "beLuaData", &name)? {
             let object = sp.val(id, 3)?;
@@ -934,6 +975,9 @@ pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
             }
             roots.push(id);
         }
+    }
+    for (_, _, id) in effect_infos(sp)? {
+        roots.push(id);
     }
     let scene = model_scene(sp, model)?;
     if let ModelScene::Info(id) = scene {
