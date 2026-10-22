@@ -62,6 +62,8 @@ options. Detection checks it first and retains the game-data scan for older imag
 
 ## Testing against real discs
 
+See [random enemies](testing/random-enemies.md) for shared enemy capacity, audio and scripted entrance regressions.
+
 Point these environment variables at clean local images:
 `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`, `DW4_RETAIL_JAPAN_ISO`.
 

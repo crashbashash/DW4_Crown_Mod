@@ -4,6 +4,7 @@
 //! nearest the original's, so a stage keeps its difficulty. Bosses, generators that stage
 //! scripts wait on by name, and kill-count stages are left as shipped; cutscenes that wait on
 //! an intro enemy by name get their name constants renamed to the model now spawned.
+//! Authored spawn sequences keep their original enemies; imported models carry their audio.
 use super::graft::{self, Retarget, INTRO_STAGES};
 use super::lua_names;
 use super::*;
@@ -12,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 1;
+pub const RULES_VERSION: u32 = 4;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 
@@ -27,7 +28,7 @@ pub struct Options {
 }
 
 /// Ordinary enemies: the models that may be copied into other stages.
-const REGULAR: &[&str] = &[
+pub(super) const REGULAR: &[&str] = &[
     "e_goburi",
     "e_nume",
     "e_scum",
@@ -99,6 +100,8 @@ const PINNED: &[(usize, &[&str])] = &[
 /// Kill-count quest stages: their clear counts kills in the hit scripts of these models and the
 /// enemy supply is fixed, so enemies only trade places among them and nothing is copied in.
 const RESTRICTED: &[(usize, &[&str])] = &[
+    // Timed quest: each native hit script updates the per-player kill counter.
+    (449, &["e_mummy", "e_mecha1", "e_minotaru", "e_pharaoh"]),
     (457, &["e_mummy", "e_mecha2"]),
     (464, &["e_mummy", "e_mecha2"]),
 ];
@@ -174,6 +177,79 @@ struct Gen {
     most: u32,
 }
 
+/// Each tier lists (original family, selected family, maximum live count).
+/// Tiers are alternatives, while generators within a tier share the same pool.
+fn shared_capacity(
+    tiers: impl IntoIterator<Item = Vec<(&'static str, &'static str, u32)>>,
+    residents: &BTreeMap<String, u32>,
+) -> BTreeMap<String, usize> {
+    let mut demand: BTreeMap<String, usize> = BTreeMap::new();
+    for tier in tiers {
+        let mut totals: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+        for (from, to, count) in tier {
+            let (all, incoming) = totals.entry(to).or_default();
+            *all += count as usize;
+            if from != to {
+                *incoming += count as usize;
+            }
+        }
+        for (model, (all, incoming)) in totals {
+            // Existing native pools also serve scripts (e.g. summons). Keep
+            // their authored headroom when adding generators of another family.
+            let reserve = residents.get(model).map_or(0, |n| *n as usize + incoming);
+            let need = demand.entry(model.to_string()).or_default();
+            *need = (*need).max(all.max(reserve));
+        }
+    }
+    demand
+}
+
+/// Stage scripts can freeze, remove, damage or wait on enemies by model name.
+/// Keep those models in their scripted encounters. Intro scripts with explicit
+/// retargeting support are handled separately, and model-owned callbacks travel
+/// with their model rather than constraining unrelated generators.
+fn scripted_models(p: &Pack, entry: usize) -> Result<BTreeSet<&'static str>> {
+    let intro = INTRO_STAGES.iter().find(|s| s.model_entry == entry);
+    let mut protected = BTreeSet::new();
+    for id in 0..p.ids.len() as u32 {
+        if p.class(id, "beLuaData").is_err() {
+            continue;
+        }
+        let Some(name) = graft::name_of(p, p.rec(id)?).and_then(|s| std::str::from_utf8(s).ok())
+        else {
+            continue;
+        };
+        if intro.is_some_and(|i| i.script == name)
+            || graft::MODEL_SCRIPTS
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
+        let obj = p.val(id, 3)?;
+        let size = p.val(obj, 2)? as usize;
+        let range = p
+            .memory
+            .get(p.val(obj, 3)? as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| bad("missing stage script"))?;
+        need(size <= range.len(), "stage script exceeds memory")?;
+        let constants = lua_names::constants(&p.b[range.start..range.start + size])?;
+        if !constants
+            .iter()
+            .any(|c| c.text == b"MODELCTRL" || c.text == b"ENEMY")
+        {
+            continue;
+        }
+        for &model in REGULAR.iter().chain(REPLACEABLE) {
+            if constants.iter().any(|c| c.text == model.as_bytes()) {
+                protected.insert(model);
+            }
+        }
+    }
+    Ok(protected)
+}
+
 fn generators(p: &Pack) -> Result<Vec<Gen>> {
     let mut out = Vec::new();
     for (id, index) in p.ids.iter().enumerate() {
@@ -236,8 +312,10 @@ pub(super) struct Randomiser {
     table: EnemyTable,
     /// Models by name and whether the source hangs them as a scene of their own.
     donors: BTreeMap<(&'static str, bool), Donor>,
+    audio_sources: BTreeMap<&'static str, usize>,
     stages: BTreeMap<usize, Stage>,
     plans: BTreeMap<usize, Retarget>,
+    pub(super) sounds: BTreeMap<usize, Vec<u8>>,
     pub log: Vec<String>,
     stats: Stats,
 }
@@ -309,8 +387,10 @@ impl Randomiser {
             opts,
             table,
             donors: BTreeMap::new(),
+            audio_sources: BTreeMap::new(),
             stages: BTreeMap::new(),
             plans: BTreeMap::new(),
+            sounds: BTreeMap::new(),
             log: Vec::new(),
             stats: Stats::default(),
         };
@@ -349,26 +429,48 @@ impl Randomiser {
                     }
                 }
             }
-            let pinned: BTreeSet<String> = PINNED
+            let mut pinned: BTreeSet<String> = PINNED
                 .iter()
                 .filter(|(entry, _)| *entry == e)
                 .flat_map(|(_, names)| names.iter().map(|n| n.to_string()))
                 .collect();
             let first = generators(&Pack::parse(data(gens[0]).unwrap())?)?;
+            // Authored entrances (cannon waits, train falls, jumps) belong to the original
+            // model's animation and movement controller. Keep those spawns intact.
+            for &pack in &gens {
+                pinned.extend(
+                    generators(&Pack::parse(data(pack).unwrap())?)?
+                        .into_iter()
+                        .filter(|g| g.seq)
+                        .map(|g| g.name),
+                );
+            }
             // Only bosses keep their model away from the other generators: a generator a
             // script merely waits on can still share its model with the rest of the stage.
-            let pinned_families = first
+            let mut pinned_families: BTreeSet<_> = first
                 .iter()
                 .filter(|g| pinned.contains(&g.name))
                 .filter_map(|g| family(g.row))
                 .filter(|f| !replaceable(f) || BOSS_REGULAR.contains(&(e, *f)))
                 .collect();
+            pinned_families.extend(scripted_models(&p, e)?);
             let stage = Stage {
                 gens,
                 residents,
                 pinned,
                 pinned_families,
             };
+            for &model in REGULAR {
+                if !me.audio_sources.contains_key(model)
+                    && stage.residents.contains_key(model)
+                    && super::sound::complete(
+                        data(e - 1).ok_or_else(|| bad("missing source sounds"))?,
+                        model,
+                    )?
+                {
+                    me.audio_sources.insert(model, e - 1);
+                }
+            }
             let own_scene = !graft::has_group(&p, b"EM01");
             for &m in REGULAR {
                 if me.donors.contains_key(&(m, own_scene))
@@ -465,7 +567,9 @@ impl Randomiser {
                 s.sites
                     .iter()
                     .copied()
-                    .filter(|(g, _)| !stage.pinned.contains(*g))
+                    .filter(|(g, model)| {
+                        !stage.pinned.contains(*g) && !stage.pinned_families.contains(*model)
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -568,6 +672,29 @@ impl Randomiser {
                             report.unattached
                         ));
                     }
+                    let sound_entry = entry - 1;
+                    let current = self
+                        .sounds
+                        .get(&sound_entry)
+                        .map(Vec::as_slice)
+                        .unwrap_or(data(sound_entry)?);
+                    let audio = *self
+                        .audio_sources
+                        .get(m)
+                        .ok_or_else(|| bad(&format!("{m}: no complete audio source")))?;
+                    let companions = graft::companion_models(
+                        &Pack::parse(data(donor.source)?)?,
+                        None,
+                        &[m.to_string()],
+                    )?;
+                    let sounds = super::sound::graft_enemy(
+                        current,
+                        data(donor.source - 1)?,
+                        data(audio)?,
+                        m,
+                        &companions,
+                    )?;
+                    self.sounds.insert(sound_entry, sounds);
                     self.stats.copied += 1;
                     self.stats.approximate += report.approximate.len();
                     self.stats.unattached += report.unattached.len();
@@ -684,11 +811,60 @@ impl Randomiser {
                     continue;
                 };
                 rt.rows.insert(g.name.clone(), row);
-                if g.seq {
-                    rt.blank_seq.insert(g.name);
-                }
             }
             self.plans.insert(pack, rt);
+        }
+        // A model pool belongs to the stage, not to an individual generator.
+        // Sum the largest authored party count for every user of that model,
+        // including pinned/unchanged generators, and take the maximum over the
+        // difficulty packs (only one difficulty is loaded at a time).
+        let mut tiers = Vec::new();
+        for &pack in &stage.gens {
+            let mut tier = Vec::new();
+            for g in generators(&Pack::parse(data(pack)?)?)? {
+                let row = self.plans[&pack]
+                    .rows
+                    .get(&g.name)
+                    .copied()
+                    .unwrap_or(g.row);
+                if let (Some(from), Some(to)) = (family(g.row), family(row)) {
+                    tier.push((from, to, g.most));
+                }
+            }
+            tiers.push(tier);
+        }
+        let demand = shared_capacity(tiers, &stage.residents);
+        let assigned: BTreeSet<_> = choice.values().cloned().collect();
+        for model in assigned {
+            let needed = demand.get(&model).copied().unwrap_or(0);
+            let old = super::capacity::slots(&Pack::parse(&dst)?, &model)?;
+            if needed > old {
+                dst = super::capacity::expand(&dst, &model, needed)?;
+                self.log.push(format!(
+                    "stage {entry}: {model} shared slots {old} -> {needed}"
+                ));
+            }
+        }
+        // More enemy instances can also exceed the base crown inventory bound.
+        let p = Pack::parse(&dst)?;
+        let mut enemy_slots = 0usize;
+        for (id, ix) in p.ids.iter().enumerate() {
+            if let Some(ix) = ix {
+                let r = &p.objects[*ix];
+                if p.classes[r.class].name == "beModelCtrlInfo"
+                    && r.field(7)
+                        .is_ok_and(|f| p.b[f.start + 4..f.end].starts_with(b"KIND_ENEMY\0"))
+                {
+                    enemy_slots += p.array(p.val(id as u32, 6)?)?.len();
+                }
+            }
+        }
+        if graft::find_named(&p, "beModelCtrlInfo", "i_rareicon")?.is_some() {
+            dst = super::capacity::expand(
+                &dst,
+                "i_rareicon",
+                (enemy_slots + 4).max(CAPACITY as usize),
+            )?;
         }
         if let Some(intro) = intro {
             if !names.is_empty() {
@@ -772,6 +948,213 @@ mod tests {
         t.stat[394][0] = 332;
         t.rarity[394] = 1;
         t
+    }
+
+    #[test]
+    fn shared_generators_need_the_sum_and_tiers_are_alternatives() {
+        let demand = shared_capacity(
+            [
+                vec![
+                    ("e_goburi", "e_tyrano", 4),
+                    ("e_goburi", "e_tyrano", 4),
+                    ("e_ogre", "e_tyrano", 1),
+                ],
+                vec![("e_goburi", "e_tyrano", 2), ("e_goburi", "e_tyrano", 2)],
+            ],
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            demand["e_tyrano"], 9,
+            "two four-enemy waves plus the nearby singleton"
+        );
+        let native = BTreeMap::from([("e_mummy".to_string(), 12)]);
+        let demand = shared_capacity(
+            [vec![("e_goburi", "e_mummy", 4), ("e_mummy", "e_mummy", 1)]],
+            &native,
+        );
+        assert_eq!(
+            demand["e_mummy"], 16,
+            "keep native capacity for script summons as well as new generators"
+        );
+    }
+
+    #[test]
+    fn cannon_and_train_entrances_survive_randomisation() {
+        let Some(path) = env::var_os("DW4_RETAIL_USA_ISO") else {
+            return;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let file = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        let base = file.lba as usize * 2048;
+        let afs = &iso[base..base + file.size as usize];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + i * 8).unwrap() as usize,
+                    u32at(afs, 12 + i * 8).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let data = |e: usize| {
+            let (o, l) = entries[e];
+            &afs[o..o + l]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let mut r = Randomiser::scan(
+            afs,
+            &entries,
+            EnemyTable::read(&iso, &layout).unwrap(),
+            Options {
+                seed: 7,
+                donors: 0,
+                warp: None,
+                only: None,
+            },
+        )
+        .unwrap();
+        let train = *r
+            .stages
+            .iter()
+            .find(|(_, s)| s.gens.contains(&659))
+            .unwrap()
+            .0;
+        let mut protected = 0;
+        let mut changed = 0;
+        for e in [614, train] {
+            r.stage(e, data(e).to_vec(), afs, &entries).unwrap();
+            for &pack in &r.stages[&e].gens {
+                let original = Pack::parse(data(pack)).unwrap();
+                let out = r
+                    .retarget(pack, data(pack))
+                    .unwrap()
+                    .unwrap_or_else(|| data(pack).to_vec());
+                let out = Pack::parse(&out).unwrap();
+                let after = generators(&out).unwrap();
+                for g in generators(&original).unwrap() {
+                    let new = after.iter().find(|n| n.name == g.name).unwrap();
+                    if g.seq {
+                        assert_eq!(new.row, g.row, "entrance {} in {pack}", g.name);
+                        assert!(new.seq);
+                        protected += 1;
+                    } else if new.row != g.row {
+                        changed += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            protected > 50,
+            "cover the cannon and train entrances on every difficulty"
+        );
+        assert!(changed > 0, "ordinary spawns still randomise");
+    }
+
+    #[test]
+    fn seed_1520_gamecube_shared_capacity_covers_every_generator() {
+        let Some(path) = env::var_os("DW4_RETAIL_GC_USA_ISO") else {
+            return;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+        let afs = &iso[f.offset as usize..(f.offset + f.size) as usize];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let data = |e: usize| {
+            let (o, l) = entries[e];
+            &afs[o..o + l]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let mut r = Randomiser::scan(
+            afs,
+            &entries,
+            EnemyTable::read(&iso, &layout).unwrap(),
+            Options {
+                seed: 1520,
+                donors: 3,
+                warp: None,
+                only: Some(vec![614]),
+            },
+        )
+        .unwrap();
+        let initial = materialize(data(614), &expand(data(614)).unwrap()).unwrap();
+        let out = r.stage(614, initial, afs, &entries).unwrap();
+        let p = Pack::parse(&out).unwrap();
+        let mut checked = 0;
+        for &pack in &r.stages[&614].gens {
+            let retargeted = r.retarget(pack, data(pack)).unwrap().unwrap();
+            let after = generators(&Pack::parse(&retargeted).unwrap()).unwrap();
+            let mut demand = BTreeMap::<&str, usize>::new();
+            for g in &after {
+                if let Some(m) = family(g.row) {
+                    if REGULAR.contains(&m) {
+                        *demand.entry(m).or_default() += g.most as usize;
+                    }
+                }
+            }
+            for (model, count) in demand {
+                if r.plans[&pack]
+                    .rows
+                    .values()
+                    .any(|&row| family(row) == Some(model))
+                {
+                    assert!(
+                        super::super::capacity::slots(&p, model).unwrap() >= count,
+                        "{pack} {model}: need {count}"
+                    );
+                    checked += 1;
+                }
+            }
+            // Maxima must still be the authored maxima, for all four party sizes.
+            let original = Pack::parse(data(pack)).unwrap();
+            let patched = Pack::parse(&retargeted).unwrap();
+            for (id, ix) in original.ids.iter().enumerate() {
+                if let Some(ix) = ix {
+                    if original.classes[original.objects[*ix].class].name == "beGeneraterPlayerData"
+                    {
+                        assert_eq!(
+                            original.val(id as u32, 3).unwrap(),
+                            patched.val(id as u32, 3).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked >= 9);
+        assert!(
+            super::super::capacity::slots(&p, "e_tyrano").unwrap() > 4,
+            "the imported four-slot Tyrannomon pool must grow"
+        );
+        let mut total = 4;
+        for (id, ix) in p.ids.iter().enumerate() {
+            if let Some(ix) = ix {
+                let rec = &p.objects[*ix];
+                if p.classes[rec.class].name == "beModelCtrlInfo"
+                    && rec
+                        .field(7)
+                        .is_ok_and(|f| p.b[f.start + 4..f.end].starts_with(b"KIND_ENEMY\0"))
+                {
+                    total += p.array(p.val(id as u32, 6).unwrap()).unwrap().len();
+                }
+            }
+        }
+        assert!(super::super::capacity::slots(&p, "i_rareicon").unwrap() >= total);
+        eprintln!(
+            "seed 1520: Tyrannomon slots {}, crown slots {}",
+            super::super::capacity::slots(&p, "e_tyrano").unwrap(),
+            super::super::capacity::slots(&p, "i_rareicon").unwrap()
+        );
     }
 
     #[test]
@@ -1701,6 +2084,161 @@ mod probe {
                 println!("{:?}", &p.b[seq.clone()]);
                 break;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dependency_audit {
+    use super::*;
+
+    #[test]
+    fn every_scripted_spawn_and_quest_dependency_survives() {
+        for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+            let Some(path) = env::var_os(variable) else {
+                continue;
+            };
+            let iso = std::fs::read(path).unwrap();
+            let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+                let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+                (f.offset as usize, f.size as usize)
+            } else {
+                let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+                (f.lba as usize * 2048, f.size as usize)
+            };
+            let afs = &iso[base..base + size];
+            let entries = (0..u32at(afs, 4).unwrap() as usize)
+                .map(|i| {
+                    (
+                        u32at(afs, 8 + 8 * i).unwrap() as usize,
+                        u32at(afs, 12 + 8 * i).unwrap() as usize,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let data = |e: usize| {
+                let (o, l) = entries[e];
+                &afs[o..o + l]
+            };
+            let layout = crate::release::detect(&iso)
+                .unwrap()
+                .layout_in(&iso)
+                .unwrap();
+            let mut r = Randomiser::scan(
+                afs,
+                &entries,
+                EnemyTable::read(&iso, &layout).unwrap(),
+                Options {
+                    seed: 1520,
+                    donors: 0,
+                    warp: None,
+                    only: None,
+                },
+            )
+            .unwrap();
+            for (e, models) in [
+                (265, vec!["e_mummy", "e_pharaoh", "e_mecha1", "e_mecha2"]),
+                (628, vec!["e_nume"]),
+                (649, vec!["e_mummy", "e_tyrano"]),
+                (686, vec!["e_geko", "e_otama", "e_torta"]),
+            ] {
+                for model in models {
+                    assert!(
+                        r.stages[&e].pinned_families.contains(model),
+                        "{e} {model} is controlled by stage scripts"
+                    );
+                }
+            }
+            let (mut protected, mut sequences, mut changed) = (0, 0, 0);
+            let mut kinds = BTreeSet::new();
+            for (e, stage) in r.stages.clone() {
+                let initial = if memchr::memmem::find(data(e), b"i_rareicon").is_some() {
+                    materialize(data(e), &expand(data(e)).unwrap()).unwrap()
+                } else {
+                    data(e).to_vec()
+                };
+                let out = r
+                    .stage(e, initial, afs, &entries)
+                    .unwrap_or_else(|err| panic!("{variable} {e}: {err}"));
+                for pack in &stage.gens {
+                    let original = Pack::parse(data(*pack)).unwrap();
+                    let after = r
+                        .retarget(*pack, data(*pack))
+                        .unwrap()
+                        .unwrap_or_else(|| data(*pack).to_vec());
+                    let after = Pack::parse(&after).unwrap();
+                    let target = generators(&after).unwrap();
+                    for g in generators(&original).unwrap() {
+                        let target = target.iter().find(|n| n.name == g.name).unwrap();
+                        let must_keep = g.seq
+                            || stage.pinned.contains(&g.name)
+                            || family(g.row).is_some_and(|m| stage.pinned_families.contains(m));
+                        if must_keep {
+                            assert_eq!(target.row, g.row, "{variable} {pack} {}", g.name);
+                            let id = original.named("beGeneraterData", &g.name).unwrap();
+                            let f = original
+                                .rec(id)
+                                .unwrap()
+                                .field(graft::GENERATOR_SEQ)
+                                .unwrap();
+                            let t = after.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
+                            assert_eq!(original.b[f.clone()], after.b[t]);
+                            protected += 1;
+                            if g.seq && family(g.row).is_some_and(|m| m.starts_with("e_")) {
+                                sequences += 1;
+                                kinds.insert(
+                                    String::from_utf8_lossy(&original.b[f.start + 4..f.end])
+                                        .trim_end_matches('\0')
+                                        .to_string(),
+                                );
+                            }
+                        } else if target.row != g.row {
+                            changed += 1;
+                        }
+                        if e == 449 && target.row != g.row {
+                            assert!(["e_mummy", "e_mecha1", "e_minotaru", "e_pharaoh"]
+                                .contains(&family(target.row).unwrap()));
+                        }
+                    }
+                }
+                if e == 449 {
+                    assert!(
+                        !r.stats.trace.iter().any(|s| s.starts_with("copy 449 ")),
+                        "counter quest must use native hit scripts"
+                    );
+                }
+                // All native model-owned scripts remain byte-identical, including
+                // kill-counter scripts and summons; capacity edits only add slots.
+                let p = Pack::parse(data(e)).unwrap();
+                let q = Pack::parse(&out).unwrap();
+                for id in 0..p.ids.len() as u32 {
+                    if p.class(id, "beLuaData").is_ok()
+                        && graft::name_of(&p, p.rec(id).unwrap())
+                            .is_some_and(|n| n.starts_with(b"hit_") || n.starts_with(b"cal_"))
+                    {
+                        let obj = p.val(id, 3).unwrap();
+                        let mem = p.val(obj, 3).unwrap();
+                        assert_eq!(
+                            p.b[p.memory[mem as usize].clone().unwrap()],
+                            q.b[q.memory[mem as usize].clone().unwrap()]
+                        );
+                    }
+                }
+            }
+            assert!(
+                protected > 500 && sequences > 500 && changed > 100,
+                "{variable}: {protected} protected, {sequences} entrances, {changed} changed"
+            );
+            assert!(kinds.is_superset(&BTreeSet::from([
+                "SQ_WAIT".into(),
+                "SQ_FALL".into(),
+                "SQ_JUMP".into(),
+                "SQ_JUMP1".into(),
+                "SQ_ENTRHS".into(),
+                "SQ_NENTR".into(),
+                "SQ_ATCK1".into(),
+                "SQ_SWON".into()
+            ])));
+            eprintln!("SCRIPT AUDIT {variable}: {protected} protected rows, {sequences} enemy entrances, {changed} ordinary rows changed; {kinds:?}");
         }
     }
 }

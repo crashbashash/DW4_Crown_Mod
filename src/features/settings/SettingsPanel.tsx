@@ -78,7 +78,7 @@ export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crow
             <span className="badge-experimental">Experimental</span>
           </span>
           <span className="setting-description" id={`${id}-random-enemies-description`}>
-            Swap the regular enemies of every stage for other enemies, with matching stats. Bosses stay put.
+            Swap regular enemies for other enemies with matching stats. Bosses and scripted encounters stay put.
           </span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>

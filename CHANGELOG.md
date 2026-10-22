@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Size shared enemy model, actor, animation and scene pools for all generators assigned to them, fixing four-enemy bottlenecks such as seed 1520’s Tyrannomon in Goblin Pass. Crown resources grow with the enemy inventory.
+
+- Carry enemy and projectile sound banks and bindings, including hit/death sounds and Gekomon’s song. Resolve missing retail sound references from complete source packs.
+- Keep authored entrances, model-specific cutscenes and cleanup encounters intact. Preserve timed-quest kill-counter scripts when randomizing enemies.
+- Enemy randomizer rules are now version 4; seeds produce a new plan with these fixes.
+
 ## v0.12.1
 
 - The suggested output file name now includes the Random enemies seed, e.g. `[CrownMod] [Seed 1234]`.

@@ -132,7 +132,7 @@ fn every_release_builds_and_records_its_plan() {
         let r = &signed["randomEnemies"];
         assert_eq!(signed["platform"], platform, "{variable}");
         assert_eq!(r["seed"], 1234, "{variable}");
-        assert_eq!(r["stages"], 72, "{variable}: {r}");
+        assert_eq!(r["stages"], 69, "{variable}: {r}");
         assert_eq!(r["undrawnEffects"], 0, "{variable}: {r}");
         digests
             .entry(platform)

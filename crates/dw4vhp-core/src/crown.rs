@@ -10,11 +10,13 @@ use crate::{
 };
 use std::{collections::BTreeMap, io::Write, ops::Range};
 
+mod capacity;
 mod drops;
 pub mod graft;
 mod lua_names;
 mod practice;
 mod random;
+mod sound;
 pub use random::Options as RandomOptions;
 pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
 mod river;
@@ -468,6 +470,9 @@ struct Builder<'p, 'a> {
     pool: Vec<u8>,
     mapping: Vec<u16>,
     object_count: u32,
+    directory_count: usize,
+    reusable_dirs: Option<BTreeMap<Vec<u8>, u16>>,
+    remapped: BTreeMap<usize, u16>,
     edits: Vec<Edit>,
     /// Bytes inserted at the end of existing memory blocks: (offset in the pool, bytes).
     grows: Vec<(usize, Vec<u8>)>,
@@ -481,9 +486,25 @@ impl<'p, 'a> Builder<'p, 'a> {
             pool: vec![],
             mapping: vec![],
             object_count: 0,
+            directory_count: 0,
+            reusable_dirs: None,
+            remapped: BTreeMap::new(),
             edits: vec![],
             grows: vec![],
         }
+    }
+    /// Instance copies can share identical directory descriptors. The remap
+    /// indexes are 16-bit; object IDs and references remain 32-bit.
+    fn reuse_directories(mut self) -> Self {
+        self.reusable_dirs = Some(
+            self.p
+                .dirs
+                .iter()
+                .enumerate()
+                .map(|(i, d)| (self.p.b[d.range.clone()].to_vec(), i as u16))
+                .collect(),
+        );
+        self
     }
     /// Where blocks were grown, as (offset in the pool, length), in pool order.
     fn grown(&self) -> Vec<(usize, usize)> {
@@ -520,22 +541,58 @@ impl<'p, 'a> Builder<'p, 'a> {
             size == range.len(),
             "block size differs from its directory entry",
         )?;
-        self.edits.push(Edit {
-            range: dir.range.clone(),
-            bytes: dir.patch(self.p.b, &[(7, (size + extra.len()) as u32)])?,
-        });
+        let bytes = dir.patch(self.p.b, &[(7, (size + extra.len()) as u32)])?;
+        if self
+            .p
+            .mapping
+            .iter()
+            .filter(|&&d| d as usize == idx)
+            .count()
+            > 1
+        {
+            // Equal-sized blocks can share one directory descriptor. Give only the grown
+            // block a private descriptor; its ID and the owning object's reference stay fixed.
+            let index = self.p.dirs.len() + self.directory_count;
+            need(
+                index <= u16::MAX as usize,
+                "expanded directory exceeds 16-bit index",
+            )?;
+            self.remapped.insert(block as usize, index as u16);
+            self.directory_count += 1;
+            self.dirs.extend(bytes);
+        } else {
+            self.edits.push(Edit {
+                range: dir.range.clone(),
+                bytes,
+            });
+        }
         self.grows.push((range.end - self.p.pool, extra));
         Ok(())
     }
     fn add(&mut self, dir: Vec<u8>, payload: Vec<u8>, memory: bool) -> Result<u32> {
         let id = self.p.ids.len() + self.mapping.len();
-        let idx = self.p.dirs.len() + self.mapping.len();
-        need(
-            idx <= u16::MAX as usize,
-            "expanded directory exceeds 16-bit index",
-        )?;
-        self.mapping.push(idx as u16);
-        self.dirs.extend(dir);
+        let reused = self
+            .reusable_dirs
+            .as_ref()
+            .and_then(|dirs| dirs.get(&dir))
+            .copied();
+        let idx = match reused {
+            Some(idx) => idx,
+            None => {
+                let idx = self.p.dirs.len() + self.directory_count;
+                need(
+                    idx < u16::MAX as usize,
+                    "expanded directory exceeds 16-bit index",
+                )?;
+                self.directory_count += 1;
+                if let Some(dirs) = &mut self.reusable_dirs {
+                    dirs.insert(dir.clone(), idx as u16);
+                }
+                self.dirs.extend(dir);
+                idx as u16
+            }
+        };
+        self.mapping.push(idx);
         if memory {
             self.pool.extend(&payload);
             self.pool.resize(a4(self.pool.len()), 0);
@@ -591,7 +648,15 @@ impl<'p, 'a> Builder<'p, 'a> {
         let mut table = self.dirs.clone();
         table.extend((8 + 2 * n).to_le_bytes());
         table.extend(n.to_le_bytes());
-        table.extend(&self.p.b[self.p.table + 8..self.p.table + 8 + 2 * self.p.ids.len()]);
+        for (id, &index) in self.p.mapping.iter().enumerate() {
+            table.extend(
+                self.remapped
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(index)
+                    .to_le_bytes(),
+            );
+        }
         for &v in &self.mapping {
             table.extend(v.to_le_bytes());
         }
@@ -617,7 +682,7 @@ impl<'p, 'a> Builder<'p, 'a> {
         // The original pool is shared as a source segment below rather than retained.
         for (word, add) in [
             (0, self.dirs.len()),
-            (1, self.mapping.len()),
+            (1, self.directory_count),
             (4, object_bytes),
             (5, self.object_count as usize),
             (6, self.pool.len() + grown),
@@ -926,13 +991,15 @@ pub(crate) fn rebuild_afs(
             }
         }
     }
+    // A stage model is planned after its sound pack in archive order. Keep edits until
+    // planning finishes so imported enemy audio can update that earlier entry.
+    let mut entry_edits = Vec::with_capacity(count);
     for (i, &(off, len)) in entries.iter().enumerate() {
         let next = entries.get(i + 1).map_or(size, |e| e.0);
         need(
             off <= next && len <= next - off && next <= size && off % 2048 == 0,
             "invalid archive entry extent/order",
         )?;
-        newentries.push((cursor, len));
         let data = &afs[off..off + len];
         let edits = if memchr::memmem::find(data, b"i_rareicon").is_some() {
             crown_packs += 1;
@@ -1081,6 +1148,19 @@ pub(crate) fn rebuild_afs(
             }
             _ => edits,
         };
+        entry_edits.push(edits);
+    }
+    if let Some(r) = random.as_mut() {
+        for (i, bytes) in std::mem::take(&mut r.sounds) {
+            entry_edits[i] = vec![Edit {
+                range: 0..entries[i].1,
+                bytes,
+            }];
+        }
+    }
+    for (i, ((off, len), edits)) in entries.iter().copied().zip(entry_edits).enumerate() {
+        let next = entries.get(i + 1).map_or(size, |e| e.0);
+        newentries.push((cursor, len));
         if !edits.is_empty() {
             let mut q = 0;
             let mut newlen = len;

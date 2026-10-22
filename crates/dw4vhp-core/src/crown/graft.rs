@@ -498,7 +498,11 @@ pub(super) const EFFECT_NUMBERS: [(&str, &str); 29] = [
 /// Enemy projectiles (`x_026eblst01a`, ...) are models of their own with their own hit data,
 /// registered by the stage that has an enemy using them. The bullet models of `models` that
 /// `sp` registers and `dp` (when given) lacks.
-fn companion_models(sp: &Pack, dp: Option<&Pack>, models: &[String]) -> Result<Vec<String>> {
+pub(super) fn companion_models(
+    sp: &Pack,
+    dp: Option<&Pack>,
+    models: &[String],
+) -> Result<Vec<String>> {
     let prefixes: Vec<String> = models
         .iter()
         .filter_map(|m| EFFECT_NUMBERS.iter().find(|(n, _)| n == m))
@@ -823,66 +827,8 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     }
     let (ids, owners) = closure(&sp, &roots)?;
     check_blocks(&sp, &ids, &owners)?;
-    let base = dp.ids.len() as u32;
-    let map: HashMap<u32, u32> = ids
-        .iter()
-        .enumerate()
-        .map(|(k, &s)| (s, base + k as u32))
-        .collect();
-    need(
-        dp.ids.len() + ids.len() < u16::MAX as usize,
-        &format!(
-            "grafted pack exceeds 16-bit directory index ({} objects, {} more needed, {} allowed)",
-            dp.ids.len(),
-            ids.len(),
-            u16::MAX
-        ),
-    )?;
-    let find_class = |p: &Pack, name: &str| p.classes.iter().position(|c| c.name == name);
-    let dst_object_dir =
-        find_class(&dp, "igObjectDirEntry").ok_or_else(|| bad("no object directory"))?;
-    let dst_memory_dir =
-        find_class(&dp, "igMemoryDirEntry").ok_or_else(|| bad("no memory directory"))?;
     let mut builder = Builder::new(&dp);
-    for &s in &ids {
-        let entry = &sp.dirs[sp.mapping[s as usize] as usize];
-        let issued = if let Some(idx) = sp.ids[s as usize] {
-            let r = &sp.objects[idx];
-            let class = class_index(&dp, &sp, r.class)?;
-            let changes = ref_slots(&sp, r)
-                .map(|(n, _)| {
-                    let v = r.val(sp.b, n)?;
-                    Ok((n, if v == NULL { NULL } else { map[&v] }))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let mut payload = r.patch(sp.b, &changes)?;
-            put(&mut payload, 0, class as u32);
-            let mut dir = entry.patch(sp.b, &[(11, class as u32)])?;
-            put(&mut dir, 0, dst_object_dir as u32);
-            report.objects += 1;
-            report.object_bytes += payload.len();
-            builder.add(dir, payload, false)?
-        } else {
-            let range = sp.memory[s as usize]
-                .clone()
-                .ok_or_else(|| bad("missing block"))?;
-            let mut bytes = sp.b[range].to_vec();
-            if let Some(&count) = owners.get(&s) {
-                for i in 0..count {
-                    let v = u32at(&bytes, 4 * i)?;
-                    if v != NULL {
-                        put(&mut bytes, 4 * i, map[&v]);
-                    }
-                }
-            }
-            let mut dir = sp.b[entry.range.clone()].to_vec();
-            put(&mut dir, 0, dst_memory_dir as u32);
-            report.blocks += 1;
-            report.block_bytes += bytes.len();
-            builder.add(dir, bytes, true)?
-        };
-        need(issued == map[&s], "new ID drifted from the plan")?;
-    }
+    let map = copy_graph(&dp, &sp, &mut builder, &ids, &owners, &mut report)?;
 
     // Register the models and scripts where the engine looks them up.
     let root = u32at(dp.b, dp.table + 8 + 2 * dp.ids.len())?;
@@ -972,9 +918,81 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     Ok((edits, report))
 }
 
+/// Append a closed subgraph with translated object, memory and class references.
+pub(super) fn copy_graph(
+    dp: &Pack,
+    sp: &Pack,
+    builder: &mut Builder,
+    ids: &BTreeSet<u32>,
+    owners: &HashMap<u32, usize>,
+    report: &mut Report,
+) -> Result<HashMap<u32, u32>> {
+    let base = dp.ids.len() as u32;
+    let map: HashMap<u32, u32> = ids
+        .iter()
+        .enumerate()
+        .map(|(k, &s)| (s, base + k as u32))
+        .collect();
+    need(
+        dp.ids.len() + ids.len() < u16::MAX as usize,
+        &format!(
+            "grafted pack exceeds 16-bit directory index ({} objects, {} more needed, {} allowed)",
+            dp.ids.len(),
+            ids.len(),
+            u16::MAX
+        ),
+    )?;
+    let find_class = |p: &Pack, name: &str| p.classes.iter().position(|c| c.name == name);
+    let dst_object_dir =
+        find_class(dp, "igObjectDirEntry").ok_or_else(|| bad("no object directory"))?;
+    let dst_memory_dir =
+        find_class(dp, "igMemoryDirEntry").ok_or_else(|| bad("no memory directory"))?;
+    for &s in ids {
+        let entry = &sp.dirs[sp.mapping[s as usize] as usize];
+        let issued = if let Some(idx) = sp.ids[s as usize] {
+            let r = &sp.objects[idx];
+            let class = class_index(dp, sp, r.class)?;
+            let changes = ref_slots(sp, r)
+                .map(|(n, _)| {
+                    let v = r.val(sp.b, n)?;
+                    Ok((n, if v == NULL { NULL } else { map[&v] }))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut payload = r.patch(sp.b, &changes)?;
+            put(&mut payload, 0, class as u32);
+            let mut dir = entry.patch(sp.b, &[(11, class as u32)])?;
+            put(&mut dir, 0, dst_object_dir as u32);
+            report.objects += 1;
+            report.object_bytes += payload.len();
+            builder.add(dir, payload, false)?
+        } else {
+            let range = sp.memory[s as usize]
+                .clone()
+                .ok_or_else(|| bad("missing block"))?;
+            let mut bytes = sp.b[range].to_vec();
+            if let Some(&count) = owners.get(&s) {
+                for i in 0..count {
+                    let v = u32at(&bytes, 4 * i)?;
+                    if v != NULL {
+                        put(&mut bytes, 4 * i, map[&v]);
+                    }
+                }
+            }
+            let mut dir = sp.b[entry.range.clone()].to_vec();
+            put(&mut dir, 0, dst_memory_dir as u32);
+            report.blocks += 1;
+            report.block_bytes += bytes.len();
+            builder.add(dir, bytes, true)?
+        };
+        need(issued == map[&s], "new ID drifted from the plan")?;
+    }
+
+    Ok(map)
+}
+
 /// Re-read the result and prove that every copied record matches its source with only
 /// IDs and class indexes changed, and that nothing original moved.
-fn verify(
+pub(super) fn verify(
     dp: &Pack,
     sp: &Pack,
     out: &[u8],
@@ -984,7 +1002,10 @@ fn verify(
 ) -> Result<()> {
     let v = Pack::parse(out)?;
     need(
-        v.mapping[..dp.mapping.len()] == dp.mapping[..],
+        v.ids[..dp.ids.len()] == dp.ids[..]
+            && dp.mapping.iter().enumerate().all(|(id, &entry)| {
+                v.mapping[id] == entry || (dp.memory[id].is_some() && v.memory[id].is_some())
+            }),
         "graft changed original IDs",
     )?;
     // The original pool is intact apart from the bytes appended to grown blocks.
