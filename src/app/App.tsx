@@ -10,6 +10,7 @@ import { PatchingDialog } from "../features/output/PatchingDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { newSeed, parseSeed } from "../features/settings/seed";
+import { isSuggestedName, withSeed } from "../features/output/outputName";
 import { UpdateCenter } from "../features/updates/UpdateCenter";
 import { MessageDialog } from "../components/MessageDialog";
 import { BackendProvider, useBackend } from "../ipc/context";
@@ -137,6 +138,14 @@ function AppInner() {
   const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
   const analyzed = disc.status?.kind === "ok";
   const canPatch = analyzed && disc.outputPath !== null && (!randomEnemies || enemySeedValue !== null);
+
+  // A suggested output name carries the enemy seed; a path the user chose is left alone.
+  const { outputPath, setOutputPath } = disc;
+  useEffect(() => {
+    if (outputPath === null || !isSuggestedName(outputPath)) return;
+    const wanted = withSeed(outputPath, enemySeedValue);
+    if (wanted !== outputPath) setOutputPath(wanted);
+  }, [outputPath, setOutputPath, enemySeedValue]);
 
   const changeRandomEnemies = (selected: boolean) => {
     setRandomEnemies(selected);

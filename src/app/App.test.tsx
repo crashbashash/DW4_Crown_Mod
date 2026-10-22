@@ -310,7 +310,34 @@ test("random enemies fills in a seed when switched on, shows it in a submenu and
   await user.click(screen.getByRole("switch", { name: "Random enemies" }));
   expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe(String(seed));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, false, true, seed));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed));
+});
+
+test("the suggested output name carries the seed while the option is on, and a custom name is left alone", async () => {
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  const output = () => (screen.getByLabelText("output path") as HTMLInputElement).value;
+  await waitFor(() => expect(output()).toBe("/mock/game [CrownMod].iso"));
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  const field = screen.getByLabelText("Enemy seed") as HTMLInputElement;
+  await user.clear(field);
+  await user.type(field, "1234");
+  await waitFor(() => expect(output()).toBe("/mock/game [CrownMod] [Seed 1234].iso"));
+  await user.click(screen.getByRole("button", { name: "New seed" }));
+  await waitFor(() => expect(output()).toBe(`/mock/game [CrownMod] [Seed ${field.value}].iso`));
+  await user.clear(field);
+  await user.type(field, "55");
+  await waitFor(() => expect(output()).toBe("/mock/game [CrownMod] [Seed 55].iso"));
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  await waitFor(() => expect(output()).toBe("/mock/game [CrownMod].iso"));
+  // A name the user typed is never rewritten.
+  const box = screen.getByLabelText("output path");
+  await user.clear(box);
+  await user.type(box, "/mock/my own name.iso");
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  expect(output()).toBe("/mock/my own name.iso");
 });
 
 test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patching", async () => {
@@ -337,7 +364,7 @@ test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patc
   await user.clear(field);
   await user.type(field, "1234");
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, false, true, 1234));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod] [Seed 1234].iso", false, false, false, false, true, 1234));
 });
 
 test("a loaded Crown Mod image shows its enemy seed and loads it into Settings", async () => {
