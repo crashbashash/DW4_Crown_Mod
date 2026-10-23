@@ -12,7 +12,9 @@ use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod capacity;
 mod drops;
+mod exp;
 pub mod graft;
+mod height;
 mod lua_names;
 mod practice;
 mod random;
@@ -986,6 +988,7 @@ pub(crate) fn rebuild_afs(
     let mut drop_packs = 0;
     let mut river_packs = 0;
     let mut practice_packs = 0;
+    let mut exp_packs = 0;
     let mut library = drops::Library::default();
     if crown_drops {
         for &(off, len) in &entries {
@@ -1065,6 +1068,18 @@ pub(crate) fn rebuild_afs(
             }
         } else {
             Vec::new()
+        };
+        let edits = if exp::candidate(data) {
+            exp_packs += 1;
+            let current = materialize(data, &edits)?;
+            let more =
+                exp::expand(&current).map_err(|e| bad(&format!("EXP archive entry {i}: {e}")))?;
+            vec![Edit {
+                range: 0..data.len(),
+                bytes: materialize(&current, &more)?,
+            }]
+        } else {
+            edits
         };
         let edits = match graft {
             Some(g)
@@ -1202,6 +1217,7 @@ pub(crate) fn rebuild_afs(
     }
     need(crown_packs == 85, "expected 85 crown model packs")?;
     need(river_packs == 1, "expected one Numenume River model pack")?;
+    need(exp_packs == 85, "expected 85 EXP popup packs")?;
     need(
         !four_player_spawns || spawn_packs > 0,
         "no four-player spawn profiles found",

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscStatus } from "../../bindings";
 import type { Backend } from "../../ipc/backend";
+import { outputExtension } from "../output/outputName";
 
 type Selection = { path: string; epoch: number };
 type Analysis = { selection: Selection; fourPlayerSpawns: boolean; crownDrops: boolean; status: DiscStatus };
@@ -9,6 +10,7 @@ type Analysis = { selection: Selection; fourPlayerSpawns: boolean; crownDrops: b
 export function useDisc(backend: Backend, fourPlayerSpawns = false, crownDrops = false, onIdentified?: (status: DiscStatus, epoch: number) => void) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
+  const [extension, setExtension] = useState("iso");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const pathEpoch = useRef(0);
   const inputPath = selection?.path ?? null;
@@ -43,7 +45,10 @@ export function useDisc(backend: Backend, fourPlayerSpawns = false, crownDrops =
     const epoch = ++pathEpoch.current;
     setSelection({ path, epoch });
     const output = await backend.defaultOutput(path);
-    if (epoch === pathEpoch.current) setOutputPath(output);
+    if (epoch === pathEpoch.current) {
+      setOutputPath(output);
+      setExtension(outputExtension(output));
+    }
   }, [backend]);
 
   const pickDisc = useCallback(async () => {
@@ -56,5 +61,5 @@ export function useDisc(backend: Backend, fourPlayerSpawns = false, crownDrops =
   }, []);
 
   const identifiedStatus = analysis?.selection === selection ? analysis?.status ?? null : null;
-  return { replaceStatus, identifiedStatus, inputPath, outputPath, status, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath };
+  return { replaceStatus, identifiedStatus, inputPath, outputPath, extension, status, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath };
 }

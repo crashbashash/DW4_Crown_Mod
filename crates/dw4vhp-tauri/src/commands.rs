@@ -142,10 +142,15 @@ pub async fn choose_iso(window: tauri::Window) -> Option<String> {
 pub async fn choose_output(window: tauri::Window, default_name: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     tauri::async_runtime::spawn_blocking(move || {
+        let extension = std::path::Path::new(&default_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("iso");
         window
             .dialog()
             .file()
             .set_parent(&window)
+            .add_filter("Disc image", &[extension])
             .set_file_name(&default_name)
             .blocking_save_file()
             .and_then(|p| p.into_path().ok())
@@ -166,10 +171,18 @@ pub fn default_output(input: String) -> String {
         .map(|s| s.to_os_string())
         .unwrap_or_default();
     name.push(OUTPUT_MARKER);
-    // CISO and RVZ inputs stay in their own format; everything else is a plain .iso.
-    let extension = match dw4vhp_core::container::detect(input) {
-        Ok(format) => format.extension(),
-        Err(_) => "iso",
+    // Compressed containers keep their format; plain GameCube .gcm keeps its suffix too.
+    let format =
+        dw4vhp_core::container::detect(input).unwrap_or(dw4vhp_core::container::Format::Raw);
+    let extension = match format {
+        dw4vhp_core::container::Format::Raw
+            if input
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gcm")) =>
+        {
+            "gcm"
+        }
+        _ => format.extension(),
     };
     name.push(format!(".{extension}"));
     input.with_file_name(name).display().to_string()
@@ -471,6 +484,33 @@ fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn suggested_output_preserves_the_source_container_and_plain_gcm_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, magic, suffix) in [
+            ("game.iso", b"raw!", "iso"),
+            ("game.gcm", b"raw!", "gcm"),
+            ("game.GCM", b"raw!", "gcm"),
+            ("game.ciso", b"CISO", "ciso"),
+            ("game.rvz", b"RVZ\x01", "rvz"),
+            // The output suffix follows the bytes when an input is misnamed.
+            ("compressed.iso", b"RVZ\x01", "rvz"),
+        ] {
+            let input = dir.path().join(name);
+            std::fs::write(&input, magic).unwrap();
+            let output = std::path::PathBuf::from(default_output(input.display().to_string()));
+            assert_eq!(output.parent(), Some(dir.path()));
+            assert_eq!(output.extension().unwrap(), suffix);
+            assert!(output
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(OUTPUT_MARKER));
+            assert_ne!(output, input);
+        }
+    }
+
     #[test]
     fn disc_details_cover_every_supported_release_and_unknown_legacy_versions() {
         use dw4vhp_core::release::Release;

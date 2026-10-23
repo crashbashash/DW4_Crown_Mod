@@ -1,5 +1,14 @@
 import { expect, test } from "vitest";
-import { isSuggestedName, withSeed } from "./outputName";
+import { isSuggestedName, outputExtension, withOutputExtension, withSeed } from "./outputName";
+
+test("completes missing extensions using only the filename", () => {
+  expect(withOutputExtension("/games/dir.iso/my game", "rvz")).toBe("/games/dir.iso/my game.rvz");
+  expect(withOutputExtension("C:\\games\\dir.iso\\my game", "gcm")).toBe("C:\\games\\dir.iso\\my game.gcm");
+  expect(withOutputExtension("/games/my game.", "iso")).toBe("/games/my game.iso");
+  expect(withOutputExtension("/games/my game.ISO", "iso")).toBe("/games/my game.ISO");
+  expect(withOutputExtension("", "iso")).toBe("");
+  expect(outputExtension("C:\\games\\game [CrownMod].ciso")).toBe("ciso");
+});
 
 test("adds, replaces and removes the seed in a suggested name", () => {
   expect(withSeed("/games/Digimon World 4 (USA) [CrownMod].iso", 1234)).toBe("/games/Digimon World 4 (USA) [CrownMod] [Seed 1234].iso");

@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.4
+
+- Fix MR02's puddle/blast effects and MR03's missile mouth fire when imported into other areas, preserving their original textures and blending.
+- Correct imported Imperialdramon's height, moving its model and collision volumes together while retaining terrain following.
+- Restore random enemies in Mangrove Forest while preserving its scripted boss/add groups and Tortamon introduction.
+- Expand floating EXP rewards to five digits, displaying up to 99,999 without changing awarded EXP.
+- Preserve the source image extension in suggested output filenames, and automatically add it when omitted in Save As or a typed output path.
+
 ## v0.12.3
 
 - Register imported enemy sound banks in the stage's static resource list so the audio loader can find them, including death sounds.

@@ -153,7 +153,7 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "d2ed6888ab36bc1a57a1f2a7376c20da",
+        "25215189ba7f252e15beb9dd3ea27ced",
     );
 }
 #[test]
@@ -162,7 +162,7 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "1f7434bf2bc148e388107c6ec6cdf747",
+        "e2c59ac2b1e98f266ae97d4cdf9a8a4e",
     );
 }
 #[test]
@@ -171,6 +171,6 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "0c7e18437a64bfdb3b3a413a9c4ba151",
+        "df9b8f3a15fde1eade95f19fe7ca01f2",
     );
 }

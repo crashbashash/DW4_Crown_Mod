@@ -63,6 +63,8 @@ options. Detection checks it first and retains the game-data scan for older imag
 ## Testing against real discs
 
 See [random enemies](testing/random-enemies.md) for shared enemy capacity, audio and scripted entrance regressions.
+See [particle effects](testing/particle-effects.md) for imported textures and render-attribute ancestry.
+See [EXP popups](testing/exp-popups.md) for the five-digit display resources and validation.
 
 Point these environment variables at clean local images:
 `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`, `DW4_RETAIL_JAPAN_ISO`.

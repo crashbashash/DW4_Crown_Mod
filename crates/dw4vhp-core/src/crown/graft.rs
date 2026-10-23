@@ -533,13 +533,12 @@ pub(super) fn companion_models(
     Ok(out.into_iter().collect())
 }
 
-/// Where a bullet or effect hangs in the stage's effect tree: the node to copy, and the path
-/// of child indexes from the tree's named top node (`EF01`, `EF02`) down to the shared
-/// `PromotedAttr` node whose child list receives it.
+/// One effect's native render ancestry. Each edge is (parent, child list, selected child),
+/// walking from its switch up to the named effect pass.
 struct Attach {
     unit: u32,
-    top: (String, Vec<u8>),
-    path: Vec<usize>,
+    top: u32,
+    path: Vec<(u32, u32, u32)>,
 }
 
 /// The nodes whose child list holds `child`: (node, child list).
@@ -572,24 +571,20 @@ fn is_promoted(p: &Pack, id: u32) -> bool {
     })
 }
 
-/// Climb from a model's switch to the effect tree's top node. `None` for a switch that is not
-/// drawn through a `PromotedAttr` under a top named `EF..`, or hangs in several places.
+/// Climb from a model's switch to the effect pass. Shared/ambiguous ancestry is
+/// refused: selecting an arbitrary parent can change the texture or blending.
 fn attach_point(sp: &Pack, switch: u32) -> Result<Option<Attach>> {
     let mut chain = vec![switch];
-    let mut index = Vec::new();
+    let mut path = Vec::new();
     loop {
         need(chain.len() < 16, "scene nesting too deep")?;
-        let holders = node_holders(sp, *chain.last().unwrap());
+        let child = *chain.last().unwrap();
+        let holders = node_holders(sp, child);
         match holders.len() {
             0 => break,
             1 => {
                 let (holder, list) = holders[0];
-                index.push(
-                    sp.array(list)?
-                        .iter()
-                        .position(|&c| c == *chain.last().unwrap())
-                        .unwrap(),
-                );
+                path.push((holder, list, child));
                 chain.push(holder);
             }
             _ => return Ok(None),
@@ -598,81 +593,134 @@ fn attach_point(sp: &Pack, switch: u32) -> Result<Option<Attach>> {
     let Some(i) = (1..chain.len()).find(|&i| is_promoted(sp, chain[i])) else {
         return Ok(None);
     };
-    let top = sp.rec(*chain.last().unwrap())?;
-    let name = name_of(sp, top).unwrap_or_default().to_vec();
-    if !name.starts_with(b"EF0") {
+    let top = *chain.last().unwrap();
+    if !name_of(sp, sp.rec(top)?)
+        .unwrap_or_default()
+        .starts_with(b"EF0")
+    {
         return Ok(None);
     }
     Ok(Some(Attach {
         unit: chain[i - 1],
-        top: (sp.classes[top.class].name.clone(), name),
-        path: index[i..].iter().rev().copied().collect(),
+        top,
+        path,
     }))
 }
 
-/// The child list of the node in `dp` that `at` names, if the stage has the same tree shape
-/// and the node carries the same render state.
-fn attach_target(sp: &Pack, dp: &Pack, at: &Attach) -> Result<Option<(u32, bool)>> {
+fn node_children(p: &Pack, node: u32) -> Result<u32> {
+    let r = p.rec(node)?;
+    let lists = ref_slots(p, r)
+        .filter(|&(_, memory)| !memory)
+        .filter_map(|(n, _)| r.val(p.b, n).ok())
+        .filter(|&v| v != NULL && p.class(v, "igNodeList").is_ok())
+        .collect::<Vec<_>>();
+    need(lists.len() == 1, "expected one effect child list")?;
+    Ok(lists[0])
+}
+
+/// Find the same render pass, without guessing at child indexes inside it. The
+/// imported branch supplies its own complete attribute stack below this node.
+fn effect_pass(sp: &Pack, dp: &Pack, top: u32) -> Result<Option<u32>> {
+    let r = sp.rec(top)?;
     let tops = (0..dp.ids.len() as u32)
         .filter(|&id| {
-            dp.rec(id).is_ok_and(|r| {
-                dp.classes[r.class].name == at.top.0 && name_of(dp, r) == Some(at.top.1.as_slice())
+            dp.rec(id).is_ok_and(|d| {
+                dp.classes[d.class].name == sp.classes[r.class].name
+                    && name_of(dp, d) == name_of(sp, r)
             }) && node_holders(dp, id).is_empty()
         })
         .collect::<Vec<_>>();
     if tops.len() != 1 {
         return Ok(None);
     }
-    let child_list = |p: &Pack, id: u32| -> Result<Option<u32>> {
-        let r = p.rec(id)?;
-        let lists = ref_slots(p, r)
-            .filter(|&(_, memory)| !memory)
-            .filter_map(|(n, _)| r.val(p.b, n).ok())
-            .filter(|&v| v != NULL && p.class(v, "igNodeList").is_ok())
-            .collect::<Vec<_>>();
-        Ok((lists.len() == 1).then(|| lists[0]))
-    };
-    // Follow the source's path; where the destination's tree is shallower or shaped
-    // differently, settle for the deepest shared node on the way.
-    let mut node = tops[0];
-    let mut deepest = None;
-    let mut exact = true;
-    for &i in &at.path {
-        let next = match child_list(dp, node)? {
-            Some(list) => dp.array(list)?.get(i).copied(),
-            None => None,
-        };
-        let Some(next) = next else {
-            exact = false;
-            break;
-        };
-        node = next;
-        if is_promoted(dp, node) {
-            deepest = Some(node);
-        }
-    }
-    let Some(found) = deepest else {
-        return Ok(None);
-    };
-    // The shared node must set up rendering the same way as the one the source used.
-    if exact && found == node {
-        let mut src = sp.rec(node_holders(sp, at.unit)[0].0)?.clone();
-        let dst = dp.rec(node)?;
-        let slots = ref_slots(sp, &src).map(|(n, _)| n).collect::<BTreeSet<_>>();
-        src.fields.retain(|n, _| !slots.contains(n));
-        for (n, range) in &src.fields {
-            if dst
-                .fields
-                .get(n)
-                .is_none_or(|d| dp.b[d.clone()] != sp.b[range.clone()])
-            {
-                exact = false;
+    Ok(Some(node_children(dp, tops[0])?))
+}
+
+struct RenderSource {
+    bytes: Vec<u8>,
+    attached: Vec<(u32, u32)>,
+}
+
+/// Prepare a private source view containing only the selected paths through the
+/// shared effect tree. Copying the ancestors without pruning would also import
+/// every sibling effect. Counts and null-filled tails keep those siblings out of
+/// both graph traversal and the loader's reference tables.
+fn render_source(
+    sp: &Pack,
+    dp: Option<&Pack>,
+    models: &[String],
+    report: &mut Report,
+) -> Result<RenderSource> {
+    let bullets = companion_models(sp, dp, models)?;
+    let mut attached = BTreeMap::new();
+    let mut selected: BTreeMap<u32, (u32, BTreeSet<u32>)> = BTreeMap::new();
+    for (switch, own, name) in effect_switches(sp, dp, models, &bullets.iter().collect::<Vec<_>>())?
+    {
+        let Some(at) = attach_point(sp, switch)? else {
+            if own {
+                report.unattached.push(format!("{name} (no tree)"));
             }
+            continue;
+        };
+        let destination = if let Some(dp) = dp {
+            let Some(list) = effect_pass(sp, dp, at.top)? else {
+                if own {
+                    report.unattached.push(format!("{name} (no pass)"));
+                }
+                continue;
+            };
+            list
+        } else {
+            NULL
+        };
+        attached.insert(at.top, destination);
+        for (parent, list, child) in at.path {
+            let (holder, children) = selected.entry(list).or_insert((parent, BTreeSet::new()));
+            need(*holder == parent, "effect ancestry shares a child list")?;
+            children.insert(child);
         }
-    } else {
-        exact = false;
     }
-    Ok(child_list(dp, found)?.map(|list| (list, exact)))
+    let mut edits = Vec::new();
+    let mut blocks = BTreeSet::new();
+    for (list, (parent, keep)) in selected {
+        let original = sp.array(list)?;
+        let children: Vec<_> = original
+            .iter()
+            .copied()
+            .filter(|id| keep.contains(id))
+            .collect();
+        need(
+            children.len() == keep.len(),
+            "effect child missing from source",
+        )?;
+        // A switch mask addresses children by index. Only attribute/group
+        // branches can be compacted without changing visibility semantics.
+        need(
+            children.len() == original.len() || sp.class(parent, "igSwitch").is_err(),
+            "cannot prune an indexed effect ancestor",
+        )?;
+        let r = sp.rec(list)?;
+        let block = sp.val(list, 4)?;
+        need(blocks.insert(block), "effect ancestry shares child memory")?;
+        let range = sp.memory[block as usize]
+            .clone()
+            .ok_or_else(|| bad("missing effect children"))?;
+        let mut bytes = vec![0xff; range.len()];
+        let head = words(&children);
+        bytes[..head.len()].copy_from_slice(&head);
+        edits.push(Edit { range, bytes });
+        for slot in [2, 3] {
+            edits.push(Edit {
+                range: r.field(slot)?.clone(),
+                bytes: (children.len() as u32).to_le_bytes().to_vec(),
+            });
+        }
+    }
+    edits.sort_by_key(|e| e.range.start);
+    Ok(RenderSource {
+        bytes: materialize(sp.b, &edits)?,
+        attached: attached.into_iter().collect(),
+    })
 }
 
 /// The scene nodes of bullets and effects that must be copied with the models: the switches
@@ -721,7 +769,13 @@ fn effect_switches(
 /// Copy the named models' record subgraphs, scripts included, from `src` into `dst`.
 pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Edit>, Report)> {
     let dp = Pack::parse(dst)?;
-    let sp = Pack::parse(src)?;
+    let original = Pack::parse(src)?;
+    let mut report = Report::default();
+    let RenderSource {
+        bytes: rendered,
+        attached,
+    } = render_source(&original, Some(&dp), models, &mut report)?;
+    let sp = Pack::parse(&rendered)?;
     let mut roots = Vec::new();
     let mut infos = Vec::new();
     let mut scripts = Vec::new();
@@ -796,35 +850,7 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
             infos.push(id);
         }
     }
-    let mut report = Report::default();
-    let mut attached: Vec<(u32, u32)> = Vec::new();
-    let bullets: Vec<&String> = all
-        .iter()
-        .filter(|(_, strict)| !strict)
-        .map(|(m, _)| *m)
-        .collect();
-    for (switch, own, name) in effect_switches(&sp, Some(&dp), models, &bullets)? {
-        let Some(at) = attach_point(&sp, switch)? else {
-            if own {
-                report.unattached.push(format!("{name} (no tree)"));
-            }
-            continue;
-        };
-        if attached.iter().any(|&(u, _)| u == at.unit) {
-            continue;
-        }
-        if let Some((list, exact)) = attach_target(&sp, &dp, &at)? {
-            roots.push(at.unit);
-            attached.push((at.unit, list));
-            if own && !exact {
-                report.approximate.push(name);
-            }
-        } else {
-            if own {
-                report.unattached.push(format!("{name} (no match)"));
-            }
-        }
-    }
+    roots.extend(attached.iter().map(|&(top, _)| top));
     let (ids, owners) = closure(&sp, &roots)?;
     check_blocks(&sp, &ids, &owners)?;
     let mut builder = Builder::new(&dp);
@@ -1425,8 +1451,14 @@ impl Profile {
 /// Run every source-side check [`graft`] makes, and refuse hit scripts that touch the
 /// kill-count quest counters (those stages count kills in the model's own script).
 pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
-    let (roots, ram) = model_roots(sp, model)?;
-    profile_of(sp, model, roots, ram)
+    let RenderSource {
+        bytes: rendered,
+        attached,
+    } = render_source(sp, None, &[model.to_string()], &mut Report::default())?;
+    let source = Pack::parse(&rendered)?;
+    let (mut roots, ram) = model_roots(&source, model)?;
+    roots.extend(attached.iter().map(|&(top, _)| top));
+    profile_of(&source, model, roots, ram)
 }
 
 /// The records [`graft`] copies for a donor model in `sp`, and the model's RAM budget.
@@ -1549,3 +1581,7 @@ pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
     }
     Ok(units)
 }
+
+#[cfg(test)]
+#[path = "particle_tests.rs"]
+mod particle_tests;

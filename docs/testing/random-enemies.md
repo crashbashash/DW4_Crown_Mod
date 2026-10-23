@@ -13,8 +13,29 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-These changes use randomizer rules version 5. The same seed is reproducible within
+These changes use randomizer rules version 7. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 7 preserves the native texture bindings and complete render-attribute
+ancestry of imported particles and projectiles. The old child-index match could
+render MR02's blast/puddle particles or MR03's mouth fire using an unrelated texture or blend
+state. See [the particle regression](particle-effects.md). Existing images need
+rebuilding; the extra render resources can affect donor fit at the object limit.
+
+Rules 7 also narrows Mangrove Forest's cutscene guard. Its `mate00.lua` wait and
+`tim_g_orbz03.lua` cleanup address Otamamon/Gekomon boss adds whose generators
+are already pinned (`GENE-131`, `GENE-139`, `GENE-s01..s05`). Those groups and
+their native model pools remain intact; unrelated patrols can now randomize.
+Tortamon's separate introduction and authored spawn sequences remain protected.
+The seed `1278675365` regression changes 480 ordinary rows across the three
+difficulties on each of the five releases, preserves 12 protected groups and
+checks every original stage script byte-for-byte. It reproduces the original
+whole-area exclusion before the fix. This is a data regression; the complete
+boss encounter has not been replayed live with the corrected patrols.
+
+Rules 6 lowers imported Imperialdramon models and their collision volumes by 13
+units without changing rules-5 generator choices. Native Imperialdramon encounters
+retain their authored data. See [the height correction](imperialdramon-height.md).
 
 Rules 5 corrects resource ownership and bank registration without changing
 rules-4 enemy placements.
@@ -62,10 +83,10 @@ scripts retain their original enemy families. Model-owned callbacks are excluded
 from this stage-level restriction. The timed quest in entry 449 now trades only
 among its native counter-aware models, like the two existing kill-count floors.
 
-The regression checks 2,019 protected generator rows per platform, including 615
+The regression checks 1,509 protected generator rows per platform, including 615
 custom enemy-entrance rows (205 distinct generators across three difficulties).
 It covers `SQ_WAIT`, `SQ_FALL`, `SQ_JUMP`, `SQ_JUMP1`, `SQ_ENTRHS`, `SQ_NENTR`,
-`SQ_ATCK1` and `SQ_SWON`. Native hit/summon script bytes remain intact, and 2,922
+`SQ_ATCK1` and `SQ_SWON`. Native hit/summon script bytes remain intact, and 3,402
 ordinary rows still change in the zero-extra-donor regression. The full default
 randomizer reports 69 stages with changes; wholly scripted stages stay authored.
 

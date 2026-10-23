@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 5;
+pub const RULES_VERSION: u32 = 7;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 
@@ -243,6 +243,19 @@ fn scripted_models(p: &Pack, entry: usize) -> Result<BTreeSet<&'static str>> {
         }
         for &model in REGULAR.iter().chain(REPLACEABLE) {
             if constants.iter().any(|c| c.text == model.as_bytes()) {
+                // Mangrove's boss-start wait and boss-end cleanup address the
+                // native add groups (GENE-131/139 and GENE-s01..s05), all pinned
+                // above. Their models and original instance pools stay loaded.
+                // Protecting those families across the whole map also locked
+                // every unrelated Otamamon/Gekomon patrol out of randomisation.
+                if entry == 686
+                    && matches!(
+                        (name, model),
+                        ("mate00.lua", "e_otama") | ("tim_g_orbz03.lua", "e_geko" | "e_otama")
+                    )
+                {
+                    continue;
+                }
                 protected.insert(model);
             }
         }
@@ -882,15 +895,24 @@ impl Randomiser {
             self.sounds.insert(entry - 1, sounds);
         }
         let assigned: BTreeSet<_> = choice.values().cloned().collect();
-        for model in assigned {
-            let needed = demand.get(&model).copied().unwrap_or(0);
-            let old = super::capacity::slots(&Pack::parse(&dst)?, &model)?;
+        for model in &assigned {
+            let needed = demand.get(model).copied().unwrap_or(0);
+            let old = super::capacity::slots(&Pack::parse(&dst)?, model)?;
             if needed > old {
-                dst = super::capacity::expand(&dst, &model, needed)?;
+                dst = super::capacity::expand(&dst, model, needed)?;
                 self.log.push(format!(
                     "stage {entry}: {model} shared slots {old} -> {needed}"
                 ));
             }
+        }
+        if assigned.contains(super::height::MODEL)
+            && !stage.residents.contains_key(super::height::MODEL)
+        {
+            let edits = super::height::imperial(&dst)?;
+            dst = materialize(&dst, &edits)?;
+            self.log.push(format!(
+                "stage {entry}: imported Imperialdramon model and collision lowered by 13"
+            ));
         }
         // More enemy instances can also exceed the base crown inventory bound.
         let p = Pack::parse(&dst)?;
@@ -1097,6 +1119,121 @@ mod tests {
             "cover the cannon and train entrances on every difficulty"
         );
         assert!(changed > 0, "ordinary spawns still randomise");
+    }
+
+    #[test]
+    fn mangrove_seed_1278675365_changes_regular_spawns_and_keeps_scripted_groups() {
+        for variable in [
+            "DW4_RETAIL_USA_ISO",
+            "DW4_RETAIL_EUROPE_ISO",
+            "DW4_RETAIL_JAPAN_ISO",
+            "DW4_RETAIL_GC_USA_ISO",
+            "DW4_RETAIL_GC_JAPAN_ISO",
+        ] {
+            let Some(path) = env::var_os(variable) else {
+                continue;
+            };
+            let iso = std::fs::read(path).unwrap();
+            let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+                let f = crate::gcm::find_file(&iso, "ndmw.afs").unwrap();
+                (f.offset as usize, f.size as usize)
+            } else {
+                let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+                (f.lba as usize * 2048, f.size as usize)
+            };
+            let afs = &iso[base..base + size];
+            let entries: Vec<_> = (0..u32at(afs, 4).unwrap() as usize)
+                .map(|i| {
+                    (
+                        u32at(afs, 8 + 8 * i).unwrap() as usize,
+                        u32at(afs, 12 + 8 * i).unwrap() as usize,
+                    )
+                })
+                .collect();
+            let data = |i: usize| {
+                let (o, n) = entries[i];
+                &afs[o..o + n]
+            };
+            let layout = crate::release::detect(&iso)
+                .unwrap()
+                .layout_in(&iso)
+                .unwrap();
+            let mut r = Randomiser::scan(
+                afs,
+                &entries,
+                EnemyTable::read(&iso, &layout).unwrap(),
+                Options {
+                    seed: 1278675365,
+                    donors: 3,
+                    warp: None,
+                    only: Some(vec![686]),
+                },
+            )
+            .unwrap();
+            let stage = r.stages[&686].clone();
+            let initial = materialize(data(686), &expand(data(686)).unwrap()).unwrap();
+            let out = r.stage(686, initial, afs, &entries).unwrap();
+            let mut changed = 0;
+            let mut protected = BTreeSet::new();
+            for pack in &stage.gens {
+                let source = Pack::parse(data(*pack)).unwrap();
+                let patched = r
+                    .retarget(*pack, data(*pack))
+                    .unwrap()
+                    .unwrap_or_else(|| data(*pack).to_vec());
+                let result = Pack::parse(&patched).unwrap();
+                for g in generators(&source).unwrap() {
+                    let id = source.named("beGeneraterData", &g.name).unwrap();
+                    let new = result.val(id, graft::GENERATOR_ROW).unwrap();
+                    if stage.pinned.contains(&g.name) || g.seq {
+                        assert_eq!(g.row, new, "{variable}: scripted group {}", g.name);
+                        let a = source.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
+                        let b = result.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
+                        assert_eq!(source.b[a], result.b[b]);
+                        protected.insert(g.name);
+                    } else if g.row != new {
+                        changed += 1;
+                    }
+                }
+            }
+            assert!(
+                changed > 0,
+                "{variable}: Mangrove ordinary enemies all remained vanilla"
+            );
+            for name in [
+                "GENE-131", "GENE-139", "GENE-165", "GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04",
+                "GENE-s05",
+            ] {
+                assert!(protected.contains(name), "missing protected group {name}");
+            }
+            let native = Pack::parse(data(686)).unwrap();
+            let result = Pack::parse(&out).unwrap();
+            for model in ["e_geko", "e_otama", "e_torta", "e_tonogeko"] {
+                // Tortamon can be loaded from its separate model file.
+                if graft::find_named(&native, "beModelCtrlInfo", model)
+                    .unwrap()
+                    .is_some()
+                {
+                    assert!(
+                        graft::find_named(&result, "beModelCtrlInfo", model)
+                            .unwrap()
+                            .is_some(),
+                        "native scripted model {model} must remain loaded"
+                    );
+                }
+            }
+            for id in 0..native.ids.len() as u32 {
+                if native.class(id, "beLuaData").is_ok() {
+                    let object = native.val(id, 3).unwrap();
+                    let mem = native.val(object, 3).unwrap();
+                    assert_eq!(
+                        native.b[native.memory[mem as usize].clone().unwrap()],
+                        result.b[result.memory[mem as usize].clone().unwrap()]
+                    );
+                }
+            }
+            eprintln!("MANGROVE {variable}: {changed} ordinary rows changed; {} scripted groups and all original scripts preserved", protected.len());
+        }
     }
 
     #[test]
@@ -2276,7 +2413,7 @@ mod dependency_audit {
                 (265, vec!["e_mummy", "e_pharaoh", "e_mecha1", "e_mecha2"]),
                 (628, vec!["e_nume"]),
                 (649, vec!["e_mummy", "e_tyrano"]),
-                (686, vec!["e_geko", "e_otama", "e_torta"]),
+                (686, vec!["e_torta"]),
             ] {
                 for model in models {
                     assert!(

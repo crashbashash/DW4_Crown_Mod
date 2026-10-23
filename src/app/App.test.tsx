@@ -90,6 +90,26 @@ describe("App disc wiring", () => {
 });
 
 describe("overwrite confirmation", () => {
+  test("an extensionless typed name checks and overwrites the completed filename", async () => {
+    const exists = vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(true);
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    const output = screen.getByLabelText("output path");
+    await waitFor(() => expect((output as HTMLInputElement).value).toContain("[CrownMod]"));
+    await user.clear(output);
+    await user.type(output, "/mock/my patched game");
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    await screen.findByRole("dialog", { name: "File already exists" });
+    expect(exists).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso");
+    expect((output as HTMLInputElement).value).toBe("/mock/my patched game.iso");
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Overwrite" }));
+    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso", true, false, false, false, false, null);
+  });
+
   test.each([false, true])("existing output asks before patching; confirm=%s", async (confirm) => {
     vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(true);
     const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
@@ -112,6 +132,26 @@ describe("overwrite confirmation", () => {
       expect(patch).not.toHaveBeenCalled();
       expect(screen.queryByRole("dialog")).toBeNull();
     }
+  });
+});
+
+describe("output extensions", () => {
+  test.each(["iso", "gcm", "ciso", "rvz"])("Save as keeps the source .%s extension after renaming", async (extension) => {
+    const choose = vi.spyOn(MockBackend.prototype, "chooseOutput").mockResolvedValue("C:\\games\\patched game");
+    const exists = vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(false);
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), `C:\\games\\game.${extension}`);
+    await user.tab();
+    const output = screen.getByLabelText("output path") as HTMLInputElement;
+    await waitFor(() => expect(output.value).toBe(`C:\\games\\game [CrownMod].${extension}`));
+    await user.click(screen.getByRole("button", { name: "Save as…" }));
+    expect(choose).toHaveBeenCalledExactlyOnceWith(`game [CrownMod].${extension}`);
+    await waitFor(() => expect(output.value).toBe(`C:\\games\\patched game.${extension}`));
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    expect(exists).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`);
+    expect(patch).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`, false, false, false, false, false, null);
   });
 });
 

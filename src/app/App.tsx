@@ -10,7 +10,7 @@ import { PatchingDialog } from "../features/output/PatchingDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { newSeed, parseSeed } from "../features/settings/seed";
-import { isSuggestedName, withSeed } from "../features/output/outputName";
+import { isSuggestedName, withOutputExtension, withSeed } from "../features/output/outputName";
 import { UpdateCenter } from "../features/updates/UpdateCenter";
 import { MessageDialog } from "../components/MessageDialog";
 import { BackendProvider, useBackend } from "../ipc/context";
@@ -166,8 +166,9 @@ function AppInner() {
   };
 
   const startPatch = async () => {
-    const output = disc.outputPath;
-    if (output === null || busy) return;
+    if (disc.outputPath === null || busy) return;
+    const output = withOutputExtension(disc.outputPath, disc.extension);
+    disc.setOutputPath(output);
     setPatchProgress(0);
     setBusy(true);
     try {
@@ -207,10 +208,14 @@ function AppInner() {
   };
 
   const chooseOutput = async () => {
-    const path = await backend.chooseOutput(
-      disc.outputPath?.split("/").pop() ?? "game [CrownMod].iso",
+    const defaultName = withOutputExtension(
+      disc.outputPath?.split(/[/\\]/).pop() ?? "game [CrownMod]",
+      disc.extension,
     );
-    if (path !== null) disc.setOutputPath(path);
+    const path = await backend.chooseOutput(
+      defaultName,
+    );
+    if (path !== null) disc.setOutputPath(withOutputExtension(path, disc.extension));
   };
 
   const setDiscPath = (path: string) => {

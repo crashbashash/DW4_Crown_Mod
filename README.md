@@ -23,6 +23,8 @@ Patching a clean disc leaves your original file unchanged.
 
 ## What the mod does
 
+- **Five-digit EXP popups.** Rewards above 9,999 display correctly, up to 99,999.
+
 - **Optional random crown colours.** Each crowned enemy spawn gets a random
   colour. Bosses keep yellow. This changes the icon only; combat stats and drops
   are unchanged. See [scope and validation](docs/testing/random-crowns.md).
