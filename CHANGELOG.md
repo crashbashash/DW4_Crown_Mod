@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Register imported enemy sound banks in the stage's static resource list so the audio loader can find them, including death sounds.
+- Grow enemy instance and scene lists in their original backing blocks, avoiding orphaned references when unloading a randomized stage.
+- Use null references in generated padding blocks, preventing resource-pointer corruption when object ID 0 is a memory block, including Cliff Dungeon with seed 1520.
+- Omit donor candidates unused by every difficulty's generators, reducing loaded resources without changing enemy assignments.
+- Update enemy randomizer rules to version 5. Rebuild existing randomized images to receive the resource fixes; enemy placements are unchanged from rules 4.
+
 ## v0.12.2
 
 - Fix simultaneous spawn limits for randomized enemies, including Tyrannomon in Goblin Pass.

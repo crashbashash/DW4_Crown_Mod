@@ -124,8 +124,10 @@ always emits the marker.
 - A signature-only fixture refuses before table parsing; unmarked modded fixtures
   retain the legacy-scan refusal.
 - Generated CISO and RVZ round trips retain the record and its options.
-- Full-disc PS2 regression tests retain the pre-signature golden hash after
+- Full-disc PS2 regression tests check unsigned default-build golden hashes after
   removing the appended metadata and reversing the volume-size update in a hashing view.
+  The padding-reference correction intentionally updates these hashes: reversing
+  only the 85 corrected padding words reproduces each region's previous golden hash.
 - DigiAtlas imports a freshly produced signed USA image and labels the version and
   random crowns from its metadata.
 

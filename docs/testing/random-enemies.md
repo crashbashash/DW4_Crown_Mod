@@ -13,15 +13,33 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-These changes use randomizer rules version 4. The same seed is reproducible within
+These changes use randomizer rules version 5. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 5 corrects resource ownership and bank registration without changing
+rules-4 enemy placements.
+Embedded `beCriSfpData` banks belong in the data list of the stage's registered
+`beStaticInfo`. Previously imported banks were appended directly to the root
+`igInfoList`, which made them reachable in a graph audit but omitted them from
+the static resources used by the audio loader. The audio regressions now require
+the actual static-data registration and preserve native bank entries and root
+registrations. The GameCube regression failed before the fix; the corrected
+audit passes all 204 source combinations on each of PS2 USA and GameCube USA.
+This is static validation; audible playback remains untested.
+
+Static inspection of the USA GameCube executable confirms the lookup path:
+`0x80314f14`, message case `0x14`, requests `STATICINFO / GETINFOLIST`, searches
+each returned info's data list at offset `0x14` for the bank filename, and adds
+matches to the sound loader. `0x802f6aa8` transfers those matched `beCriSfpData`
+banks. A bank referenced only by the pack root is absent from that search.
 
 ## Audio and scripted encounter audit
 
 The data audit covers all 20 importable enemy families in 204 native stage/model
 combinations on each of PS2 USA and GameCube USA. It checks every original action
 binding, including damage/death labels, selector cue numbers and parameters,
-translated filename indexes, registered embedded bank payloads and repeat imports.
+translated filename indexes, static-data registration, embedded bank payloads
+and repeat imports.
 Bank bytes match the retail sources. Projectile/effect models are checked too;
 their own bindings must be present even when they only use shared sound banks.
 
@@ -72,6 +90,42 @@ This avoids exhausting the descriptor table when expanding a large stage.
 Every expansion reparses the graph and verifies translated instance references,
 original IDs, original memory, untouched records and model/animation pairing.
 Unknown private instance layouts are refused rather than partially cloned.
+
+Instance arrays and scene child lists grow in their existing memory blocks.
+Replacing a list's backing block left its old references in the IGB directory;
+in the GameCube seed-1520 checkpoint, the expanded Goburimon pool survived
+unloading while unexpanded imported families were freed. The regression now
+requires the original backing-block IDs for model, action, animation-combiner,
+collision and shadow pools, and for existing scene child lists. Original mask
+objects and their backing blocks are also preserved as visibility capacity grows.
+
+Candidate donors are still chosen before generator assignments. Afterwards the
+pack is rebuilt without candidates unused across all three difficulty packs.
+This avoids allocating unused models and sound banks while preserving the seed's
+generator choices. The seed-1520 Humid Cave check keeps both MR04 generators and
+the Infermon generator, their full authored pools and the native Numemon model,
+and omits the unused MR03 import. Both floors' generator-pack bytes match rules 4.
+
+A private GameCube seed-1520 build was cold booted with random crowns, random
+enemies and four-player spawns, then taken through World 1, Humid Cave B1, B2,
+B1 again and back to World 1 using the normal entrance triggers. All transitions
+completed without an exception. Arena usage was approximately 7.38, 5.09, 6.24,
+5.34 and 8.06 MB respectively. Returning to World 1 previously failed at about
+11.22 MB. The remaining 0.68 MB increase over the initial World 1 visit has not
+yet been distinguished from caches or position-dependent allocations; repeated
+routes and other dungeons still need validation. The supplied public-release
+savestate was preserved and was not used for this cold-boot test.
+
+The subsequent Cliff Dungeon B1 load exposed a separate padding bug. Its sound
+pack (AFS entry 194) places the root list's memory at ID 0. Three unowned padding
+blocks contained zero, which the loader resolves as a reference to ID 0 even
+without a list owning the block. Object-reference counting then incremented the
+root list's second word, corrupting the sound-info pointer. A memory write
+watchpoint caught the increment at `0x8006a5fc`, before the eventual resource-list
+fault at `0x802f9f88`. Padding now contains the null ID `0xFFFFFFFF`. Replaying the
+same checkpoint with only those three padding words corrected successfully
+loaded Cliff Dungeon. A regression constructs padding using the retail pack's
+object-reference memory template and requires the null value.
 
 The seed 1520 GameCube Goblin Pass regression checks all three difficulty packs,
 the imported Tyrannomon pool growing beyond four slots, unchanged generator

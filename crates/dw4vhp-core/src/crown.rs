@@ -520,6 +520,9 @@ impl<'p, 'a> Builder<'p, 'a> {
     /// that owns it keeps the same block (the engine never sees a replacement).
     fn grow_mem(&mut self, block: u32, extra: Vec<u8>) -> Result<()> {
         need(extra.len().is_multiple_of(4), "unaligned block growth")?;
+        if extra.is_empty() {
+            return Ok(());
+        }
         let range = self
             .p
             .memory
@@ -642,7 +645,10 @@ impl<'p, 'a> Builder<'p, 'a> {
     }
     fn finish(mut self, template: u32) -> Result<Vec<Edit>> {
         if !self.mapping.len().is_multiple_of(2) {
-            self.mem(vec![0; 4], template)?;
+            // The template can describe object references. Even unowned blocks
+            // are resolved by the loader, so zero would retain object ID 0 (or
+            // treat memory ID 0 as an object and corrupt its second word).
+            self.mem(words(&[NULL]), template)?;
         }
         let n = (self.p.ids.len() + self.mapping.len()) as u32;
         let mut table = self.dirs.clone();
@@ -1547,6 +1553,36 @@ impl CrownPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn padding_uses_null_references_when_id_zero_is_memory() {
+        let Some(path) = std::env::var_os("DW4_RETAIL_GC_USA_ISO") else {
+            return;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let file = gcm::find_file(&iso, "NDMW.AFS").unwrap();
+        let afs = &iso[file.offset as usize..(file.offset + file.size) as usize];
+        // Cliff Dungeon B1's sound pack starts with the root list's memory at
+        // ID 0. Resolving a dummy zero as an object corrupts that list's second
+        // pointer when the loader increments the supposed object's refcount.
+        let offset = u32at(afs, 8 + 8 * 194).unwrap() as usize;
+        let size = u32at(afs, 12 + 8 * 194).unwrap() as usize;
+        let bytes = &afs[offset..offset + size];
+        let p = Pack::parse(bytes).unwrap();
+        assert!(p.memory[0].is_some());
+        let root = u32at(bytes, p.table + 8 + 2 * p.ids.len()).unwrap();
+        assert_eq!(p.val(root, 4).unwrap(), 0);
+        let mut builder = Builder::new(&p);
+        builder.mem(words(&[NULL]), 0).unwrap();
+        let edits = builder.finish(0).unwrap();
+        let out = materialize(bytes, &edits).unwrap();
+        let q = Pack::parse(&out).unwrap();
+        assert_eq!(q.ids.len(), p.ids.len() + 2);
+        let padding = q.memory[p.ids.len() + 1].clone().unwrap();
+        assert_eq!(&out[padding], &words(&[NULL]));
+        assert_eq!(q.array(root).unwrap(), p.array(root).unwrap());
+    }
+
     #[test]
     fn malformed_packs_are_refused_without_panicking() {
         for n in [0, 4, 47, 48, 2048, 32768] {

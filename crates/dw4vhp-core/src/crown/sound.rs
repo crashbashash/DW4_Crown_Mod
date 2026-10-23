@@ -309,10 +309,14 @@ fn graft_bank(dst: &[u8], src: &[u8], model: &str, bank: &str) -> Result<Vec<u8>
     )?;
     let root = u32at(dp.b, dp.table + 8 + 2 * dp.ids.len())?;
     if let Some(bank_id) = bank_id.filter(|_| copy_bank) {
-        let count = dp.array(root)?.len() + 1;
-        let block = dp.val(root, 4)?;
-        builder.grow_mem(block, words(&[map[&bank_id]]))?;
-        builder.modify(root, &[(2, count as u32), (3, count as u32)])?;
+        // The loader discovers bank data through the registered static info.
+        // A bank in the root igInfoList is absent from that static-data lookup.
+        let static_info = info(&dp, "beStaticInfo")?;
+        need(
+            dp.array(root)?.contains(&static_info),
+            "sound static info is not registered",
+        )?;
+        append(&dp, &mut builder, dp.val(static_info, 5)?, &[map[&bank_id]])?;
     }
     let grows = builder.grown();
     let edits = builder.finish(dp.val(root, 4)?)?;
@@ -400,7 +404,15 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let root = u32at(p.b, p.table + 8 + 2 * p.ids.len()).unwrap();
-            assert!(p.array(root).unwrap().contains(&bank));
+            let static_info = info(&p, "beStaticInfo").unwrap();
+            assert!(p.array(root).unwrap().contains(&static_info));
+            assert!(
+                p.array(p.val(static_info, 5).unwrap())
+                    .unwrap()
+                    .contains(&bank),
+                "embedded banks must be registered in beStaticInfo's data list"
+            );
+            assert!(!p.array(root).unwrap().contains(&bank));
             let source = Pack::parse(src).unwrap();
             let source_bank = graft::find_named(&source, "beCriSfpData", "e_geko.sfp")
                 .unwrap()
@@ -536,6 +548,20 @@ mod audit {
                         "repeat import must be a no-op"
                     );
                     let dest = Pack::parse(&out).unwrap();
+                    let root = u32at(dest.b, dest.table + 8 + 2 * dest.ids.len()).unwrap();
+                    let original_root =
+                        u32at(original.b, original.table + 8 + 2 * original.ids.len()).unwrap();
+                    assert_eq!(
+                        dest.array(root).unwrap(),
+                        original.array(original_root).unwrap()
+                    );
+                    let original_static = info(&original, "beStaticInfo").unwrap();
+                    let original_banks = original
+                        .array(original.val(original_static, 5).unwrap())
+                        .unwrap();
+                    let static_info = info(&dest, "beStaticInfo").unwrap();
+                    let registered_banks = dest.array(dest.val(static_info, 5).unwrap()).unwrap();
+                    assert!(registered_banks.starts_with(&original_banks));
                     let si = info(&dest, "beSoundInfo").unwrap();
                     let files = dest.array(dest.val(si, 7).unwrap()).unwrap();
                     for companion in
@@ -626,13 +652,15 @@ mod audit {
                                 let target_bank = bank_info(&dest, bank).unwrap().unwrap();
                                 let root =
                                     u32at(dest.b, dest.table + 8 + 2 * dest.ids.len()).unwrap();
+                                let static_info = info(&dest, "beStaticInfo").unwrap();
+                                assert!(dest.array(root).unwrap().contains(&static_info));
                                 assert!(
-                                    graft::closure(&dest, &[root])
+                                    dest.array(dest.val(static_info, 5).unwrap())
                                         .unwrap()
-                                        .0
                                         .contains(&target_bank),
-                                    "{e} {actor} {name} bank {bank} must be reachable"
+                                    "{e} {actor} {name} bank {bank} must be registered as static data"
                                 );
+                                assert!(!dest.array(root).unwrap().contains(&target_bank));
                                 assert_eq!(
                                     source.b[source.memory
                                         [source.val(srcbank, 4).unwrap() as usize]

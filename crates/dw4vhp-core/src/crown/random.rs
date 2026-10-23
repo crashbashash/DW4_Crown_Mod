@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 4;
+pub const RULES_VERSION: u32 = 5;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 
@@ -535,8 +535,23 @@ impl Randomiser {
         Ok(dst)
     }
 
-    /// Copy donors into the stage's model pack, choose each generator's model, and record the
-    /// rows for the stage's generator packs. Returns the new model pack.
+    fn import_sounds<'a>(
+        &self,
+        model: &str,
+        source: usize,
+        dst: &[u8],
+        data: &impl Fn(usize) -> Result<&'a [u8]>,
+    ) -> Result<Vec<u8>> {
+        let audio = *self
+            .audio_sources
+            .get(model)
+            .ok_or_else(|| bad(&format!("{model}: no complete audio source")))?;
+        let companions =
+            graft::companion_models(&Pack::parse(data(source)?)?, None, &[model.to_string()])?;
+        super::sound::graft_enemy(dst, data(source - 1)?, data(audio)?, model, &companions)
+    }
+
+    /// Copy donors, choose generators and retain the resources used by the resulting stage.
     fn plan_stage(
         &mut self,
         entry: usize,
@@ -644,6 +659,15 @@ impl Randomiser {
             candidates
                 .sort_by_key(|(m, _)| first.iter().position(|f| f == m).unwrap_or(usize::MAX));
         }
+        let original_model = dst.clone();
+        let original_sound = self.sounds.get(&(entry - 1)).cloned();
+        let original_stats = (
+            self.stats.copied,
+            self.stats.approximate,
+            self.stats.unattached,
+            self.stats.trace.len(),
+        );
+        let mut imports = Vec::new();
         let (mut added, mut tried) = (0, 0);
         let enough =
             |pool: &Vec<_>, added: usize| added >= self.opts.donors && pool.len() > sites.len();
@@ -678,22 +702,7 @@ impl Randomiser {
                         .get(&sound_entry)
                         .map(Vec::as_slice)
                         .unwrap_or(data(sound_entry)?);
-                    let audio = *self
-                        .audio_sources
-                        .get(m)
-                        .ok_or_else(|| bad(&format!("{m}: no complete audio source")))?;
-                    let companions = graft::companion_models(
-                        &Pack::parse(data(donor.source)?)?,
-                        None,
-                        &[m.to_string()],
-                    )?;
-                    let sounds = super::sound::graft_enemy(
-                        current,
-                        data(donor.source - 1)?,
-                        data(audio)?,
-                        m,
-                        &companions,
-                    )?;
+                    let sounds = self.import_sounds(m, donor.source, current, &data)?;
                     self.sounds.insert(sound_entry, sounds);
                     self.stats.copied += 1;
                     self.stats.approximate += report.approximate.len();
@@ -708,6 +717,7 @@ impl Randomiser {
                         ));
                     }
                     dst = materialize(&base, &edits)?;
+                    imports.push((m, own_scene));
                     pool.push((m.to_string(), donor.ram, donor.rarities.clone()));
                     added += 1;
                     let used = Pack::parse(&dst).map_or(0, |p| p.ids.len());
@@ -834,6 +844,43 @@ impl Randomiser {
             tiers.push(tier);
         }
         let demand = shared_capacity(tiers, &stage.residents);
+        // Candidate imports make selection independent of how many generators
+        // eventually use each family. Rebuild without unused candidates: even
+        // unreachable objects are allocated by the game's IGB loader.
+        if imports
+            .iter()
+            .any(|(model, _)| demand.get(*model).copied().unwrap_or(0) == 0)
+        {
+            dst = original_model;
+            let mut sounds = original_sound.unwrap_or(data(entry - 1)?.to_vec());
+            self.stats.copied = original_stats.0;
+            self.stats.approximate = original_stats.1;
+            self.stats.unattached = original_stats.2;
+            self.stats.trace.truncate(original_stats.3);
+            for (model, scene) in imports {
+                if demand.get(model).copied().unwrap_or(0) == 0 {
+                    self.log.push(format!("stage {entry}: omit unused {model}"));
+                    pool.retain(|(m, _, _)| m != model);
+                    continue;
+                }
+                let donor = &self.donors[&(model, scene)];
+                let missing = donor.profile.missing(&Pack::parse(&dst)?);
+                if !missing.is_empty() {
+                    dst = add_classes(&dst, &missing)?;
+                }
+                let (edits, report) =
+                    graft::graft(&dst, data(donor.source)?, &[model.to_string()])?;
+                dst = materialize(&dst, &edits)?;
+                sounds = self.import_sounds(model, donor.source, &sounds, &data)?;
+                self.stats.copied += 1;
+                self.stats.approximate += report.approximate.len();
+                self.stats.unattached += report.unattached.len();
+                self.stats
+                    .trace
+                    .push(format!("copy {entry} {model} {}", donor.source));
+            }
+            self.sounds.insert(entry - 1, sounds);
+        }
         let assigned: BTreeSet<_> = choice.values().cloned().collect();
         for model in assigned {
             let needed = demand.get(&model).copied().unwrap_or(0);
@@ -1053,6 +1100,84 @@ mod tests {
     }
 
     #[test]
+    fn seed_1520_gamecube_humid_cave_omits_unused_imports() {
+        let Some(path) = env::var_os("DW4_RETAIL_GC_USA_ISO") else {
+            return;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+        let afs = &iso[f.offset as usize..(f.offset + f.size) as usize];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let data = |e: usize| {
+            let (o, l) = entries[e];
+            &afs[o..o + l]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let mut r = Randomiser::scan(
+            afs,
+            &entries,
+            EnemyTable::read(&iso, &layout).unwrap(),
+            Options {
+                seed: 1520,
+                donors: 3,
+                warp: None,
+                only: Some(vec![179, 187]),
+            },
+        )
+        .unwrap();
+        let original = materialize(data(187), &expand(data(187)).unwrap()).unwrap();
+        let out = r.stage(187, original.clone(), afs, &entries).unwrap();
+        let p = Pack::parse(&out).unwrap();
+        assert!(graft::find_named(&p, "beModelCtrlInfo", "e_nume")
+            .unwrap()
+            .is_some());
+        assert!(graft::find_named(&p, "beModelCtrlInfo", "e_mecha3")
+            .unwrap()
+            .is_none());
+        assert_eq!(super::super::capacity::slots(&p, "e_mecha4").unwrap(), 6);
+        assert_eq!(super::super::capacity::slots(&p, "e_infermo").unwrap(), 12);
+        assert_eq!(r.stats.copied, 2);
+        for &pack in &r.stages[&187].gens {
+            let bytes = r.retarget(pack, data(pack)).unwrap().unwrap();
+            let target = Pack::parse(&bytes).unwrap();
+            let mut counts = BTreeMap::new();
+            for g in generators(&target).unwrap() {
+                if r.plans[&pack].rows.contains_key(&g.name) {
+                    *counts.entry(family(g.row).unwrap()).or_insert(0) += 1;
+                }
+            }
+            assert_eq!(counts, BTreeMap::from([("e_mecha4", 2), ("e_infermo", 1)]));
+        }
+        // Optional private fixtures for replaying a user-supplied savestate.
+        // Keep the export directory outside the source checkout.
+        if let Some(dir) = env::var_os("DW4_TEST_STAGE_EXPORT") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("187.igb"), &out).unwrap();
+            std::fs::write(dir.join("186.igb"), &r.sounds[&186]).unwrap();
+            let first = materialize(data(179), &expand(data(179)).unwrap()).unwrap();
+            let first = r.stage(179, first, afs, &entries).unwrap();
+            std::fs::write(dir.join("179.igb"), first).unwrap();
+            std::fs::write(dir.join("178.igb"), &r.sounds[&178]).unwrap();
+        }
+        eprintln!(
+            "Humid Cave B2: {} -> {} model bytes; MR04/Infermon assignments and pools retained",
+            original.len(),
+            out.len()
+        );
+    }
+
+    #[test]
     fn seed_1520_gamecube_shared_capacity_covers_every_generator() {
         let Some(path) = env::var_os("DW4_RETAIL_GC_USA_ISO") else {
             return;
@@ -1089,8 +1214,20 @@ mod tests {
         )
         .unwrap();
         let initial = materialize(data(614), &expand(data(614)).unwrap()).unwrap();
+        let before = Pack::parse(&initial).unwrap();
+        let scene_blocks: Vec<_> = (0..before.ids.len() as u32)
+            .filter(|&id| before.class(id, "igNodeList").is_ok())
+            .map(|id| (id, before.val(id, 4).unwrap()))
+            .collect();
         let out = r.stage(614, initial, afs, &entries).unwrap();
         let p = Pack::parse(&out).unwrap();
+        for (list, block) in scene_blocks {
+            assert_eq!(
+                p.val(list, 4).unwrap(),
+                block,
+                "scene list {list}: imported enemies must not orphan the original backing block"
+            );
+        }
         let mut checked = 0;
         for &pack in &r.stages[&614].gens {
             let retargeted = r.retarget(pack, data(pack)).unwrap().unwrap();

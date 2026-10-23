@@ -899,16 +899,12 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     }
     for (list, added) in children {
         let mut entries = dp.array(list)?;
-        entries.extend(added);
+        entries.extend(&added);
         let template = dp.val(list, 4)?;
-        let block = builder.mem(words(&entries), template)?;
+        builder.grow_mem(template, words(&added))?;
         builder.modify(
             list,
-            &[
-                (2, entries.len() as u32),
-                (3, entries.len() as u32),
-                (4, block),
-            ],
+            &[(2, entries.len() as u32), (3, entries.len() as u32)],
         )?;
     }
     let grows = builder.grown();
@@ -1008,22 +1004,7 @@ pub(super) fn verify(
             }),
         "graft changed original IDs",
     )?;
-    // The original pool is intact apart from the bytes appended to grown blocks.
-    let (mut from, mut to, mut seen) = (dp.pool, v.pool, 0);
-    for &(at, len) in grows {
-        let run = at - seen;
-        need(
-            dp.b[from..from + run] == out[to..to + run],
-            "graft changed the original memory pool",
-        )?;
-        from += run;
-        to += run + len;
-        seen = at;
-    }
-    need(
-        dp.b[from..] == out[to..to + dp.b.len() - from],
-        "graft changed the original memory pool",
-    )?;
+    verify_pool(dp, &v, grows)?;
     for (&s, &d) in map {
         if let Some(si) = sp.ids[s as usize] {
             let di = v.ids[d as usize].ok_or_else(|| bad("copied object missing"))?;
@@ -1077,6 +1058,25 @@ pub(super) fn verify(
         }
     }
     Ok(())
+}
+
+/// Original memory stays byte-for-byte intact around additions to its blocks.
+pub(super) fn verify_pool(dp: &Pack, v: &Pack, grows: &[(usize, usize)]) -> Result<()> {
+    let (mut from, mut to, mut seen) = (dp.pool, v.pool, 0);
+    for &(at, len) in grows {
+        let run = at - seen;
+        need(
+            dp.b[from..from + run] == v.b[to..to + run],
+            "changed original memory pool",
+        )?;
+        from += run;
+        to += run + len;
+        seen = at;
+    }
+    need(
+        dp.b[from..] == v.b[to..to + dp.b.len() - from],
+        "changed original memory pool",
+    )
 }
 
 /// The row of `donor` standing at the same position in its model family as `row` does in its own.

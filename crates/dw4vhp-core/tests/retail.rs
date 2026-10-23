@@ -34,7 +34,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         &mut |_| {},
     )
     .unwrap();
-    // The pre-signature default-build fingerprints remain an independent
+    // The unsigned default-build fingerprints remain an independent
     // oracle after reversing only the footer/volume-length metadata below.
     assert_eq!(outcome.bytes, report.output_size);
     assert!(outcome.bytes > original.len() as u64);
@@ -51,7 +51,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         identity,
         dw4vhp_core::signature::metadata(release, &PatchPlan::default())
     );
-    // Preserve the independent pre-signature golden checksum: remove only the
+    // Check the independent unsigned golden checksum: remove only the
     // footer and reverse the volume-size update in this hashing view.
     let unsigned_len = signature["recovery"]["archiveEnd"].as_u64().unwrap() as usize;
     let mut head = patched[..64 * 2048].to_vec();
@@ -141,7 +141,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         "original must be unchanged"
     );
     eprintln!(
-        "PASS: {} {} → {actual} (legacy {output_md5}); all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive and signature verified",
+        "PASS: {} {} → {actual} (unsigned {output_md5}); all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive and signature verified",
         release.label(),
         release.serial(), actual = outcome.md5
     );
@@ -153,7 +153,7 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "dd1c73561a824c1a2512f9c3f4078e38",
+        "d2ed6888ab36bc1a57a1f2a7376c20da",
     );
 }
 #[test]
@@ -162,7 +162,7 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "e6abfe8b81f2234a88228776e93f0186",
+        "1f7434bf2bc148e388107c6ec6cdf747",
     );
 }
 #[test]
@@ -171,6 +171,6 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "f2cefb65e40ea022487f009a783c96e9",
+        "0c7e18437a64bfdb3b3a413a9c4ba151",
     );
 }

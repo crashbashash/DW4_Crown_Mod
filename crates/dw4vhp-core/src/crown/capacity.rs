@@ -213,8 +213,11 @@ pub(super) fn expand(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
         .into_iter()
         .chain(auxiliary.iter().map(|(list, entries)| (*list, entries)))
     {
-        let data = builder.mem(words(elements), p.val(list, 4)?)?;
-        builder.modify(list, &[(2, count as u32), (3, count as u32), (4, data)])?;
+        // Keep the original backing block: the IGB loader resolves its object
+        // references even if the list is redirected to a replacement block.
+        // Leaving that block orphaned keeps its original instances alive.
+        builder.grow_mem(p.val(list, 4)?, words(&elements[old..]))?;
+        builder.modify(list, &[(2, count as u32), (3, count as u32)])?;
     }
     let word_count = count.div_ceil(32);
     let mut bits = vec![0; word_count * 4];
@@ -226,17 +229,16 @@ pub(super) fn expand(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
     for (i, word) in old_bits.iter().enumerate() {
         put(&mut bits, i * 4, *word);
     }
-    let data = builder.mem(bits, p.val(mask, 4)?)?;
-    let newmask = builder.obj(
+    builder.grow_mem(p.val(mask, 4)?, bits[old_bits.len() * 4..].to_vec())?;
+    builder.modify(
         mask,
         &[
             (2, word_count as u32),
             (3, word_count as u32),
-            (4, data),
             (5, count as u32),
         ],
     )?;
-    builder.modify(switch, &[(8, newmask)])?;
+    let grows = builder.grown();
     let edits = builder.finish(p.val(ramlist, 4)?)?;
     let out = materialize(b, &edits)?;
     let v = Pack::parse(&out)?;
@@ -244,7 +246,7 @@ pub(super) fn expand(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
         v.array(ramlist)? == rams
             && v.array(actionlist)? == actions
             && v.array(parent)? == nodes
-            && v.val(newmask, 5)? as usize == count,
+            && v.val(mask, 5)? as usize == count,
         "expanded instance graph differs",
     )?;
     need(
@@ -281,14 +283,16 @@ pub(super) fn expand(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
             }
         }
     }
+    graft::verify_pool(&p, &v, &grows)?;
     need(
-        p.mapping == v.mapping[..p.mapping.len()]
-            && b[p.pool..] == out[v.pool..v.pool + b.len() - p.pool],
-        "original instance data changed",
+        p.mapping.iter().enumerate().all(|(id, &entry)| {
+            v.mapping[id] == entry || (p.memory[id].is_some() && v.memory[id].is_some())
+        }),
+        "original instance IDs changed",
     )?;
     for (id, ix) in p.ids.iter().enumerate() {
         if let Some(ix) = ix {
-            if ![ramlist, actionlist, parent, switch].contains(&(id as u32))
+            if ![ramlist, actionlist, parent, mask].contains(&(id as u32))
                 && !auxiliary.iter().any(|(list, _)| *list == id as u32)
             {
                 need(
@@ -355,6 +359,26 @@ mod tests {
                     let rams = v.array(v.val(info, 6).unwrap()).unwrap();
                     let actions = v.array(v.val(action, 6).unwrap()).unwrap();
                     assert_eq!(rams.len(), 70);
+                    for (class, slot) in [
+                        ("beModelCtrlInfo", 6),
+                        ("beAction2Info", 6),
+                        ("igAnimationDatabase", 9),
+                        ("beHitLandDelivInfo", 6),
+                        ("beShadow01Info", 6),
+                    ] {
+                        let Some(info) = graft::find_named(&p, class, name).unwrap() else {
+                            continue;
+                        };
+                        let list = p.val(info, slot).unwrap();
+                        if p.array(list).unwrap().is_empty() {
+                            continue;
+                        }
+                        assert_eq!(
+                            v.val(list, 4).unwrap(),
+                            p.val(list, 4).unwrap(),
+                            "{name} {class}: expansion must keep the original backing block"
+                        );
+                    }
                     let mask = v.val(v.val(action, 7).unwrap(), 8).unwrap();
                     assert_eq!(v.val(mask, 5).unwrap(), 70);
                     assert_eq!(v.array(mask).unwrap().len(), 3);
