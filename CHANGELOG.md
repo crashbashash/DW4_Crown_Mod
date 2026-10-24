@@ -3,9 +3,6 @@
 ## v0.13.0
 
 - Make Crown Mod optional, allowing Random enemies and other independent options to run with the original game balance.
-- Start with all patch options off and disable Patch ISO until at least one option is selected.
-- Show Crown Drops as a sub-option of Crown Mod, and clear it when Crown Mod is turned off.
-- Give every enemy and boss a cosmetic crown in a random colour when Random crown colours is enabled. This works with or without Crown Mod and preserves combat stats, EXP and drop tables.
 - Make randomized enemies award the EXP of the enemies they replace, preserving each difficulty's rewards and applying Crown Mod's EXP scaling only when enabled. Replacement combat strength is matched separately.
 
 ## v0.12.4
