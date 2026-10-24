@@ -1362,12 +1362,12 @@ impl Spec {
     }
 }
 
-/// Per-pack generator edits chosen by name: the new enemy row and whether to clear the
-/// generator's spawn sequence (a donor may not define the original's).
+/// Per-pack generator edits chosen by name: enemy rows and spawn-sequence overrides.
 #[derive(Default, Clone, Debug)]
 pub(super) struct Retarget {
     pub rows: BTreeMap<String, u32>,
     pub blank_seq: BTreeSet<String>,
+    pub sequences: BTreeMap<String, String>,
 }
 
 /// Field numbers of `beGeneraterData` and its per-player counts.
@@ -1378,8 +1378,8 @@ pub(super) fn retarget_rows(b: &[u8], rt: &Retarget) -> Result<(Vec<u8>, usize)>
     let p = Pack::parse(b)?;
     let mut edits = Vec::new();
     let mut n = 0;
-    for (id, index) in p.ids.iter().enumerate() {
-        let Some(index) = index else { continue };
+    let mut added = 0;
+    for index in p.ids.iter().flatten() {
         let r = &p.objects[*index];
         if p.classes[r.class].name != "beGeneraterData" {
             continue;
@@ -1388,7 +1388,6 @@ pub(super) fn retarget_rows(b: &[u8], rt: &Retarget) -> Result<(Vec<u8>, usize)>
             continue;
         };
         if let Some(&row) = rt.rows.get(&name) {
-            let _ = id;
             edits.push(Edit {
                 range: r.field(GENERATOR_ROW)?.clone(),
                 bytes: row.to_le_bytes().to_vec(),
@@ -1403,9 +1402,38 @@ pub(super) fn retarget_rows(b: &[u8], rt: &Retarget) -> Result<(Vec<u8>, usize)>
                 bytes: vec![0; f.len() - 4],
             });
         }
+        if let Some(sequence) = rt.sequences.get(&name) {
+            need(!rt.blank_seq.contains(&name), "conflicting spawn sequences")?;
+            let f = r.field(GENERATOR_SEQ)?;
+            let size = a4(sequence.len() + 1).max(f.len() - 4);
+            let mut bytes = (size as u32).to_le_bytes().to_vec();
+            bytes.extend(sequence.as_bytes());
+            bytes.resize(4 + size, 0);
+            let growth = bytes.len() - f.len();
+            edits.push(Edit { range: f, bytes });
+            if growth > 0 {
+                edits.push(Edit {
+                    range: r.range.start + 4..r.range.start + 8,
+                    bytes: ((r.range.len() + growth) as u32).to_le_bytes().to_vec(),
+                });
+                added += growth;
+            }
+        }
+    }
+    if added > 0 {
+        edits.push(Edit {
+            range: 16..20,
+            bytes: (u32at(b, 16)? + added as u32).to_le_bytes().to_vec(),
+        });
     }
     edits.sort_by_key(|e| e.range.start);
-    Ok((materialize(b, &edits)?, n))
+    let out = materialize(b, &edits)?;
+    let after = Pack::parse(&out)?;
+    need(
+        p.mapping == after.mapping && b[p.pool..] == out[after.pool..],
+        "generator retarget changed IDs or memory",
+    )?;
+    Ok((out, n))
 }
 
 /// What copying a model out of a stage pack takes, worked out without a destination.

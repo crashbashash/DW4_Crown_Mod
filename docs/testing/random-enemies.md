@@ -13,8 +13,27 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 8. The same seed is reproducible within
+The current randomizer uses rules version 9. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 9 gives every generator assigned Minotaurmon (`e_minotaru`) the native
+`SQ_NENTR` entrance. It keeps the half-HP switch on the normal combat branch,
+bypassing the retreat to a stage-specific healing position that can strand an
+imported enemy against a wall. This covers both imported and resident models,
+all difficulties and crown rarities, including private EXP variants. Authored
+entrances and protected encounters retain their original setup. Other enemy
+choices, combat rows and rewards are unchanged from rules 8.
+
+The Minotaurmon regression checks PS2 USA/Europe/Japan and GameCube USA/Japan.
+It exercises a resident model in `dng205b1` and an import into Abyss of Grief,
+verifies 180 selected generator rows across the three difficulties, follows
+private EXP rows back to their combat family and original reward, and checks
+the alternate entrance's normal-combat label. Reapplying the generator edits
+is byte-identical; other entrance fields and protected generator records are
+preserved. This is disc-data validation; the change has not been tested live.
+The existing PS2 USA/GameCube USA scripted-encounter audit also passes, and
+the PS2 USA full-disc regression confirms same-seed reproducibility, a distinct
+plan for another seed, and byte-for-byte verification of the written image.
 
 Rules 8 separates combat matching from EXP. A replacement still uses the closest
 HP/attack variant of the same authored crown rarity. Its EXP comes from the

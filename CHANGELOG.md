@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.13.1
+
+- Fixed randomised Minotaurmon retreating to heal below 50% HP and getting stuck against walls. They now continue fighting.
+
 ## v0.13.0
 
 - Make Crown Mod optional, allowing Random enemies and other independent options to run with the original game balance.

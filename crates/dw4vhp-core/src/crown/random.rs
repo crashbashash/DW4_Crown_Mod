@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 8;
+pub const RULES_VERSION: u32 = 9;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 
@@ -301,6 +301,9 @@ impl Randomiser {
         for (pack, plan) in &self.plans {
             for (generator, row) in &plan.rows {
                 hash.update(format!("row {pack} {generator} {row}\n").as_bytes());
+            }
+            for (generator, sequence) in &plan.sequences {
+                hash.update(format!("seq {pack} {generator} {sequence}\n").as_bytes());
             }
         }
         for (stage, rewards) in &self.rewards {
@@ -817,11 +820,13 @@ impl Randomiser {
             if fits {
                 rewards = attempt;
                 for (pack, combat) in selected {
-                    self.plans
-                        .get_mut(&pack)
-                        .unwrap()
-                        .rows
-                        .insert(name.clone(), combat);
+                    let plan = self.plans.get_mut(&pack).unwrap();
+                    plan.rows.insert(name.clone(), combat);
+                    // Native SQ_NENTR keeps SQ_SWON on the normal combat
+                    // branch instead of seeking donor-stage healing positions.
+                    if model == "e_minotaru" {
+                        plan.sequences.insert(name.clone(), "SQ_NENTR".into());
+                    }
                 }
             } else {
                 choice.remove(&name);
