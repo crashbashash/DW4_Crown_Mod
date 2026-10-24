@@ -440,6 +440,7 @@ pub async fn start_patch(
 
 /// The selected modded image is replaced only after the new copy passes verification.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_mod(
     four_player_spawns: bool,
     crown_drops: bool,
