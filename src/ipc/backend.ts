@@ -1,3 +1,4 @@
+import type { PatchSelection } from "../bindings/PatchSelection";
 import type { UpdateCheck } from "../bindings/UpdateCheck";
 import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 
@@ -12,12 +13,12 @@ export interface Backend {
   acceptUpdate(version: string): Promise<"browser" | "installer">;
   chooseIso(): Promise<string | null>;
   chooseOutput(defaultName: string): Promise<string | null>;
-  analyze(path: string, fourPlayerSpawns?: boolean, crownDrops?: boolean, crownMod?: boolean): Promise<DiscStatus>;
+  analyze(path: string, selection?: PatchSelection): Promise<DiscStatus>;
   defaultOutput(input: string): Promise<string>;
   outputExists(output: string): Promise<boolean>;
   planSummary(): Promise<PlanSummary | null>;
-  startPatch(output: string, overwrite: boolean, fourPlayerSpawns?: boolean, crownDrops?: boolean, randomCrownColours?: boolean, randomEnemies?: boolean, enemySeed?: number | null, crownMod?: boolean): Promise<void>;
-  updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, original: string | null, crownMod?: boolean): Promise<void>;
+  startPatch(output: string, overwrite: boolean, selection?: PatchSelection): Promise<void>;
+  updateMod(selection: PatchSelection, original: string | null): Promise<void>;
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// Every failure the engine can report. Player-facing messages name the fix,
-/// not just the fault, as required by spec §6.
+/// not just the fault, with actionable recovery instructions.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("this disc is already Crown Mod v{version} — use your original disc image")]

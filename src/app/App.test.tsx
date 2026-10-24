@@ -1,7 +1,12 @@
+import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../bindings/PatchSelection";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { MockBackend } from "../ipc/mock";
 import { App } from "./App";
+
+function patchSelection(overrides: Partial<PatchSelection> = {}): PatchSelection {
+  return { ...DEFAULT_PATCH_SELECTION, ...overrides };
+}
 
 // Existing patch-flow cases explicitly select the historical Crown Mod preset.
 function renderCrownModApp() {
@@ -114,7 +119,7 @@ describe("overwrite confirmation", () => {
     expect((output as HTMLInputElement).value).toBe("/mock/my patched game.iso");
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Overwrite" }));
-    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso", true, false, false, false, false, null, true);
+    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso", true, patchSelection({ crownMod: true }));
   });
 
   test.each([false, true])("existing output asks before patching; confirm=%s", async (confirm) => {
@@ -133,7 +138,7 @@ describe("overwrite confirmation", () => {
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: confirm ? "Overwrite" : "Cancel" }));
     if (confirm) {
-      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, true, true, false, false, null, true);
+      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, patchSelection({ crownMod: true, fourPlayerSpawns: true, crownDrops: true }));
       expect(await screen.findByRole("dialog", { name: "Patching your game" })).toBeTruthy();
     } else {
       expect(patch).not.toHaveBeenCalled();
@@ -158,7 +163,7 @@ describe("output extensions", () => {
     await waitFor(() => expect(output.value).toBe(`C:\\games\\patched game.${extension}`));
     await user.click(screen.getByRole("button", { name: "Patch ISO" }));
     expect(exists).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`);
-    expect(patch).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`, false, false, false, false, false, null, true);
+    expect(patch).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`, false, patchSelection({ crownMod: true }));
   });
 });
 
@@ -335,7 +340,7 @@ test.each(["success", "failure"] as const)("patching uses only the modal until %
    await user.click(screen.getByRole("switch",{name:"Random crown colours"}));
    expect(analyze.mock.calls.length).toBe(before);
    await user.click(screen.getByRole("button",{name:"Patch ISO"}));
-   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso",false,false,false,true,false,null, true));
+   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, patchSelection({ crownMod: true, randomCrownColours: true })));
  });
 
 test("random enemies fills in a seed when switched on, shows it in a submenu and patches with it", async () => {
@@ -357,7 +362,7 @@ test("random enemies fills in a seed when switched on, shows it in a submenu and
   await user.click(screen.getByRole("switch", { name: "Random enemies" }));
   expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe(String(seed));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed, true));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, patchSelection({ crownMod: true, randomEnemies: true, enemySeed: seed })));
 });
 
 test("the suggested output name carries the seed while the option is on, and a custom name is left alone", async () => {
@@ -411,7 +416,7 @@ test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patc
   await user.clear(field);
   await user.type(field, "1234");
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod] [Seed 1234].iso", false, false, false, false, true, 1234, true));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod] [Seed 1234].iso", false, patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 1234 })));
 });
 
 test("a loaded Crown Mod image shows its enemy seed and loads it into Settings", async () => {
@@ -438,7 +443,7 @@ test("a loaded Crown Mod image shows its enemy seed and loads it into Settings",
   await user.click(screen.getByRole("button", { name: "Update ISO" }));
   expect((await screen.findByRole("dialog")).textContent).toContain("seed 4242");
   await user.click(screen.getByRole("button", { name: "Update image" }));
-  await waitFor(() => expect(update).toHaveBeenCalledWith(false, false, false, true, 4242, null, true));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 4242 }), null));
 });
 
 test("settings refresh output size in the background and only the latest choice enables patching", async () => {
@@ -458,7 +463,7 @@ test("settings refresh output size in the background and only the latest choice 
   expect(screen.getByText("Updating output size…")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
   await user.click(screen.getByRole("switch", { name: "Match drops to crowns" }));
-  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, true, true);
+  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", patchSelection({ crownMod: true, fourPlayerSpawns: true, crownDrops: true }));
   expect(screen.queryByRole("dialog")).toBeNull();
   await act(async () => pending[0]!({ ...verdict, kind: "refused", text: "stale result" }));
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -502,7 +507,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.click(screen.getByRole("button", {name: "Update ISO"}));
    expect((await screen.findByRole("dialog")).textContent).toContain("v0.10.0");
    await user.click(screen.getByRole("button", { name: "Update image" }));
-   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, false, null, null, true));
+   await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, crownDrops: true, randomCrownColours: true }), null));
    expect(picker).not.toHaveBeenCalled();
    expect((await screen.findByRole("dialog")).textContent).toContain("/mock/modded.iso");
  });
@@ -551,7 +556,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.tab();
    await user.click(await screen.findByRole("button", {name: "Update ISO"}));
    await user.click(await screen.findByRole("button", {name: "Update image"}));
-   expect(update).toHaveBeenCalledWith(false, false, false, false, null, null, true);
+   expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true }), null);
    expect(patch).not.toHaveBeenCalled();
  });
 
@@ -589,7 +594,7 @@ test("randomizer-only patching sends Crown Mod off and becomes disabled when des
   await user.click(screen.getByRole("switch", { name: "Random enemies" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed, false);
+  expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, patchSelection({ randomEnemies: true, enemySeed: seed }));
 });
 
 test("a modern randomizer-only image restores Crown Mod off", async () => {
@@ -620,5 +625,5 @@ test("random crown colours works alone and stays selected when Crown Mod is turn
   expect(screen.queryByRole("switch", { name: "Match drops to crowns" })).toBeNull();
   await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, true, false, null, false);
+  expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, patchSelection({ randomCrownColours: true }));
 });

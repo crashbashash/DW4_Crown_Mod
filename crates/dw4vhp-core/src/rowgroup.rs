@@ -2,23 +2,23 @@
 //!
 //! The disc cannot express this grouping: the three patchable columns carry
 //! numbers, not type identity, and the `MODEL` column the game uses to tell
-//! rows apart exists only at runtime (spec §12). The table below came from a
+//! rows apart exists only at runtime. The table below came from a
 //! RAM snapshot of the authored table, via `tools/rowgroups.py`; the tests
 //! check it against that snapshot and against the clean ISO's HP column. That
 //! these groups are the game's real type partition cannot be proved from the
-//! disc alone, and the About panel states it as inferred (spec §12.3, §12.5).
+//! disc alone, and the About panel states it as inferred.
 //!
 //! No game data is stored here — row indices and model names only.
 
 use std::ops::RangeInclusive;
 
 /// Rows the collapse never writes: the practice stage's own lesson rows and its
-/// 2-player graduation tripwire (spec §12.2, §3.6).
+/// 2-player graduation tripwire.
 pub const COLLAPSE_SKIP_ROWS: RangeInclusive<usize> = 638..=645;
 
 /// One enemy model's authored rows. `top` is the row with the maximum authored
 /// HP, which is the row the collapse copies over the group's other rows
-/// (spec §12.1).
+///.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowGroup {
     pub model: &'static str,

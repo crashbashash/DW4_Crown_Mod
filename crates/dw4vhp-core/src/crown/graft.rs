@@ -1,5 +1,5 @@
-//! Experimental: copy whole enemy model subgraphs from one stage model pack into
-//! another and retarget generator rows at them. Nothing here is wired into the app.
+//! Copy enemy model subgraphs and retarget generator rows for the randomizer.
+//! The public graft specifications also support focused development fixtures.
 use super::*;
 use std::collections::{BTreeSet, HashMap};
 
@@ -1565,7 +1565,7 @@ pub(super) fn has_group(p: &Pack, name: &[u8]) -> bool {
 }
 
 /// The scene nodes [`graft`] would hang for a model's bullets and effects in an identical stage.
-#[cfg(test)]
+#[cfg(all(test, feature = "devtools"))]
 pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
     let bullets = companion_models(sp, None, &[model.to_string()])?;
     let mut units = Vec::new();

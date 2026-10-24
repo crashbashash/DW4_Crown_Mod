@@ -63,8 +63,8 @@ def main():
         assert not enabled(initial)
         assert not any(name in initial["text"] for name in ("Extreme", "Brutal", "Custom", "Advanced"))
         switches = [i for i in initial["inputs"] if i["type"] == "checkbox"]
-        assert len(switches) == 3 and not any(i["checked"] for i in switches)
-        record("base mode only; patch disabled without a disc")
+        assert len(switches) == 4 and not any(i["checked"] for i in switches)
+        record("all options off; patch disabled without a disc")
 
         drive("fill", "disc path", str(failures))
         text_is("not a supported disc image")
@@ -73,6 +73,9 @@ def main():
         record("invalid disc refused with dismissible popup")
 
         drive("fill", "disc path", str(iso))
+        text_is("Unmodified")
+        assert not enabled(drive("snapshot"))
+        drive("option", "Crown Mod", "on")
         wait(enabled)
         assert f"{args.expected_size / 1e9:.2f} GB of free space" in drive("snapshot")["text"]
         assert "pinned" not in drive("snapshot")["text"]
@@ -91,16 +94,16 @@ def main():
         drive("click", "OK")
 
         drive("click", "Patch ISO")
-        text_is("Overwrite existing file?")
-        assert "Overwrite it?" in drive("snapshot")["text"]
+        text_is("File already exists")
+        assert "Overwrite" in drive("snapshot")["text"]
         drive("screenshot", str(folder / "overwrite-question.png"))
         drive("click", "Cancel")
-        assert "Overwrite existing file?" not in drive("snapshot")["text"]
+        assert "File already exists" not in drive("snapshot")["text"]
         assert md5(output) == args.expected_md5.lower()
         record("existing output asks; cancelling preserves the file")
 
         drive("click", "Patch ISO")
-        text_is("Overwrite existing file?")
+        text_is("File already exists")
         drive("click", "Overwrite")
         text_is("Ready to play")
         wait(enabled)
@@ -110,7 +113,7 @@ def main():
 
         drive("fill", "output path", str(iso))
         drive("click", "Patch ISO")
-        text_is("Overwrite existing file?")
+        text_is("File already exists")
         drive("click", "Overwrite")
         text_is("the output path is the same file as the input")
         wait(enabled)

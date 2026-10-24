@@ -1,3 +1,4 @@
+import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../bindings/PatchSelection";
 import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bindings";
 import packageInfo from "../../package.json";
 import type { UpdateCheck } from "../bindings/UpdateCheck";
@@ -29,7 +30,7 @@ export class MockBackend implements Backend {
     return `/mock/${defaultName}`;
   }
 
-  async analyze(path: string, _fourPlayerSpawns = false, _crownDrops = false, _crownMod = false): Promise<DiscStatus> {
+  async analyze(path: string, _selection: PatchSelection = DEFAULT_PATCH_SELECTION): Promise<DiscStatus> {
     const error = this.nextAnalyzeError;
     this.nextAnalyzeError = null;
     if (error !== null) {
@@ -78,12 +79,7 @@ export class MockBackend implements Backend {
   async startPatch(
     _output: string,
     _overwrite: boolean,
-    _fourPlayerSpawns = false,
-    _crownDrops = false,
-    _randomCrownColours = false,
-    _randomEnemies = false,
-    _enemySeed: number | null = null,
-    _crownMod = false,
+    _selection: PatchSelection = DEFAULT_PATCH_SELECTION,
   ): Promise<void> {
     for (let i = 1; i <= 3; i++) {
       this.emit<ProgressEvent>("patch-progress", { phase: "copying", done: i, total: 3 });
@@ -111,8 +107,8 @@ export class MockBackend implements Backend {
     });
   }
 
-  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, _original: string | null, crownMod = false): Promise<void> {
-    await this.startPatch("/mock/game.iso", true, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, crownMod);
+  async updateMod(selection: PatchSelection, _original: string | null): Promise<void> {
+    await this.startPatch("/mock/game.iso", true, selection);
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

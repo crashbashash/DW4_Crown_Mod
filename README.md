@@ -103,8 +103,8 @@ updates.
 
 ## Contributing and building from source
 
-See the [development guide](docs/DEVELOPMENT.md) for build steps, tests and project
-layout. Release notes and checksums are in the [changelog](CHANGELOG.md).
+Start with [CONTRIBUTING](CONTRIBUTING.md), the [architecture map](docs/ARCHITECTURE.md)
+and the [development guide](docs/DEVELOPMENT.md). Release notes are in the [changelog](CHANGELOG.md).
 
 No disc images or extracted game files are committed, and the app reads everything
 it needs from your own disc.

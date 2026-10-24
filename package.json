@@ -9,7 +9,15 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check": "node tools/check.mjs",
+    "check:core": "node tools/check.mjs core",
+    "check:frontend": "node tools/check.mjs frontend",
+    "check:desktop": "node tools/check.mjs desktop",
+    "bindings": "node tools/bindings.mjs",
+    "bindings:check": "node tools/bindings.mjs --check",
+    "docs:rules": "node tools/rules-docs.mjs",
+    "docs:rules:check": "node tools/rules-docs.mjs --check"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

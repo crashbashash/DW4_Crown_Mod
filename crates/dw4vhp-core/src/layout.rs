@@ -2,7 +2,7 @@
 ///
 /// Every block's copy is contiguous: HP is `rows × i32` column-major, the twelve
 /// stats are `rows × 12 × i16` row-major, and crit/paralysis/rarity are
-/// `rows × 3 × u8` row-major (spec §3.1).
+/// `rows × 3 × u8` row-major.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Layout {
     pub hp_off: u64,

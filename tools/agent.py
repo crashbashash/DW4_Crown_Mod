@@ -38,6 +38,9 @@ def main():
     fill.add_argument("value")
     click = commands.add_parser("click")
     click.add_argument("text")
+    option = commands.add_parser("option")
+    option.add_argument("label")
+    option.add_argument("state", choices=("on", "off"))
     script = commands.add_parser("eval")
     script.add_argument("script")
     args = parser.parse_args()
@@ -59,9 +62,10 @@ def main():
             raise
         return
     if args.command == "screenshot":
-        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--name", "^DW4 Crown Mod$"], text=True).splitlines()
+        info = json.loads(Path(args.session).read_text())
+        windows = subprocess.check_output(["xdotool", "search", "--onlyvisible", "--pid", str(info["pid"]), "--name", "^DW4 Crown Mod$"], text=True).splitlines()
         if len(windows) != 1:
-            raise RuntimeError("expected exactly one visible app window")
+            raise RuntimeError("expected one visible window for the selected app session")
         subprocess.run(["import", "-window", windows[0], args.path], check=True)
         print(json.dumps({"screenshot": args.path}))
         return
@@ -79,6 +83,15 @@ def main():
           e.dispatchEvent(new Event('change', {bubbles:true}));
           e.blur(); return true;
         })()""".replace("LABEL", json.dumps(args.label)).replace("VALUE", json.dumps(args.value))
+    elif args.command == "option":
+        script = """(() => {
+          const e = [...document.querySelectorAll('input[type=checkbox]')].find(e =>
+            e.closest('label')?.querySelector('.setting-title')?.textContent.trim() === LABEL);
+          if (!e) throw Error('option missing');
+          if (e.disabled) throw Error('option disabled');
+          if (e.checked !== SELECTED) e.click();
+          return true;
+        })()""".replace("LABEL", json.dumps(args.label)).replace("SELECTED", json.dumps(args.state == "on"))
     elif args.command == "click":
         script = """(() => {
           const matches = [...document.querySelectorAll('button')].filter(e => e.innerText.trim() === TEXT);

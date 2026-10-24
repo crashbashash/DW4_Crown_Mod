@@ -3,7 +3,7 @@
 #
 #   ./run.sh              live-reloading development window (npx tauri dev)
 #   ./run.sh --release    optimised build, then open the app
-#   ./run.sh --test       core tests, frontend tests, typecheck and lint
+#   ./run.sh --test       complete engine, frontend and desktop checks
 #
 # The app asks for your own PS2 or GameCube disc image (.iso, .ciso, .rvz).
 set -euo pipefail
@@ -18,14 +18,11 @@ usage() { sed -n "2,8p" "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 case "${1:-}" in
   -h|--help) usage ;;
   --release)
-    npx tauri build --no-bundle
+    CARGO_TARGET_DIR="$root/target" npx tauri build --no-bundle
     exec "$root/target/release/dw4-crown-mod"
     ;;
   --test)
-    cargo test -p dw4vhp-core
-    npm test --silent
-    npm run -s typecheck
-    npm run -s lint
+    npm run check
     ;;
   "") exec npx tauri dev ;;
   *) usage >&2; exit 2 ;;

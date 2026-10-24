@@ -1,3 +1,4 @@
+import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../../bindings/PatchSelection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscStatus } from "../../bindings";
 import type { Backend } from "../../ipc/backend";
@@ -7,7 +8,10 @@ type Selection = { path: string; epoch: number };
 type Analysis = { crownMod: boolean; selection: Selection; fourPlayerSpawns: boolean; crownDrops: boolean; status: DiscStatus };
 
 /** Reinspect when the disc or resource options change, preserving a chosen output. */
-export function useDisc(backend: Backend, fourPlayerSpawns = false, crownDrops = false, onIdentified?: (status: DiscStatus, epoch: number) => void, crownMod = false) {
+export type ResourceSelection = Pick<PatchSelection, "crownMod" | "fourPlayerSpawns" | "crownDrops">;
+
+export function useDisc(backend: Backend, selectionOptions: ResourceSelection = DEFAULT_PATCH_SELECTION, onIdentified?: (status: DiscStatus, epoch: number) => void) {
+  const { crownMod, fourPlayerSpawns, crownDrops } = selectionOptions;
   const [selection, setSelection] = useState<Selection | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [extension, setExtension] = useState("iso");
@@ -26,7 +30,7 @@ export function useDisc(backend: Backend, fourPlayerSpawns = false, crownDrops =
   useEffect(() => {
     if (selection === null || moddedSelection) return;
     let cancelled = false;
-    void backend.analyze(selection.path, fourPlayerSpawns, crownDrops, crownMod)
+    void backend.analyze(selection.path, { ...DEFAULT_PATCH_SELECTION, fourPlayerSpawns, crownDrops, crownMod })
       .then((status) => {
         if (!cancelled) {
           setAnalysis({ selection, fourPlayerSpawns, crownDrops, crownMod, status });

@@ -1,3 +1,4 @@
+import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../bindings/PatchSelection";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiscStatus } from "../bindings";
 import { UpdateModDialog } from "../features/disc/UpdateModDialog";
@@ -39,11 +40,11 @@ export function App() {
 
 function AppInner() {
   const backend = useBackend();
-  const [crownMod, setCrownMod] = useState(false);
-  const [fourPlayerSpawns, setFourPlayerSpawns] = useState(false);
-  const [crownDrops, setCrownDrops] = useState(false);
-  const [randomCrownColours, setRandomCrownColours] = useState(false);
-  const [randomEnemies, setRandomEnemies] = useState(false);
+  const [crownMod, setCrownMod] = useState(DEFAULT_PATCH_SELECTION.crownMod);
+  const [fourPlayerSpawns, setFourPlayerSpawns] = useState(DEFAULT_PATCH_SELECTION.fourPlayerSpawns);
+  const [crownDrops, setCrownDrops] = useState(DEFAULT_PATCH_SELECTION.crownDrops);
+  const [randomCrownColours, setRandomCrownColours] = useState(DEFAULT_PATCH_SELECTION.randomCrownColours);
+  const [randomEnemies, setRandomEnemies] = useState(DEFAULT_PATCH_SELECTION.randomEnemies);
   const [enemySeed, setEnemySeed] = useState("");
   const appliedOptionsEpoch = useRef<number | null>(null);
   const applyDetectedOptions = useCallback((status: DiscStatus, epoch: number) => {
@@ -60,7 +61,7 @@ function AppInner() {
       if (options?.randomEnemies === true && typeof seed === "number") setEnemySeed(String(seed));
     }
   }, []);
-  const disc = useDisc(backend, fourPlayerSpawns, crownDrops, applyDetectedOptions, crownMod);
+  const disc = useDisc(backend, { fourPlayerSpawns, crownDrops, crownMod }, applyDetectedOptions);
   const replaceDiscStatus = disc.replaceStatus;
   const wide = useMediaQuery("(min-width: 900px)");
 
@@ -76,7 +77,7 @@ function AppInner() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [donePopup, setDonePopup] = useState<string | null>(null);
   const outputRef = useRef<string | null>(null);
-  const pendingModUpdate = useRef<{ path: string; status: DiscStatus; spawns: boolean; drops: boolean; crownMod: boolean } | null>(null);
+  const pendingModUpdate = useRef<{ path: string; status: DiscStatus; selection: PatchSelection } | null>(null);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
@@ -99,7 +100,7 @@ function AppInner() {
         const updated = pendingModUpdate.current;
         pendingModUpdate.current = null;
         if (updated) {
-          void backend.analyze(updated.path, updated.spawns, updated.drops, updated.crownMod).catch((error: unknown): DiscStatus => ({
+          void backend.analyze(updated.path, updated.selection).catch((error: unknown): DiscStatus => ({
             kind: "unknown", text: String(error), size: 0, outputSize: 0, copies: null,
           })).then(status => {
             replaceDiscStatus(updated.status, status);
@@ -138,6 +139,7 @@ function AppInner() {
 
   const info = selectedStatus?.discInfo;
   const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
+  const selection: PatchSelection = { crownMod, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed: enemySeedValue };
   const analyzed = disc.status?.kind === "ok";
   const hasOptions = crownMod || fourPlayerSpawns || randomCrownColours || randomEnemies;
   const canPatch = hasOptions && (analyzed || selectedStatus?.reason === "already-modded")
@@ -166,7 +168,7 @@ function AppInner() {
     setPatchProgress(0);
     setPatchError(null);
     try {
-      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue, crownMod);
+      await backend.startPatch(output, overwrite, selection);
     } catch (error) {
       setBusy(false);
       setPatchError(String(error));
@@ -192,7 +194,7 @@ function AppInner() {
     }
   };
 
-  const updateMod = async (spawns: boolean, drops: boolean, colours: boolean, enemies: boolean, seed: number | null) => {
+  const updateMod = async () => {
     const status = discError;
     if (!canPatch || !status || !disc.inputPath || busy) return;
     setBusy(true);
@@ -206,8 +208,8 @@ function AppInner() {
       }
       outputRef.current = disc.inputPath;
       setDismissedDiscStatus(status);
-      pendingModUpdate.current = { path: disc.inputPath, status, spawns, drops, crownMod };
-      await backend.updateMod(spawns, drops, colours, enemies, seed, original, crownMod);
+      pendingModUpdate.current = { path: disc.inputPath, status, selection: { ...DEFAULT_PATCH_SELECTION, crownMod, fourPlayerSpawns, crownDrops } };
+      await backend.updateMod(selection, original);
     } catch (error) {
       pendingModUpdate.current = null;
       setBusy(false);
@@ -292,7 +294,7 @@ function AppInner() {
       {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}
       {!busy && !disc.analyzing && discError !== null && (
         discError.reason === "already-modded" ? (
-          <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod(fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue)} />
+          <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod()} />
         ) : <MessageDialog title="Unable to open disc" message={discError.text} onClose={() => setDismissedDiscStatus(discError)} />
       )}
       {!busy && !disc.analyzing && patchError !== null && (

@@ -26,9 +26,8 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - uses: actions/setup-node@v4
+      - run: npm run check:core
 
   frontend:
     name: frontend (typecheck, lint, test)
@@ -39,9 +38,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
+      - run: npm run check:frontend
 
   shell:
     name: tauri shell compiles
@@ -56,7 +53,4 @@ jobs:
           toolchain: stable
       - uses: actions/setup-node@v4
       - run: npm ci
-      - run: npm run build
-      - run: cargo clippy --manifest-path crates/dw4vhp-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path crates/dw4vhp-tauri/Cargo.toml
-      - run: cargo build --manifest-path crates/dw4vhp-tauri/Cargo.toml
+      - run: npm run check:desktop

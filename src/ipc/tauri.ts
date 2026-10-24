@@ -1,3 +1,4 @@
+import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../bindings/PatchSelection";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -22,8 +23,8 @@ export class TauriBackend implements Backend {
     return invoke<string | null>("choose_output", { defaultName });
   }
 
-  async analyze(path: string, fourPlayerSpawns = false, crownDrops = false, crownMod = false): Promise<DiscStatus> {
-    return invoke<DiscStatus>("analyze", { path, fourPlayerSpawns, crownDrops, crownMod });
+  async analyze(path: string, selection: PatchSelection = DEFAULT_PATCH_SELECTION): Promise<DiscStatus> {
+    return invoke<DiscStatus>("analyze", { path, selection });
   }
 
   async defaultOutput(input: string): Promise<string> {
@@ -38,12 +39,12 @@ export class TauriBackend implements Backend {
     return invoke<PlanSummary | null>("plan_summary");
   }
 
-  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false, randomEnemies = false, enemySeed: number | null = null, crownMod = false): Promise<void> {
-    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, crownMod });
+  async startPatch(output: string, overwrite: boolean, selection: PatchSelection = DEFAULT_PATCH_SELECTION): Promise<void> {
+    await invoke("start_patch", { output, overwrite, selection });
   }
 
-  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, original: string | null, crownMod = false): Promise<void> {
-    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, original, crownMod });
+  async updateMod(selection: PatchSelection, original: string | null): Promise<void> {
+    await invoke("update_mod", { selection, original });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

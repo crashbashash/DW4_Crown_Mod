@@ -3,7 +3,7 @@ use crate::rowgroup::{COLLAPSE_SKIP_ROWS, ROW_GROUPS};
 use crate::table::EnemyTable;
 
 /// Authored rows for the destructibles (`g_*` crates and barrels), left
-/// byte-identical so they still break normally (spec §3.4).
+/// byte-identical so they still break normally.
 pub const DESTRUCTIBLE_ROWS: std::ops::RangeInclusive<usize> = 370..=378;
 
 /// The `e_cockatri` tutorial pair: excluded from the general buffs. The separate
@@ -12,7 +12,7 @@ pub const TRIPWIRE_ROWS: [usize; 2] = [644, 645];
 
 /// The practice stage's lesson rows: when [`PatchPlan::exclude_practice`] is
 /// set these are left byte-identical, so the training enemies stay exactly as
-/// the vanilla game ships them (spec §3.6).
+/// the vanilla game ships them.
 pub const PRACTICE_ROWS: std::ops::RangeInclusive<usize> = 638..=643;
 /// Includes the two Kokatorimon practice variants as well as the lesson rows.
 pub const PRACTICE_ENEMY_ROWS: std::ops::RangeInclusive<usize> = 638..=645;
@@ -22,7 +22,7 @@ pub const SPEED_COLUMN: usize = 4;
 /// 638–643 are authored as token values, so each is replaced by an ordinary
 /// tier-0 row of the same type. Sources are read from the *computed* table
 /// (after scaling) and the whole row is copied. Rows 644/645 are not in this
-/// map, so the tripwire survives the buff (spec §3.6).
+/// map, so the tripwire survives the buff.
 pub const PRACTICE_MAP: [(usize, usize); 6] = [
     (638, 0),
     (639, 1),
@@ -42,7 +42,7 @@ const CHARGEN_CAP: f64 = 60.0;
 
 /// Low-level patch configuration: the multipliers applied on top of the
 /// derived [`RatioVector`], the crown rank, and the exclusions/toggles that
-/// define a build (spec §7).
+/// define a build.
 #[derive(PartialEq, Debug, Clone)]
 pub struct PatchPlan {
     /// Apply Crown Mod balance, practice and crown changes.
@@ -134,7 +134,7 @@ fn is_excluded(r: usize, plan: &PatchPlan) -> bool {
 }
 
 /// Applies `plan` and `ratio` to `authored`, returning the table that gets
-/// written back and a count of what happened (spec §3.3, §3.4, §3.6).
+/// written back and a count of what happened.
 ///
 /// Rounding is ties-to-even throughout, matching the Python patcher that
 /// produced the shipped discs. Excluded rows are copied through untouched,
@@ -196,7 +196,7 @@ pub fn transform(
     }
 
     // Copy each type's strongest row over that type's other rows, so
-    // the variant a stage happens to pick stops mattering (spec §12.2). The
+    // the variant a stage happens to pick stops mattering. The
     // cap counters above are deliberately not recounted: they measure the
     // scaling step, and the collapse copies values that are already clamped.
     if plan.collapse_to_top {

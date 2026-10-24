@@ -1,3 +1,4 @@
+import { DEFAULT_PATCH_SELECTION } from "../../bindings/PatchSelection";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { MockBackend } from "../../ipc/mock";
@@ -13,7 +14,7 @@ describe("useDisc — pick, default output, auto-analyze", () => {
       return original(path);
     };
     const { result } = renderHook(() => useDisc(backend));
-    await result.current.pickDisc();
+    await act(() => result.current.pickDisc());
     await waitFor(() => expect(result.current.status?.kind).toBe("ok"));
     expect(result.current.inputPath).toBe("/mock/game.iso");
     expect(analyzed).toBe("/mock/game.iso");
@@ -22,7 +23,7 @@ describe("useDisc — pick, default output, auto-analyze", () => {
   test("setInputPath computes the default output and analyzes", async () => {
     const backend = new MockBackend();
     const { result } = renderHook(() => useDisc(backend));
-    await result.current.setInputPath("/mock/mygame.iso");
+    await act(() => result.current.setInputPath("/mock/mygame.iso"));
     await waitFor(() => expect(result.current.status?.kind).toBe("ok"));
     expect(result.current.outputPath).toBe("/mock/mygame [CrownMod].iso");
   });
@@ -31,7 +32,7 @@ describe("useDisc — pick, default output, auto-analyze", () => {
     const backend = new MockBackend();
     backend.nextAnalyzeError = "this disc is already modded (600 rows carry a crown) — use your original ISO";
     const { result } = renderHook(() => useDisc(backend));
-    await result.current.setInputPath("/mock/modded.iso");
+    await act(() => result.current.setInputPath("/mock/modded.iso"));
     await waitFor(() => expect(result.current.status?.kind).toBe("refused"));
   });
 });
@@ -39,16 +40,16 @@ describe("useDisc — pick, default output, auto-analyze", () => {
 test("changing spawn counts reinspects the disc but preserves the chosen output", async () => {
   const backend = new MockBackend();
   const original = backend.analyze.bind(backend);
-  const analyze = vi.spyOn(backend, "analyze").mockImplementation(async (path, four) => ({
-    ...await original(path), outputSize: four ? 4_700_000_000 : 4_600_000_000,
+  const analyze = vi.spyOn(backend, "analyze").mockImplementation(async (path, selection) => ({
+    ...await original(path), outputSize: selection?.fourPlayerSpawns ? 4_700_000_000 : 4_600_000_000,
   }));
-  const { result, rerender } = renderHook(({ four }) => useDisc(backend, four), { initialProps: { four: false } });
+  const { result, rerender } = renderHook(({ four }) => useDisc(backend, { ...DEFAULT_PATCH_SELECTION, fourPlayerSpawns: four }), { initialProps: { four: false } });
   await act(() => result.current.setInputPath("/mock/game.iso"));
   await waitFor(() => expect(result.current.status?.outputSize).toBe(4_600_000_000));
   act(() => result.current.setOutputPath("/chosen/out.iso"));
   rerender({ four: true });
   await waitFor(() => expect(result.current.status?.outputSize).toBe(4_700_000_000));
-  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, false, false);
+  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", { ...DEFAULT_PATCH_SELECTION, fourPlayerSpawns: true });
   expect(result.current.outputPath).toBe("/chosen/out.iso");
 });
 
@@ -58,7 +59,7 @@ test("an old inspection cannot replace the current spawn-option verdict", async 
   type Verdict = Awaited<ReturnType<typeof backend.analyze>>;
   const pending: Array<(value: Verdict) => void> = [];
   vi.spyOn(backend, "analyze").mockImplementation(() => new Promise(resolve => pending.push(resolve)));
-  const { result, rerender } = renderHook(({ four }) => useDisc(backend, four), { initialProps: { four: false } });
+  const { result, rerender } = renderHook(({ four }) => useDisc(backend, { ...DEFAULT_PATCH_SELECTION, fourPlayerSpawns: four }), { initialProps: { four: false } });
   await act(() => result.current.setInputPath("/mock/game.iso"));
   await waitFor(() => expect(pending).toHaveLength(1));
   rerender({ four: true });
@@ -74,15 +75,15 @@ test("an old inspection cannot replace the current spawn-option verdict", async 
  test("changing loot reinspects output size while keeping spawn counts independent", async () => {
    const backend = new MockBackend();
    const original = backend.analyze.bind(backend);
-   const analyze = vi.spyOn(backend, "analyze").mockImplementation(async (path, _four, drops) => ({
-     ...await original(path), outputSize: drops ? 4_800_000_000 : 4_600_000_000,
+   const analyze = vi.spyOn(backend, "analyze").mockImplementation(async (path, selection) => ({
+     ...await original(path), outputSize: selection?.crownDrops ? 4_800_000_000 : 4_600_000_000,
    }));
-   const { result, rerender } = renderHook(({ drops }) => useDisc(backend, false, drops), { initialProps: { drops: false } });
+   const { result, rerender } = renderHook(({ drops }) => useDisc(backend, { ...DEFAULT_PATCH_SELECTION, crownDrops: drops }), { initialProps: { drops: false } });
    await act(() => result.current.setInputPath("/mock/game.iso"));
    await waitFor(() => expect(result.current.status?.outputSize).toBe(4_600_000_000));
    act(() => result.current.setOutputPath("/chosen/out.iso"));
    rerender({ drops: true });
    await waitFor(() => expect(result.current.status?.outputSize).toBe(4_800_000_000));
-   expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", false, true, false);
+   expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", { ...DEFAULT_PATCH_SELECTION, crownDrops: true });
    expect(result.current.outputPath).toBe("/chosen/out.iso");
  });
