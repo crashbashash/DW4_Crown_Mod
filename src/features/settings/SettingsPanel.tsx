@@ -3,7 +3,9 @@ import { Button, Switch } from "react-aria-components";
 import { newSeed, parseSeed } from "./seed";
 
 /** Optional patches start disabled. */
-export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, enemySeed, onEnemySeedChange, busy }: {
+export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, enemySeed, onEnemySeedChange, busy }: {
+  crownMod: boolean;
+  onCrownModChange: (selected: boolean) => void;
   fourPlayerSpawns: boolean;
   onFourPlayerSpawnsChange: (selected: boolean) => void;
   crownDrops: boolean;
@@ -22,6 +24,32 @@ export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crow
   return (
     <section className="panel settings-panel" aria-labelledby={`${id}-settings-heading`}>
       <h2 id={`${id}-settings-heading`}>Settings</h2>
+      <Switch className="setting-row" isSelected={crownMod} onChange={onCrownModChange}
+        isDisabled={busy} aria-labelledby={`${id}-crown-mod-label`} aria-describedby={`${id}-crown-mod-description`}>
+        <span className="setting-copy">
+          <span className="setting-title" id={`${id}-crown-mod-label`}>Crown Mod</span>
+          <span className="setting-description" id={`${id}-crown-mod-description`}>Stronger enemies, increased EXP rewards and crowns for every enemy.</span>
+        </span>
+        <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      </Switch>
+      {crownMod && (
+        <div className="setting-submenu" role="group" aria-label="Crown Mod options">
+      <Switch
+        className="setting-row"
+        isSelected={crownDrops}
+        onChange={onCrownDropsChange}
+        isDisabled={busy}
+        aria-labelledby={`${id}-crown-drops-label`}
+        aria-describedby={`${id}-crown-drops-description`}
+      >
+        <span className="setting-copy">
+          <span className="setting-title" id={`${id}-crown-drops-label`}>Match drops to crowns</span>
+          <span className="setting-description" id={`${id}-crown-drops-description`}>Improve enemy drops for the increased difficulty.</span>
+        </span>
+        <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      </Switch>
+        </div>
+      )}
       <Switch
         className="setting-row"
         isSelected={fourPlayerSpawns}
@@ -38,20 +66,6 @@ export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crow
       </Switch>
       <Switch
         className="setting-row"
-        isSelected={crownDrops}
-        onChange={onCrownDropsChange}
-        isDisabled={busy}
-        aria-labelledby={`${id}-crown-drops-label`}
-        aria-describedby={`${id}-crown-drops-description`}
-      >
-        <span className="setting-copy">
-          <span className="setting-title" id={`${id}-crown-drops-label`}>Match drops to crowns</span>
-          <span className="setting-description" id={`${id}-crown-drops-description`}>Improve enemy drops for the increased difficulty.</span>
-        </span>
-        <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
-      </Switch>
-      <Switch
-        className="setting-row"
         isSelected={randomCrownColours}
         onChange={onRandomCrownColoursChange}
         isDisabled={busy}
@@ -60,7 +74,7 @@ export function SettingsPanel({ fourPlayerSpawns, onFourPlayerSpawnsChange, crow
       >
         <span className="setting-copy">
           <span className="setting-title" id={`${id}-random-crown-colours-label`}>Random crown colours</span>
-          <span className="setting-description" id={`${id}-random-crown-colours-description`}>Randomise enemy and river turret crown colours. Bosses keep yellow.</span>
+          <span className="setting-description" id={`${id}-random-crown-colours-description`}>Give every enemy and boss a random crown colour.</span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
       </Switch>

@@ -26,6 +26,7 @@ pub fn metadata(release: Release, plan: &PatchPlan) -> Value {
         "formatVersion": 1, "id": "dw4-crown-mod", "version": env!("CARGO_PKG_VERSION"),
         "platform": if release.is_gamecube() { "gc" } else { "ps2" }, "release": release.serial(),
         "options": {
+            "crownMod": plan.crown_mod,
             "fourPlayerSpawns": plan.four_player_spawns, "betterLoot": plan.crown_drops,
             "randomCrownColours": plan.random_crown_colours, "crownColourSeed": plan.crown_colour_seed,
             "randomEnemies": plan.random_enemies, "enemySeed": plan.enemy_seed,

@@ -141,6 +141,18 @@ pub fn inspect_retail_with_options(
     four_player_spawns: bool,
     crown_drops: bool,
 ) -> Result<DiscReport> {
+    inspect_retail_for_plan(
+        path,
+        &crate::plan::PatchPlan {
+            four_player_spawns,
+            crown_drops,
+            ..crate::plan::PatchPlan::default()
+        },
+    )
+}
+
+/// Inspect the requested feature set using the same balance/resource recipe as patching.
+pub fn inspect_retail_for_plan(path: &Path, plan: &crate::plan::PatchPlan) -> Result<DiscReport> {
     let format = container::detect(path)?;
     if format != Format::Raw {
         // Inspection needs the plain image, so expand into a throwaway folder.
@@ -153,7 +165,7 @@ pub fn inspect_retail_with_options(
             };
         let plain = work.path().join("disc.iso");
         container::unpack(format, path, &plain, &mut |_, _| {})?;
-        return inspect_retail_with_options(&plain, four_player_spawns, crown_drops);
+        return inspect_retail_for_plan(&plain, plan);
     }
     let file = File::open(path)?;
     if file.metadata()?.len() == 0 {
@@ -161,8 +173,7 @@ pub fn inspect_retail_with_options(
     }
     // Safety: input is opened read-only and is never modified by the patcher.
     let mmap = unsafe { Mmap::map(&file)? };
-    inspect_retail_planned_with_options(&mmap, four_player_spawns, crown_drops)
-        .map(|(report, _)| report)
+    inspect_retail_planned_for_plan(&mmap, plan).map(|(report, _)| report)
 }
 
 pub fn inspect_retail_bytes(iso: &[u8]) -> Result<DiscReport> {
@@ -229,16 +240,17 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
         None
     };
     let crowns = if release.is_gamecube() {
-        crate::crown::CrownPlan::build_gcm_with_options(
+        crate::crown::CrownPlan::build_gcm_with_balance(
             iso,
             plan.four_player_spawns,
             plan.crown_drops,
             plan.random_crown_colours,
             plan.crown_colour_seed.unwrap_or(0),
             random,
+            plan.crown_mod,
         )?
     } else {
-        crate::crown::CrownPlan::build_with_options(
+        crate::crown::CrownPlan::build_with_balance(
             iso,
             plan.four_player_spawns,
             plan.crown_drops,
@@ -246,6 +258,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_colour_seed.unwrap_or(0),
             None,
             random,
+            plan.crown_mod,
         )?
     };
     progress(200, 1000);

@@ -22,8 +22,8 @@ export class TauriBackend implements Backend {
     return invoke<string | null>("choose_output", { defaultName });
   }
 
-  async analyze(path: string, fourPlayerSpawns = false, crownDrops = false): Promise<DiscStatus> {
-    return invoke<DiscStatus>("analyze", { path, fourPlayerSpawns, crownDrops });
+  async analyze(path: string, fourPlayerSpawns = false, crownDrops = false, crownMod = false): Promise<DiscStatus> {
+    return invoke<DiscStatus>("analyze", { path, fourPlayerSpawns, crownDrops, crownMod });
   }
 
   async defaultOutput(input: string): Promise<string> {
@@ -38,12 +38,12 @@ export class TauriBackend implements Backend {
     return invoke<PlanSummary | null>("plan_summary");
   }
 
-  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false, randomEnemies = false, enemySeed: number | null = null): Promise<void> {
-    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed });
+  async startPatch(output: string, overwrite: boolean, fourPlayerSpawns = false, crownDrops = false, randomCrownColours = false, randomEnemies = false, enemySeed: number | null = null, crownMod = false): Promise<void> {
+    await invoke("start_patch", { output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, crownMod });
   }
 
-  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, original: string | null): Promise<void> {
-    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, original });
+  async updateMod(fourPlayerSpawns: boolean, crownDrops: boolean, randomCrownColours: boolean, randomEnemies: boolean, enemySeed: number | null, original: string | null, crownMod = false): Promise<void> {
+    await invoke("update_mod", { fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed, original, crownMod });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

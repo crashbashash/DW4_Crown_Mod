@@ -9,7 +9,7 @@
 //! without asking the frontend to interpret error-message text.
 
 use crate::state::AppState;
-use dw4vhp_core::disc::{inspect_retail_with_options, DiscReport};
+use dw4vhp_core::disc::{inspect_retail_for_plan, DiscReport};
 use dw4vhp_core::error::Error;
 use dw4vhp_core::patch::{patch_file, PatchOptions};
 use dw4vhp_core::plan::{transform, PatchPlan, PlanSummary};
@@ -17,6 +17,32 @@ use dw4vhp_core::ratio::RatioVector;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Validate dependencies at the IPC boundary as well as in the UI.
+fn selected_plan(
+    crown_mod: bool,
+    four_player_spawns: bool,
+    crown_drops: bool,
+    random_crown_colours: bool,
+    random_enemies: bool,
+    enemy_seed: Option<u32>,
+) -> Result<PatchPlan, String> {
+    if crown_drops && !crown_mod {
+        return Err("Crown Drops requires Crown Mod.".into());
+    }
+    if !(crown_mod || four_player_spawns || random_crown_colours || random_enemies) {
+        return Err("Select at least one patch option.".into());
+    }
+    Ok(PatchPlan {
+        crown_mod,
+        four_player_spawns,
+        crown_drops,
+        random_crown_colours,
+        random_enemies,
+        enemy_seed: enemy_seed.filter(|_| random_enemies),
+        ..PatchPlan::default()
+    })
+}
 
 /// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
 const OUTPUT_MARKER: &str = " [CrownMod]";
@@ -250,6 +276,7 @@ pub async fn analyze(
     path: String,
     four_player_spawns: Option<bool>,
     crown_drops: Option<bool>,
+    crown_mod: Option<bool>,
     app: AppHandle,
 ) -> Result<DiscStatusPayload, String> {
     let epoch = app
@@ -261,10 +288,14 @@ pub async fn analyze(
     // input stored for the patch), so the worker gets a clone.
     let inspect_path = std::path::PathBuf::from(&path);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        inspect_retail_with_options(
+        inspect_retail_for_plan(
             &inspect_path,
-            four_player_spawns.unwrap_or(false),
-            crown_drops.unwrap_or(false),
+            &PatchPlan {
+                crown_mod: crown_mod.unwrap_or(false),
+                four_player_spawns: four_player_spawns.unwrap_or(false),
+                crown_drops: crown_drops.unwrap_or(false),
+                ..PatchPlan::default()
+            },
         )
     })
     .await
@@ -349,18 +380,18 @@ pub async fn start_patch(
     random_crown_colours: Option<bool>,
     random_enemies: Option<bool>,
     enemy_seed: Option<u32>,
+    crown_mod: Option<bool>,
     app: AppHandle,
 ) -> Result<(), String> {
     let permit = app.state::<AppState>().begin_operation()?;
-    let random_enemies = random_enemies.unwrap_or(false);
-    let plan = PatchPlan {
-        four_player_spawns: four_player_spawns.unwrap_or(false),
-        crown_drops: crown_drops.unwrap_or(false),
-        random_crown_colours: random_crown_colours.unwrap_or(false),
-        random_enemies,
-        enemy_seed: enemy_seed.filter(|_| random_enemies),
-        ..PatchPlan::default()
-    };
+    let plan = selected_plan(
+        crown_mod.unwrap_or(false),
+        four_player_spawns.unwrap_or(false),
+        crown_drops.unwrap_or(false),
+        random_crown_colours.unwrap_or(false),
+        random_enemies.unwrap_or(false),
+        enemy_seed,
+    )?;
     let input = {
         let state = app.state::<AppState>();
         let stored = state.input.lock().expect("input lock");
@@ -416,6 +447,7 @@ pub async fn update_mod(
     random_enemies: Option<bool>,
     enemy_seed: Option<u32>,
     original: Option<String>,
+    crown_mod: Option<bool>,
     app: AppHandle,
 ) -> Result<(), String> {
     let permit = app.state::<AppState>().begin_operation()?;
@@ -426,17 +458,17 @@ pub async fn update_mod(
         .expect("input lock")
         .clone()
         .ok_or_else(|| "Select a modded image first.".to_string())?;
+    let plan = selected_plan(
+        crown_mod.unwrap_or(false),
+        four_player_spawns,
+        crown_drops,
+        random_crown_colours,
+        random_enemies.unwrap_or(false),
+        enemy_seed,
+    )?;
     tauri::async_runtime::spawn_blocking(move || {
         let _permit = permit;
-        let random_enemies = random_enemies.unwrap_or(false);
-        let plan = PatchPlan {
-            four_player_spawns,
-            crown_drops,
-            random_crown_colours,
-            random_enemies,
-            enemy_seed: enemy_seed.filter(|_| random_enemies),
-            ..PatchPlan::default()
-        };
+
         let original = original.map(std::path::PathBuf::from);
         let result =
             dw4vhp_core::update::update_image(&input, original.as_deref(), &plan, &mut |p| {
@@ -570,5 +602,23 @@ mod tests {
             assert!(result.text.contains("supported disc image"));
             assert!(!result.text.contains("PS2"));
         }
+    }
+}
+
+#[cfg(test)]
+mod selected_options_tests {
+    use super::*;
+    #[test]
+    fn empty_and_orphaned_crown_drops_are_rejected() {
+        assert!(selected_plan(false, false, false, false, false, None).is_err());
+        assert!(selected_plan(false, false, true, false, true, Some(1)).is_err());
+        assert!(selected_plan(true, false, true, false, false, None).is_ok());
+    }
+    #[test]
+    fn randomizer_only_has_no_crown_balance() {
+        let plan = selected_plan(false, false, false, false, true, Some(42)).unwrap();
+        assert!(!plan.crown_mod && !plan.crown_drops);
+        assert!(plan.random_enemies);
+        assert_eq!(plan.enemy_seed, Some(42));
     }
 }

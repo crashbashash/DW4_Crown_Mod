@@ -12,6 +12,8 @@ export interface DiscStatus {
   modMetadata?: {
     version: string;
     options: {
+      /** Missing on legacy images, which always enabled Crown Mod. */
+      crownMod?: boolean;
       fourPlayerSpawns: boolean;
       betterLoot: boolean;
       randomCrownColours: boolean;

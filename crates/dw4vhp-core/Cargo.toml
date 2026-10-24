@@ -1,6 +1,6 @@
 [package]
 name = "dw4vhp-core"
-version = "0.12.4"
+version = "0.13.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Engine for the Digimon World 4 Crown Mod ISO patcher"

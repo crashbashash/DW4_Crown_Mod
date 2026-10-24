@@ -254,7 +254,16 @@ fn hit(c: &mut Chunk) -> Result<Vec<u8>> {
     c.write(&code)
 }
 
+#[cfg(test)]
 pub(super) fn expand(b: &[u8], random: bool, seed: u32) -> Result<Vec<Edit>> {
+    expand_with_balance(b, random, seed, true)
+}
+pub(super) fn expand_with_balance(
+    b: &[u8],
+    random: bool,
+    seed: u32,
+    crown_mod: bool,
+) -> Result<Vec<Edit>> {
     let p = Pack::parse(b)?;
     let turret = p.named("beModelCtrlInfo", TURRET)?;
     need(
@@ -347,7 +356,11 @@ pub(super) fn expand(b: &[u8], random: bool, seed: u32) -> Result<Vec<Edit>> {
             || has(&chunk, "g_boathp") && has(&chunk, "BLPgetDamageValue")
         {
             damage_count += 1;
-            Some(damage(&mut chunk)?)
+            if crown_mod {
+                Some(damage(&mut chunk)?)
+            } else {
+                None
+            }
         } else if r.named(b, "hit_g_numepodz01.lua") {
             hit_count += 1;
             Some(hit(&mut chunk)?)
@@ -370,7 +383,7 @@ pub(super) fn expand(b: &[u8], random: bool, seed: u32) -> Result<Vec<Edit>> {
     need(
         damage_count == 1
             && hit_count == 1
-            && changed.len() == 4
+            && changed.len() == if crown_mod { 4 } else { 3 }
             && spawned == (0..8).collect::<Vec<_>>(),
         "incomplete river missile patch",
     )?;
@@ -584,6 +597,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn cosmetic_only_river_preserves_the_native_boat_damage_script() {
+        let Some(path) = std::env::var_os("DW4_RIVER_PACK") else {
+            return;
+        };
+        let raw = std::fs::read(path).unwrap();
+        let expanded = materialize(&raw, &super::super::expand(&raw).unwrap()).unwrap();
+        let out = materialize(
+            &expanded,
+            &expand_with_balance(&expanded, true, 42, false).unwrap(),
+        )
+        .unwrap();
+        let p = Pack::parse(&expanded).unwrap();
+        let q = Pack::parse(&out).unwrap();
+        let mut checked = 0;
+        for id in 0..p.ids.len() as u32 {
+            if p.class(id, "beLuaData").is_err() {
+                continue;
+            }
+            let object = p.val(id, 3).unwrap();
+            let mem = p.val(object, 3).unwrap();
+            let size = p.val(object, 2).unwrap() as usize;
+            let range = p.memory[mem as usize].as_ref().unwrap();
+            let before = &expanded[range.start..range.start + size];
+            if memchr::memmem::find(before, b"g_boathp\0").is_none()
+                || memchr::memmem::find(before, b"BLPgetDamageValue\0").is_none()
+            {
+                continue;
+            }
+            let object = q.val(id, 3).unwrap();
+            let mem = q.val(object, 3).unwrap();
+            let size = q.val(object, 2).unwrap() as usize;
+            let range = q.memory[mem as usize].as_ref().unwrap();
+            assert_eq!(before, &out[range.start..range.start + size]);
+            checked += 1;
+        }
+        assert!(checked > 0);
     }
 
     #[test]

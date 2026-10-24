@@ -1,7 +1,14 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { MockBackend } from "../ipc/mock";
 import { App } from "./App";
+
+// Existing patch-flow cases explicitly select the historical Crown Mod preset.
+function renderCrownModApp() {
+  const view = render(<App />);
+  fireEvent.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  return view;
+}
 
 let media: Record<string, boolean> = {};
 
@@ -31,33 +38,33 @@ afterEach(() => {
 
 describe("App layout", () => {
   test("renders the app header", () => {
-    render(<App />);
+    renderCrownModApp();
     expect(screen.getByRole("heading", { name: "DW4 Crown Mod" })).toBeTruthy();
   });
 
   test("wide layout uses two columns", () => {
     mockMatchMedia("(min-width: 900px)", true);
-    render(<App />);
+    renderCrownModApp();
     expect(document.querySelector("main")?.className).toContain("layout-two-col");
   });
 
   test("narrow layout uses one column", () => {
     mockMatchMedia("(min-width: 900px)", false);
-    render(<App />);
+    renderCrownModApp();
     expect(document.querySelector("main")?.className).toContain("layout-one-col");
   });
 });
 
 describe("App wiring", () => {
   test("keeps the difficulty settings fixed", () => {
-    render(<App />);
+    renderCrownModApp();
     expect(screen.queryByRole("heading", { name: "Crown Mod" })).toBeNull();
     expect(screen.queryByText(/Extreme|Brutal|Custom|Advanced/)).toBeNull();
     expect(screen.queryByLabelText("hp")).toBeNull();
   });
 
   test("patch button starts disabled until a disc is analysed", async () => {
-    render(<App />);
+    renderCrownModApp();
     const patchBtn = screen.getByRole("button", { name: /patch iso/i });
     expect(patchBtn.hasAttribute("disabled")).toBe(true); // no disc yet
     expect(screen.getByText(/choose a disc/i)).toBeTruthy();
@@ -67,7 +74,7 @@ describe("App wiring", () => {
 
 describe("App disc wiring", () => {
   test("typing an ISO path into the disc field starts analysis", async () => {
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     const field = screen.getByLabelText("disc path");
     await user.type(field, "/mock/game.iso");
@@ -76,7 +83,7 @@ describe("App disc wiring", () => {
   });
 
   test("typing into the disc field suggests the output name", async () => {
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     const field = screen.getByLabelText("disc path");
     await user.type(field, "/mock/mygame.iso");
@@ -93,7 +100,7 @@ describe("overwrite confirmation", () => {
   test("an extensionless typed name checks and overwrites the completed filename", async () => {
     const exists = vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(true);
     const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
     await user.tab();
@@ -107,13 +114,13 @@ describe("overwrite confirmation", () => {
     expect((output as HTMLInputElement).value).toBe("/mock/my patched game.iso");
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Overwrite" }));
-    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso", true, false, false, false, false, null);
+    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/my patched game.iso", true, false, false, false, false, null, true);
   });
 
   test.each([false, true])("existing output asks before patching; confirm=%s", async (confirm) => {
     vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(true);
     const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     // Both resource options reach the confirmed patch request.
     await user.click(screen.getByRole("switch", { name: "4-player enemy spawns" }));
@@ -126,7 +133,7 @@ describe("overwrite confirmation", () => {
     expect(patch).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: confirm ? "Overwrite" : "Cancel" }));
     if (confirm) {
-      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, true, true, false, false, null);
+      expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod].iso", true, true, true, false, false, null, true);
       expect(await screen.findByRole("dialog", { name: "Patching your game" })).toBeTruthy();
     } else {
       expect(patch).not.toHaveBeenCalled();
@@ -140,7 +147,7 @@ describe("output extensions", () => {
     const choose = vi.spyOn(MockBackend.prototype, "chooseOutput").mockResolvedValue("C:\\games\\patched game");
     const exists = vi.spyOn(MockBackend.prototype, "outputExists").mockResolvedValue(false);
     const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     await user.type(screen.getByLabelText("disc path"), `C:\\games\\game.${extension}`);
     await user.tab();
@@ -151,13 +158,13 @@ describe("output extensions", () => {
     await waitFor(() => expect(output.value).toBe(`C:\\games\\patched game.${extension}`));
     await user.click(screen.getByRole("button", { name: "Patch ISO" }));
     expect(exists).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`);
-    expect(patch).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`, false, false, false, false, false, null);
+    expect(patch).toHaveBeenCalledExactlyOnceWith(`C:\\games\\patched game.${extension}`, false, false, false, false, false, null, true);
   });
 });
 
 describe("patch finished popup", () => {
   async function patchOnce() {
-    render(<App />);
+    renderCrownModApp();
     const user = (await import("@testing-library/user-event")).default;
     await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
     await user.tab();
@@ -192,7 +199,7 @@ describe("patch finished popup", () => {
 
  test("a modded-disc popup can be dismissed and a clean selection recovers", async () => {
    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "This disc is already modded. Choose an original copy.", size: 0, outputSize: 0, copies: null });
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
    await user.tab();
@@ -212,7 +219,7 @@ describe("patch finished popup", () => {
 
  test("an immediate patch-start failure opens the error popup", async () => {
    vi.spyOn(MockBackend.prototype, "startPatch").mockRejectedValue(new Error("Unable to create output."));
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/clean.iso");
    await user.tab();
@@ -225,7 +232,7 @@ test("an update offer waits until a disc-error popup is dismissed", async () => 
   let resolveCheck: (value: Awaited<ReturnType<MockBackend["checkUpdates"]>>) => void = () => {};
   vi.spyOn(MockBackend.prototype, "checkUpdates").mockImplementation(() => new Promise(resolve => { resolveCheck = resolve; }));
   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "unknown", text: "The disc could not be read.", size: 0, outputSize: 0, copies: null });
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/missing.iso");
   await user.tab();
@@ -241,7 +248,7 @@ test("an update offer waits until a disc-error popup is dismissed", async () => 
 test.each(["ok", "refused"] as const)("analysis stays in a modal until the %s result arrives", async (kind) => {
   let finish: (value: Awaited<ReturnType<MockBackend["analyze"]>>) => void = () => {};
   vi.spyOn(MockBackend.prototype, "analyze").mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -269,7 +276,7 @@ test.each(["success", "failure"] as const)("patching uses only the modal until %
     send = (name, payload) => (this as unknown as { emit: (name: string, payload: unknown) => void }).emit(name, payload);
     return new Promise(resolve => { finish = resolve; });
   });
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -321,19 +328,19 @@ test.each(["success", "failure"] as const)("patching uses only the modal until %
  test("random crown colours reach patching without reanalyzing or enabling other options", async () => {
    const analyze=vi.spyOn(MockBackend.prototype,"analyze");
    const patch=vi.spyOn(MockBackend.prototype,"startPatch").mockResolvedValue();
-   render(<App />);const user=(await import("@testing-library/user-event")).default;
+   renderCrownModApp();const user=(await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"),"/mock/game.iso");await user.tab();
    await waitFor(()=>expect(screen.getByRole("button",{name:"Patch ISO"}).hasAttribute("disabled")).toBe(false));
    const before=analyze.mock.calls.length;
    await user.click(screen.getByRole("switch",{name:"Random crown colours"}));
    expect(analyze.mock.calls.length).toBe(before);
    await user.click(screen.getByRole("button",{name:"Patch ISO"}));
-   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso",false,false,false,true,false,null));
+   await waitFor(()=>expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso",false,false,false,true,false,null, true));
  });
 
 test("random enemies fills in a seed when switched on, shows it in a submenu and patches with it", async () => {
   const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -350,11 +357,11 @@ test("random enemies fills in a seed when switched on, shows it in a submenu and
   await user.click(screen.getByRole("switch", { name: "Random enemies" }));
   expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe(String(seed));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed, true));
 });
 
 test("the suggested output name carries the seed while the option is on, and a custom name is left alone", async () => {
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -382,7 +389,7 @@ test("the suggested output name carries the seed while the option is on, and a c
 
 test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patching", async () => {
   const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -404,7 +411,7 @@ test("a typed seed is used, a new seed can be rolled, and a bad seed blocks patc
   await user.clear(field);
   await user.type(field, "1234");
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod] [Seed 1234].iso", false, false, false, false, true, 1234));
+  await waitFor(() => expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod] [Seed 1234].iso", false, false, false, false, true, 1234, true));
 });
 
 test("a loaded Crown Mod image shows its enemy seed and loads it into Settings", async () => {
@@ -419,7 +426,7 @@ test("a loaded Crown Mod image shows its enemy seed and loads it into Settings",
     },
   });
   const update = vi.spyOn(MockBackend.prototype, "updateMod");
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
   await user.tab();
@@ -431,7 +438,7 @@ test("a loaded Crown Mod image shows its enemy seed and loads it into Settings",
   await user.click(screen.getByRole("button", { name: "Update ISO" }));
   expect((await screen.findByRole("dialog")).textContent).toContain("seed 4242");
   await user.click(screen.getByRole("button", { name: "Update image" }));
-  await waitFor(() => expect(update).toHaveBeenCalledWith(false, false, false, true, 4242, null));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(false, false, false, true, 4242, null, true));
 });
 
 test("settings refresh output size in the background and only the latest choice enables patching", async () => {
@@ -441,7 +448,7 @@ test("settings refresh output size in the background and only the latest choice 
   const analyze = vi.spyOn(MockBackend.prototype, "analyze")
     .mockResolvedValueOnce(verdict)
     .mockImplementation(() => new Promise(resolve => pending.push(resolve)));
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -451,7 +458,7 @@ test("settings refresh output size in the background and only the latest choice 
   expect(screen.getByText("Updating output size…")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
   await user.click(screen.getByRole("switch", { name: "Match drops to crowns" }));
-  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, true);
+  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, true, true);
   expect(screen.queryByRole("dialog")).toBeNull();
   await act(async () => pending[0]!({ ...verdict, kind: "refused", text: "stale result" }));
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -466,7 +473,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
   vi.spyOn(MockBackend.prototype, "analyze")
     .mockResolvedValueOnce({ kind: "ok", text: "clean", size: 100, outputSize: 200, copies: [665, 665, 665] })
     .mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-  render(<App />);
+  renderCrownModApp();
   const user = (await import("@testing-library/user-event")).default;
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
@@ -482,7 +489,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({ kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, modMetadata: { version: "0.10.0", options: { fourPlayerSpawns: true, betterLoot: false, randomCrownColours: true }, recovery: { formatVersion: 1 } } });
    const update = vi.spyOn(MockBackend.prototype, "updateMod");
    const picker = vi.spyOn(MockBackend.prototype, "chooseIso");
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
    await user.tab();
@@ -495,7 +502,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.click(screen.getByRole("button", {name: "Update ISO"}));
    expect((await screen.findByRole("dialog")).textContent).toContain("v0.10.0");
    await user.click(screen.getByRole("button", { name: "Update image" }));
-   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, false, null, null));
+   await waitFor(() => expect(update).toHaveBeenCalledWith(false, true, true, false, null, null, true));
    expect(picker).not.toHaveBeenCalled();
    expect((await screen.findByRole("dialog")).textContent).toContain("/mock/modded.iso");
  });
@@ -504,7 +511,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "older mod", size: 0, outputSize: 0, copies: null });
    const update = vi.spyOn(MockBackend.prototype, "updateMod");
    vi.spyOn(MockBackend.prototype, "chooseIso").mockResolvedValue(null);
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/older.iso");
    await user.tab();
@@ -519,7 +526,7 @@ test("a failed background size refresh still opens the disc-error popup", async 
    const initial = { kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, discInfo: {console: "PS2", region: "USA", modded: true, modVersion: "0.10.0"}, modMetadata: {version: "0.10.0", options: {fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false}, recovery: {formatVersion: 1}} } as const;
    const current = { ...initial, discInfo: {...initial.discInfo, modVersion: "0.11.1"}, modMetadata: {...initial.modMetadata, version: "0.11.1"} };
    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce(initial).mockResolvedValue(current);
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
    await user.tab();
@@ -538,12 +545,80 @@ test("a failed background size refresh still opens the disc-error popup", async 
    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null, modMetadata: {version: "0.11.0", options: {fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false}, recovery: {formatVersion: 1}}});
    const update = vi.spyOn(MockBackend.prototype, "updateMod").mockResolvedValue();
    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
-   render(<App />);
+   renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
    await user.tab();
    await user.click(await screen.findByRole("button", {name: "Update ISO"}));
    await user.click(await screen.findByRole("button", {name: "Update image"}));
-   expect(update).toHaveBeenCalledWith(false, false, false, false, null, null);
+   expect(update).toHaveBeenCalledWith(false, false, false, false, null, null, true);
    expect(patch).not.toHaveBeenCalled();
  });
+
+test("a clean disc still needs an explicit option, and Crown Drops follows Crown Mod", async () => {
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  expect(screen.queryAllByRole("switch", { checked: true })).toHaveLength(0);
+  expect(screen.queryByRole("switch", { name: "Match drops to crowns" })).toBeNull();
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Analyzing disc" })).toBeNull());
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  expect(screen.getByRole("group", { name: "Crown Mod options" })).toBeTruthy();
+  await user.click(screen.getByRole("switch", { name: "Match drops to crowns" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  expect(screen.queryByRole("group", { name: "Crown Mod options" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  expect(screen.getByRole("switch", { name: "Match drops to crowns", checked: false })).toBeTruthy();
+});
+
+test("randomizer-only patching sends Crown Mod off and becomes disabled when deselected", async () => {
+  const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  const seed = Number((screen.getByLabelText("Enemy seed") as HTMLInputElement).value);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+  expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, false, false, false, true, seed, false);
+});
+
+test("a modern randomizer-only image restores Crown Mod off", async () => {
+  vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({
+    kind: "refused", reason: "already-modded", text: "modded", size: 0, outputSize: 0, copies: null,
+    modMetadata: { version: "fixture", options: { crownMod: false, fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false, randomEnemies: true, enemySeed: 42 }, recovery: { formatVersion: 1 } },
+  });
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+  await user.tab();
+  await screen.findByRole("button", { name: "Update ISO" });
+  expect(screen.getByRole("switch", { name: "Crown Mod", checked: false })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Random enemies", checked: true })).toBeTruthy();
+  expect(screen.queryByRole("switch", { name: "Match drops to crowns" })).toBeNull();
+});
+
+test("random crown colours works alone and stays selected when Crown Mod is turned off", async () => {
+  const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+  render(<App />);
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+  await user.tab();
+  await user.click(screen.getByRole("switch", { name: "Random crown colours" }));
+  await user.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  await user.click(screen.getByRole("switch", { name: "Crown Mod" }));
+  expect(screen.getByRole("switch", { name: "Random crown colours", checked: true })).toBeTruthy();
+  expect(screen.queryByRole("switch", { name: "Match drops to crowns" })).toBeNull();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+  expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, false, false, true, false, null, false);
+});

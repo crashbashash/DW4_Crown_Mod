@@ -1,11 +1,10 @@
 # Random crown colours
 
 The optional **Random crown colours** setting starts disabled. When enabled,
-each ordinary crowned enemy rolls its icon colour when it spawns: green, blue,
-pink, white or yellow. Two enemies of the same type can have different colours;
-colours may repeat and remain fixed for that enemy's lifetime. Boss families
-keep yellow. Other uncrowned enemies and props stay uncrowned, including
-the tutorial's otherwise unbuffed Kokatorimon.
+every enemy and boss receives a cosmetic crown and rolls its colour when it
+spawns: green, blue, pink, white or yellow. Colours may repeat and remain fixed
+for that enemy's lifetime. This includes otherwise uncrowned enemies and the
+practice enemies. Props and unfilled table slots remain unchanged.
 
 Numenume River's eight missile turrets are also crowned. Their cosmetic colour
 is chosen when each turret is generated and stays fixed until destruction.
@@ -15,14 +14,15 @@ turrets have no enemy-table rarity row. It consumes no game RNG calls. See
 
 This option changes the displayed icon only. It does not remap enemy rows,
 change HP, stats, critical/stun values, or choose different drop tables. It works
-independently of the spawn-count and custom-drop settings.
+independently of Crown Mod and the spawn-count settings. Without Crown Mod,
+crowns are still added while native balance and rewards are preserved.
 
 ## Implementation
 
-Ordinary crowned rows use an internal icon marker in the existing RARITY byte.
+All enemy rows use an internal icon marker in the existing RARITY byte.
 A hook at the icon-argument push converts that marker to a colour. Other rank
 values pass through unchanged. The general rank getter and messaging functions
-are left intact. Boss rows retain rank 5.
+are left intact. Boss rows use the same marker as other crowned enemies.
 
 The hook uses a private 32-bit generator, seeded once from the operating system
 when patching. It does not consume the game's random stream. The seed is shared
@@ -33,7 +33,7 @@ PS2 uses an EE hook; GameCube uses a PowerPC hook. Both validate the original
 call context and unused padding before writing. The feature supports all five
 retail releases listed in the README. No executable growth is needed.
 
-## Verification
+## Earlier verification (before boss colours were included)
 
 - Both emitted instruction sequences are executed by small instruction models
   over 10,000 spawns. Their results match the private generator; ordinary ranks
@@ -66,3 +66,23 @@ including container round-trip verification. With the explicit test seed
 `0x72abcdef`, the output is 990,853,895 bytes with MD5
 `11daa61c1ccf51e647697c6383be11b3`. Other compressed colour combinations have not
 been separately exercised.
+
+## All crown colours with optional Crown Mod
+
+The current marking regression requires every enemy family, including all boss
+families, to receive the random marker regardless of the original crown byte.
+Props and unfilled rows retain their original values. The MIPS and PPC
+instruction models exercise the same per-spawn random hook for every marked row.
+A separate transform regression disables Crown Mod and verifies that random
+colours preserve HP, stats and critical/stun bytes while adding cosmetic crowns.
+
+River cosmetics and Crown Mod damage changes are selected separately: enabling
+colours alone preserves the original boat-damage script.
+
+Colour-only full images built and passed output verification on PS2 USA and
+GameCube USA with Crown Mod disabled. An independent audit found all 665 copies
+of the original HP and stat blocks unchanged on each platform. All 665 chargen
+blocks preserved critical/paralysis values and marked every enemy row, including
+156 boss-family rows, for random colours. Props and unfilled rows were preserved.
+The native river-script regression also passed with cosmetic colours enabled
+and Crown Mod disabled, retaining the complete original boat-damage script.

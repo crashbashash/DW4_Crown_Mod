@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 7;
+pub const RULES_VERSION: u32 = 8;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 
@@ -109,7 +109,7 @@ const RESTRICTED: &[(usize, &[&str])] = &[
 /// Models that are a stage's boss though they are ordinary enemies elsewhere.
 const BOSS_REGULAR: &[(usize, &str)] = &[(319, "e_mecha4"), (394, "e_mecha5")];
 
-fn family(row: u32) -> Option<&'static str> {
+pub(super) fn family(row: u32) -> Option<&'static str> {
     ROW_GROUPS
         .iter()
         .find(|g| g.rows.iter().any(|&r| r as u32 == row))
@@ -120,14 +120,21 @@ fn replaceable(model: &str) -> bool {
     REGULAR.contains(&model) || REPLACEABLE.contains(&model)
 }
 
-/// The row of `model`'s family with the same rarity whose HP and attack are nearest to `row`'s.
+/// Match combat strength independently of EXP, which comes from the original spawn.
 pub(super) fn nearest_row(table: &EnemyTable, row: u32, model: &str) -> Option<u32> {
     let group = ROW_GROUPS.iter().find(|g| g.model == model)?;
     let row = row as usize;
-    let (hp, atk) = (
-        table.hp[row].max(1) as f64,
-        table.stat[row][0].max(1) as f64,
-    );
+    // Product ratios rank combat like the previous sum of logarithms. Integer
+    // cross-products make ties deterministic across Windows and Linux.
+    let distance = |a: i32, b: i32| {
+        let (a, b) = (a.max(1) as u64, b.max(1) as u64);
+        (a.max(b), a.min(b))
+    };
+    let combat = |r: usize| {
+        let hp = distance(table.hp[r], table.hp[row]);
+        let atk = distance(table.stat[r][0] as i32, table.stat[row][0] as i32);
+        (hp.0 * atk.0, hp.1 * atk.1)
+    };
     group
         .rows
         .iter()
@@ -138,11 +145,11 @@ pub(super) fn nearest_row(table: &EnemyTable, row: u32, model: &str) -> Option<u
                 && !crate::rowgroup::COLLAPSE_SKIP_ROWS.contains(r)
         })
         .min_by(|&a, &b| {
-            let score = |r: usize| {
-                (table.hp[r].max(1) as f64 / hp).ln().abs()
-                    + (table.stat[r][0].max(1) as f64 / atk).ln().abs()
-            };
-            score(a).total_cmp(&score(b)).then(a.cmp(&b))
+            let (a_num, a_den) = combat(a);
+            let (b_num, b_den) = combat(b);
+            (u128::from(a_num) * u128::from(b_den))
+                .cmp(&(u128::from(b_num) * u128::from(a_den)))
+                .then(a.cmp(&b))
         })
         .map(|r| r as u32)
 }
@@ -328,6 +335,7 @@ pub(super) struct Randomiser {
     audio_sources: BTreeMap<&'static str, usize>,
     stages: BTreeMap<usize, Stage>,
     plans: BTreeMap<usize, Retarget>,
+    pub(super) rewards: BTreeMap<usize, super::rewards::StageRewards>,
     pub(super) sounds: BTreeMap<usize, Vec<u8>>,
     pub log: Vec<String>,
     stats: Stats,
@@ -355,6 +363,9 @@ fn rarities(table: &EnemyTable, model: &str) -> BTreeSet<u8> {
 }
 
 impl Randomiser {
+    pub(super) fn reward_plan(&self, iso: &[u8]) -> Result<super::rewards::Plan> {
+        super::rewards::Plan::build(iso, &self.table, &self.rewards)
+    }
     /// The settings and results the image signature records: enough to rebuild the same
     /// image from the original disc, and a digest of every decision to confirm that it did.
     pub(super) fn summary(&self) -> serde_json::Value {
@@ -367,6 +378,11 @@ impl Randomiser {
         for (pack, plan) in &self.plans {
             for (generator, row) in &plan.rows {
                 hash.update(format!("row {pack} {generator} {row}\n").as_bytes());
+            }
+        }
+        for (stage, rewards) in &self.rewards {
+            for (row, sources) in &rewards.rows {
+                hash.update(format!("xp {stage} {row} {sources:?}\n").as_bytes());
             }
         }
         let digest = hash
@@ -386,6 +402,7 @@ impl Randomiser {
             "approximateEffects": self.stats.approximate,
             "undrawnEffects": self.stats.unattached,
             "planDigest": digest,
+            "rewardVariants": self.rewards.values().map(|r| r.rows.len()).sum::<usize>(),
         })
     }
 
@@ -403,6 +420,7 @@ impl Randomiser {
             audio_sources: BTreeMap::new(),
             stages: BTreeMap::new(),
             plans: BTreeMap::new(),
+            rewards: BTreeMap::new(),
             sounds: BTreeMap::new(),
             log: Vec::new(),
             stats: Stats::default(),
@@ -523,7 +541,13 @@ impl Randomiser {
         let Some(rt) = self.plans.get(&entry) else {
             return Ok(None);
         };
-        let (out, n) = graft::retarget_rows(b, rt)?;
+        let mut rt = rt.clone();
+        for stage in self.rewards.values() {
+            if let Some(rows) = stage.targets.get(&entry) {
+                rt.rows.extend(rows.clone());
+            }
+        }
+        let (out, n) = graft::retarget_rows(b, &rt)?;
         need(
             n == rt.rows.len(),
             "a planned generator is missing from its pack",
@@ -824,18 +848,76 @@ impl Randomiser {
                     .collect::<Vec<_>>()
             ));
         }
-        for &pack in &stage.gens {
-            let mut rt = Retarget::default();
-            for g in generators(&Pack::parse(data(pack)?)?)? {
-                let Some(model) = choice.get(&g.name) else {
+        let tiers = stage
+            .gens
+            .iter()
+            .map(|&pack| Ok((pack, generators(&Pack::parse(data(pack)?)?)?)))
+            .collect::<Result<Vec<_>>>()?;
+        // Never reuse a row referenced by any original difficulty pack. Only
+        // globally unfilled table slots are eligible for local variants.
+        let used: BTreeSet<_> = tiers
+            .iter()
+            .flat_map(|(_, gs)| gs.iter().map(|g| g.row as usize))
+            .collect();
+        let free: Vec<_> = (0..self.table.len())
+            .filter(|r| self.table.hp[*r] == 0 && !used.contains(r))
+            .collect();
+        let mut rewards = super::rewards::StageRewards::new(stage.gens.clone(), free);
+        for (pack, _) in &tiers {
+            self.plans.insert(*pack, Retarget::default());
+        }
+        // Commit a generator across all difficulty packs together. In the rare
+        // event that local slots run out, retain its original enemy and reward.
+        for name in choice.keys().cloned().collect::<Vec<_>>() {
+            let model = &choice[&name];
+            let mut attempt = rewards.clone();
+            let mut selected = Vec::new();
+            let mut fits = true;
+            for (pack, gs) in &tiers {
+                let Some(g) = gs.iter().find(|g| g.name == name) else {
                     continue;
                 };
-                let Some(row) = nearest_row(&self.table, g.row, model) else {
+                let Some(combat) = nearest_row(&self.table, g.row, model) else {
                     continue;
                 };
-                rt.rows.insert(g.name.clone(), row);
+                let Some(target) = attempt.assign(combat as usize, g.row as usize) else {
+                    fits = false;
+                    break;
+                };
+                attempt
+                    .targets
+                    .entry(*pack)
+                    .or_default()
+                    .insert(name.clone(), target as u32);
+                selected.push((*pack, combat));
             }
-            self.plans.insert(pack, rt);
+            if fits {
+                rewards = attempt;
+                for (pack, combat) in selected {
+                    self.plans
+                        .get_mut(&pack)
+                        .unwrap()
+                        .rows
+                        .insert(name.clone(), combat);
+                }
+            } else {
+                choice.remove(&name);
+                for &(gen, original) in &sites {
+                    if gen == name {
+                        names.remove(original);
+                    }
+                }
+                self.log.push(format!(
+                    "stage {entry}: retain {name}; local reward variants full"
+                ));
+            }
+        }
+        if !rewards.rows.is_empty() {
+            self.log.push(format!(
+                "stage {entry}: {} original-spawn EXP variants",
+                rewards.rows.len()
+            ));
+            self.rewards.insert(entry, rewards);
         }
         // A model pool belongs to the stage, not to an individual generator.
         // Sum the largest authored party count for every user of that model,
@@ -1290,7 +1372,9 @@ mod tests {
             let mut counts = BTreeMap::new();
             for g in generators(&target).unwrap() {
                 if r.plans[&pack].rows.contains_key(&g.name) {
-                    *counts.entry(family(g.row).unwrap()).or_insert(0) += 1;
+                    *counts
+                        .entry(family(r.plans[&pack].rows[&g.name]).unwrap())
+                        .or_insert(0) += 1;
                 }
             }
             assert_eq!(counts, BTreeMap::from([("e_mecha4", 2), ("e_infermo", 1)]));
@@ -1447,6 +1531,25 @@ mod tests {
         assert_eq!(nearest_row(&t, 0, "e_mummy"), Some(114));
         assert_eq!(nearest_row(&t, 3, "e_mummy"), Some(114));
         assert_eq!(nearest_row(&t, 3, "e_goburi"), Some(3));
+    }
+
+    #[test]
+    fn combat_matching_ignores_exp_and_breaks_ties_by_row() {
+        let mut t = table();
+        t.hp[0] = 100;
+        t.stat[0][0] = 100;
+        t.stat[0][crate::table::EXP_COLUMN] = 100;
+        for row in 114..=117 {
+            t.hp[row] = 100;
+            t.stat[row][0] = 100;
+            t.stat[row][crate::table::EXP_COLUMN] = 1;
+        }
+        t.stat[115][crate::table::EXP_COLUMN] = 100;
+        assert_eq!(nearest_row(&t, 0, "e_mummy"), Some(114));
+        t.hp[114] = 1000;
+        assert_eq!(nearest_row(&t, 0, "e_mummy"), Some(115));
+        t.hp[115] = 0;
+        assert_eq!(nearest_row(&t, 0, "e_mummy"), Some(116));
     }
 
     #[test]
@@ -2469,8 +2572,16 @@ mod dependency_audit {
                             changed += 1;
                         }
                         if e == 449 && target.row != g.row {
-                            assert!(["e_mummy", "e_mecha1", "e_minotaru", "e_pharaoh"]
-                                .contains(&family(target.row).unwrap()));
+                            assert!(["e_mummy", "e_mecha1", "e_minotaru", "e_pharaoh"].contains(
+                                &family(
+                                    r.rewards
+                                        .get(&e)
+                                        .and_then(|s| s.rows.get(&(target.row as usize)))
+                                        .map(|v| v.combat as u32)
+                                        .unwrap_or(target.row)
+                                )
+                                .unwrap()
+                            ));
                         }
                     }
                 }

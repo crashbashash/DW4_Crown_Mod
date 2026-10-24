@@ -45,7 +45,7 @@ export function OutputPanel({
         </p>
       )}
       <div className="row patch-actions">
-        <button className="primary" type="button" onClick={onPatch} disabled={(!canPatch && !modded) || busy}>
+        <button className="primary" type="button" onClick={onPatch} disabled={!canPatch || busy}>
           {modded ? "Update ISO" : "Patch ISO"}
         </button>
       </div>

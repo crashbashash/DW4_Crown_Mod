@@ -28,7 +28,7 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-/** Disc selection and output for the base Crown Mod mode. */
+/** Disc selection and output for the selected patch options. */
 export function App() {
   return (
     <BackendProvider>
@@ -39,6 +39,7 @@ export function App() {
 
 function AppInner() {
   const backend = useBackend();
+  const [crownMod, setCrownMod] = useState(false);
   const [fourPlayerSpawns, setFourPlayerSpawns] = useState(false);
   const [crownDrops, setCrownDrops] = useState(false);
   const [randomCrownColours, setRandomCrownColours] = useState(false);
@@ -51,14 +52,15 @@ function AppInner() {
     if (status.reason === "already-modded") {
       const options = status.modMetadata?.options;
       setFourPlayerSpawns(options?.fourPlayerSpawns ?? false);
-      setCrownDrops(options?.betterLoot ?? false);
+      setCrownMod(options?.crownMod ?? true);
+      setCrownDrops((options?.crownMod ?? true) && (options?.betterLoot ?? false));
       setRandomCrownColours(options?.randomCrownColours ?? false);
       const seed = status.modMetadata?.randomEnemies?.seed ?? options?.enemySeed;
       setRandomEnemies(options?.randomEnemies ?? false);
       if (options?.randomEnemies === true && typeof seed === "number") setEnemySeed(String(seed));
     }
   }, []);
-  const disc = useDisc(backend, fourPlayerSpawns, crownDrops, applyDetectedOptions);
+  const disc = useDisc(backend, fourPlayerSpawns, crownDrops, applyDetectedOptions, crownMod);
   const replaceDiscStatus = disc.replaceStatus;
   const wide = useMediaQuery("(min-width: 900px)");
 
@@ -74,7 +76,7 @@ function AppInner() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [donePopup, setDonePopup] = useState<string | null>(null);
   const outputRef = useRef<string | null>(null);
-  const pendingModUpdate = useRef<{ path: string; status: DiscStatus; spawns: boolean; drops: boolean } | null>(null);
+  const pendingModUpdate = useRef<{ path: string; status: DiscStatus; spawns: boolean; drops: boolean; crownMod: boolean } | null>(null);
 
   // Patch events: progress streams, one terminal event ends the run.
   useEffect(() => {
@@ -97,7 +99,7 @@ function AppInner() {
         const updated = pendingModUpdate.current;
         pendingModUpdate.current = null;
         if (updated) {
-          void backend.analyze(updated.path, updated.spawns, updated.drops).catch((error: unknown): DiscStatus => ({
+          void backend.analyze(updated.path, updated.spawns, updated.drops, updated.crownMod).catch((error: unknown): DiscStatus => ({
             kind: "unknown", text: String(error), size: 0, outputSize: 0, copies: null,
           })).then(status => {
             replaceDiscStatus(updated.status, status);
@@ -137,7 +139,13 @@ function AppInner() {
   const info = selectedStatus?.discInfo;
   const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
   const analyzed = disc.status?.kind === "ok";
-  const canPatch = analyzed && disc.outputPath !== null && (!randomEnemies || enemySeedValue !== null);
+  const hasOptions = crownMod || fourPlayerSpawns || randomCrownColours || randomEnemies;
+  const canPatch = hasOptions && (analyzed || selectedStatus?.reason === "already-modded")
+    && disc.outputPath !== null && (!randomEnemies || enemySeedValue !== null);
+  const changeCrownMod = (selected: boolean) => {
+    setCrownMod(selected);
+    if (!selected) setCrownDrops(false);
+  };
 
   // A suggested output name carries the enemy seed; a path the user chose is left alone.
   const { outputPath, setOutputPath } = disc;
@@ -158,7 +166,7 @@ function AppInner() {
     setPatchProgress(0);
     setPatchError(null);
     try {
-      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue);
+      await backend.startPatch(output, overwrite, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeedValue, crownMod);
     } catch (error) {
       setBusy(false);
       setPatchError(String(error));
@@ -166,7 +174,7 @@ function AppInner() {
   };
 
   const startPatch = async () => {
-    if (disc.outputPath === null || busy) return;
+    if (!canPatch || disc.outputPath === null || busy) return;
     const output = withOutputExtension(disc.outputPath, disc.extension);
     disc.setOutputPath(output);
     setPatchProgress(0);
@@ -186,7 +194,7 @@ function AppInner() {
 
   const updateMod = async (spawns: boolean, drops: boolean, colours: boolean, enemies: boolean, seed: number | null) => {
     const status = discError;
-    if (!status || !disc.inputPath || busy) return;
+    if (!canPatch || !status || !disc.inputPath || busy) return;
     setBusy(true);
     setPatchProgress(0);
     setPatchError(null);
@@ -198,8 +206,8 @@ function AppInner() {
       }
       outputRef.current = disc.inputPath;
       setDismissedDiscStatus(status);
-      pendingModUpdate.current = { path: disc.inputPath, status, spawns, drops };
-      await backend.updateMod(spawns, drops, colours, enemies, seed, original);
+      pendingModUpdate.current = { path: disc.inputPath, status, spawns, drops, crownMod };
+      await backend.updateMod(spawns, drops, colours, enemies, seed, original, crownMod);
     } catch (error) {
       pendingModUpdate.current = null;
       setBusy(false);
@@ -242,7 +250,7 @@ function AppInner() {
         <div className="app-intro">
           <h2>Patch your disc</h2>
           <p className="app-subtitle">
-            Turn your own clean PS2 or GameCube Digimon World 4 / World X disc into a much harder one, with crown icons for every enemy.
+            Choose how to play Digimon World 4 / World X on PS2 or GameCube. Select Crown Mod, random enemies, or combine your preferred options.
           </p>
         </div>
         <main className={`app-main ${wide ? "layout-two-col" : "layout-one-col"}`}>
@@ -255,7 +263,7 @@ function AppInner() {
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
-            <SettingsPanel fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || disc.analyzing} />
+            <SettingsPanel crownMod={crownMod} onCrownModChange={changeCrownMod} fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || disc.analyzing} />
           </div>
           <div className="col">
             <OutputPanel

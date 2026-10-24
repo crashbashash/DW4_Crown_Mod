@@ -48,7 +48,7 @@ test("changing spawn counts reinspects the disc but preserves the chosen output"
   act(() => result.current.setOutputPath("/chosen/out.iso"));
   rerender({ four: true });
   await waitFor(() => expect(result.current.status?.outputSize).toBe(4_700_000_000));
-  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, false);
+  expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", true, false, false);
   expect(result.current.outputPath).toBe("/chosen/out.iso");
 });
 
@@ -83,6 +83,6 @@ test("an old inspection cannot replace the current spawn-option verdict", async 
    act(() => result.current.setOutputPath("/chosen/out.iso"));
    rerender({ drops: true });
    await waitFor(() => expect(result.current.status?.outputSize).toBe(4_800_000_000));
-   expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", false, true);
+   expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", false, true, false);
    expect(result.current.outputPath).toBe("/chosen/out.iso");
  });

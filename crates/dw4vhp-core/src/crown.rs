@@ -1,7 +1,8 @@
 //! Expands the authored crown resources together: model and animation RAM,
 //! private mutable scene roots, and a private two-word visibility mask.
-//! No executable offsets or external game metadata are used. Original geometry,
-//! original IDs and pool contents remain intact. Archive order is preserved.
+//! No executable offsets or external game metadata are used. Original geometry
+//! and model IDs remain intact. Randomized rewards use otherwise unfilled rows
+//! in each area's enemy database. Archive order is preserved.
 //! The river model pack also receives missile damage and turret crown scripts.
 use crate::{
     error::{Error, Result},
@@ -18,6 +19,7 @@ mod height;
 mod lua_names;
 mod practice;
 mod random;
+mod rewards;
 mod sound;
 pub use random::Options as RandomOptions;
 pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
@@ -925,13 +927,20 @@ pub struct CrownPlan {
     pieces: Vec<Piece>,
     /// What the enemy randomiser did, when it ran: recorded in the image signature.
     random: Option<serde_json::Value>,
+    pub(crate) rewards: rewards::Plan,
     pub regions: Vec<WriteRegion>,
     pub output_size: u64,
     append_offset: usize,
 }
+pub(crate) struct Rebuilt {
+    pieces: Vec<Piece>,
+    length: usize,
+    random: Option<serde_json::Value>,
+    rewards: rewards::Plan,
+}
 /// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
-/// expanded and the river turret scripts updated. Returns the recipe for the new archive and its length. It knows
-/// nothing about the disc filesystem, so ISO9660 and GameCube images share it.
+/// expanded and the river turret scripts updated. The shared rebuild also
+/// resolves area-local enemy reward tables through the disc's resource manifest.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_afs(
     iso: &[u8],
@@ -943,7 +952,8 @@ pub(crate) fn rebuild_afs(
     colour_seed: u32,
     graft: Option<&graft::Spec>,
     random: Option<RandomOptions>,
-) -> Result<(Vec<Piece>, usize, Option<serde_json::Value>)> {
+    crown_mod: bool,
+) -> Result<Rebuilt> {
     let afs = iso
         .get(base..base + size)
         .ok_or_else(|| bad("NDMW.AFS outside image"))?;
@@ -1013,11 +1023,18 @@ pub(crate) fn rebuild_afs(
         let edits = if memchr::memmem::find(data, b"i_rareicon").is_some() {
             crown_packs += 1;
             let edits = expand(data)?;
-            if memchr::memmem::find(data, b"g_numepodz01\0").is_some() {
+            if (crown_mod || random_crown_colours)
+                && memchr::memmem::find(data, b"g_numepodz01\0").is_some()
+            {
                 river_packs += 1;
                 let expanded = materialize(data, &edits)?;
-                let edits = river::expand(&expanded, random_crown_colours, colour_seed)
-                    .map_err(|e| bad(&format!("river archive entry {i}: {e}")))?;
+                let edits = river::expand_with_balance(
+                    &expanded,
+                    random_crown_colours,
+                    colour_seed,
+                    crown_mod,
+                )
+                .map_err(|e| bad(&format!("river archive entry {i}: {e}")))?;
                 vec![Edit {
                     range: 0..data.len(),
                     bytes: materialize(&expanded, &edits)?,
@@ -1069,7 +1086,7 @@ pub(crate) fn rebuild_afs(
         } else {
             Vec::new()
         };
-        let edits = if exp::candidate(data) {
+        let edits = if crown_mod && exp::candidate(data) {
             exp_packs += 1;
             let current = materialize(data, &edits)?;
             let more =
@@ -1216,8 +1233,14 @@ pub(crate) fn rebuild_afs(
         }
     }
     need(crown_packs == 85, "expected 85 crown model packs")?;
-    need(river_packs == 1, "expected one Numenume River model pack")?;
-    need(exp_packs == 85, "expected 85 EXP popup packs")?;
+    need(
+        river_packs == usize::from(crown_mod || random_crown_colours),
+        "unexpected Numenume River patch count",
+    )?;
+    need(
+        exp_packs == if crown_mod { 85 } else { 0 },
+        "unexpected EXP popup patch count",
+    )?;
     need(
         !four_player_spawns || spawn_packs > 0,
         "no four-player spawn profiles found",
@@ -1271,11 +1294,17 @@ pub(crate) fn rebuild_afs(
             }
         }
     }
-    Ok((
+    let rewards = random
+        .as_ref()
+        .map(|r| r.reward_plan(iso))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(Rebuilt {
         pieces,
-        cursor,
-        random.as_ref().map(random::Randomiser::summary),
-    ))
+        length: cursor,
+        random: random.as_ref().map(random::Randomiser::summary),
+        rewards,
+    })
 }
 
 impl CrownPlan {
@@ -1299,10 +1328,37 @@ impl CrownPlan {
         graft: Option<&graft::Spec>,
         random: Option<RandomOptions>,
     ) -> Result<Self> {
+        Self::build_with_balance(
+            iso,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+            graft,
+            random,
+            true,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_with_balance(
+        iso: &[u8],
+        four_player_spawns: bool,
+        crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
+        graft: Option<&graft::Spec>,
+        random: Option<RandomOptions>,
+        crown_mod: bool,
+    ) -> Result<Self> {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
-        let (pieces, cursor, random) = rebuild_afs(
+        let Rebuilt {
+            pieces,
+            length: cursor,
+            random,
+            rewards,
+        } = rebuild_afs(
             iso,
             base,
             size,
@@ -1312,6 +1368,7 @@ impl CrownPlan {
             colour_seed,
             graft,
             random,
+            crown_mod,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
@@ -1353,8 +1410,10 @@ impl CrownPlan {
                 });
             }
         }
+        regions.extend(rewards.models.clone());
         Ok(Self {
             pieces,
+            rewards,
             regions,
             output_size: output_size as u64,
             append_offset,
@@ -1374,9 +1433,34 @@ impl CrownPlan {
         colour_seed: u32,
         random: Option<RandomOptions>,
     ) -> Result<Self> {
+        Self::build_gcm_with_balance(
+            disc,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+            random,
+            true,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_gcm_with_balance(
+        disc: &[u8],
+        four_player_spawns: bool,
+        crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
+        random: Option<RandomOptions>,
+        crown_mod: bool,
+    ) -> Result<Self> {
         let file = gcm::find_file(disc, "ndmw.afs")?;
         let (base, size) = (file.offset as usize, file.size as usize);
-        let (pieces, cursor, random) = rebuild_afs(
+        let Rebuilt {
+            pieces,
+            length: cursor,
+            random,
+            rewards,
+        } = rebuild_afs(
             disc,
             base,
             size,
@@ -1386,6 +1470,7 @@ impl CrownPlan {
             colour_seed,
             None,
             random,
+            crown_mod,
         )?;
         let append_offset = disc.len();
         need(
@@ -1396,7 +1481,7 @@ impl CrownPlan {
             (append_offset + cursor) as u64 <= u32::MAX as u64,
             "expanded image exceeds format limit",
         )?;
-        let regions = vec![
+        let mut regions = vec![
             WriteRegion {
                 offset: file.offset_field,
                 bytes: (append_offset as u32).to_be_bytes().to_vec(),
@@ -1406,8 +1491,10 @@ impl CrownPlan {
                 bytes: (cursor as u32).to_be_bytes().to_vec(),
             },
         ];
+        regions.extend(rewards.models.clone());
         Ok(Self {
             pieces,
+            rewards,
             regions,
             output_size: (append_offset + cursor) as u64,
             append_offset,
@@ -1510,7 +1597,11 @@ impl CrownPlan {
         use std::io::{Seek, SeekFrom};
         out.write_all(iso)?;
         self.append(iso, out, &mut |_, _| {})?;
-        for r in &self.regions {
+        for r in self
+            .regions
+            .iter()
+            .chain(self.rewards.unscaled(iso)?.iter())
+        {
             out.seek(SeekFrom::Start(r.offset))?;
             out.write_all(&r.bytes)?;
         }

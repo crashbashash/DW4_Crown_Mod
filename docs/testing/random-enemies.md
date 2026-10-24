@@ -13,8 +13,33 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-These changes use randomizer rules version 7. The same seed is reproducible within
+The current randomizer uses rules version 8. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 8 separates combat matching from EXP. A replacement still uses the closest
+HP/attack variant of the same authored crown rarity. Its EXP comes from the
+original generator's row on the selected difficulty, after the normal Crown Mod
+transform, including configured multipliers, exclusions and caps. This preserves
+the reward the original encounter would have supplied; it can raise or lower the
+replacement's native reward. Party sharing and player EXP bonuses remain native.
+
+Each localized AREA pack receives private variants in otherwise unfilled enemy
+rows. A variant copies the replacement's HP, combat stats, chargen and MODEL
+binding, then takes only EXP from the original spawn. Original occupied rows are
+preserved. Distinct (combat row, original row) pairs get distinct variants, so two
+spawns of the same model can pay different rewards. All three difficulty packs
+share the area's allocation; original generator rows are excluded from the free
+pool. If the pool cannot hold a generator's variants across all difficulties,
+that generator keeps its original enemy and reward. Model capacity planning uses
+the combat families rather than the private row numbers.
+
+Full-block overrides merge with the existing stat writes. MODEL reference writes
+are included in byte-for-byte output verification and recovery, so updating an
+older signed image restores the original database before rebuilding. The data
+regression resolves all seven localized copies on all five supported releases
+and checks two simultaneous MR02 variants paying 146 and 496 while its original
+row remains at 58. These checks exercise the default transformed rewards rather
+than just changing the floating display.
 
 Rules 7 preserves the native texture bindings and complete render-attribute
 ancestry of imported particles and projectiles. The old child-index match could
@@ -209,3 +234,27 @@ No physical GameCube validation is claimed.
 An old hub savestate can restore the original cached archive index as well as
 stage resources. Verification must cold-boot the rebuilt image and load a memory
 card; reloading a stage after loading an old savestate is insufficient.
+
+## Original-spawn EXP validation (rules 8)
+
+Seed `1278675365` full images built and passed output verification on PS2 USA
+and GameCube USA with random enemies, random crowns, Crown Drops and four-player
+spawn counts. An independent disc audit checked 72,072 spawn rewards per platform
+across 243 difficulty packs and 567 localized tables, including 42,042 randomized
+spawn checks. Each replacement's HP, non-EXP stats and chargen matched its selected
+combat variant. Every originally occupied row remained unchanged relative to the
+normal Crown Mod table. Recovery covered all changed original bytes on both
+images, including the additional MODEL bindings.
+
+A fresh GameCube boot loaded the memory-card fixture and entered Goblin Pass
+through the normal gate. Its first randomized MR02 group used a private row with
+HP 1,300 and EXP 146, preserving the original Goburimon reward rather than MR02's
+native 58. Two kills increased the player's actual EXP by 146 each (292 total).
+For this payout check, active enemies' current HP was reduced to 1 and the player
+was made invulnerable; reward tables and the payout code were unchanged.
+
+The same seed also built and passed verification on PS2 USA and GameCube USA
+with Crown Mod disabled and Random enemies selected alone. The independent audit
+again checked 72,072 rewards per platform and the replacement combat variants
+across all difficulties and localized copies. Rewards matched the original
+unscaled spawn rows, and every originally occupied row retained native balance.

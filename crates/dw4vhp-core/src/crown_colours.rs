@@ -17,39 +17,14 @@ const MIPS_STATE: u32 = 0x0010_02c4;
 const PPC_CODE: u32 = 0x8000_4a00;
 const PPC_STATE: u32 = PPC_CODE + 64;
 
-/// Boss families remain yellow; regular enemies and the practice variants roll
-/// independently each time their icon is generated.
-pub fn is_boss_model(model: &str) -> bool {
-    model.starts_with("f_")
-        || matches!(
-            model,
-            "e_blosso"
-                | "e_mammos"
-                | "e_mecha4"
-                | "e_mecha4bs"
-                | "e_skulgrey"
-                | "e_anomalo"
-                | "e_tonogeko"
-                | "e_mecha3"
-                | "e_diabolo"
-                | "e_mecha5"
-                | "e_ldknight"
-        )
-}
+/// Every enemy, including bosses, receives a cosmetic crown and rolls its colour.
 pub(crate) fn mark_rows(table: &mut EnemyTable) {
     for group in ROW_GROUPS {
         if group.model.starts_with("g_") {
             continue;
         }
-        let colour = if is_boss_model(group.model) {
-            5
-        } else {
-            RANDOM_MARKER
-        };
         for &row in group.rows {
-            if table.rarity[row] != 0 {
-                table.rarity[row] = colour;
-            }
+            table.rarity[row] = RANDOM_MARKER;
         }
     }
 }
@@ -258,7 +233,7 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport, seed: u32) -> Result<Vec<
 mod tests {
     use super::*;
     #[test]
-    fn marking_only_changes_cosmetic_bytes_and_keeps_bosses_yellow() {
+    fn marking_includes_bosses_and_only_changes_cosmetic_bytes() {
         let mut table = EnemyTable {
             hp: vec![10; 649],
             stat: vec![[12; 12]; 649],
@@ -281,16 +256,12 @@ mod tests {
                     table.rarity[row],
                     if group.model.starts_with("g_") {
                         0
-                    } else if is_boss_model(group.model) {
-                        5
                     } else {
                         RANDOM_MARKER
                     }
                 );
             }
         }
-        assert!(is_boss_model("e_tonogeko") && is_boss_model("e_anomalo"));
-        assert!(!is_boss_model("e_goburi"));
     }
     // Small instruction models execute the emitted code, rather than testing
     // only a Rust copy of the PRNG. Loads/stores outside its private state fail.
@@ -430,7 +401,7 @@ mod tests {
         panic!("PPC hook did not tail-call the original icon routine");
     }
     #[test]
-    fn both_cpu_hooks_roll_per_spawn_and_leave_ordinary_colours_and_bosses_unchanged() {
+    fn both_cpu_hooks_roll_per_spawn_and_leave_unmarked_colours_unchanged() {
         for input in 0..=5 {
             let mut state = 0x72abcdef;
             assert_eq!(run_mips(input, &mut state), input);
@@ -459,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_uncrowned_enemies_and_props_stay_uncrowned() {
+    fn cosmetic_crowns_include_uncrowned_enemies_bosses_and_practice_but_skip_props() {
         let mut table = EnemyTable {
             hp: vec![10; 649],
             stat: vec![[12; 12]; 649],
@@ -468,6 +439,12 @@ mod tests {
             rarity: vec![0; 649],
         };
         mark_rows(&mut table);
-        assert!(table.rarity.iter().all(|rank| *rank == 0));
+        for row in [0, 60, 644, 645] {
+            assert_eq!(table.rarity[row], RANDOM_MARKER);
+        }
+        for row in 370..=378 {
+            assert_eq!(table.rarity[row], 0);
+        }
+        assert_eq!(table.rarity[66], 0, "unfilled table slots are not enemies");
     }
 }

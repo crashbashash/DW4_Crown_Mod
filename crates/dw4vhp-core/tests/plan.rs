@@ -344,3 +344,37 @@ fn practice_speed_is_halved_after_buffs_and_no_other_values_change() {
         }
     }
 }
+
+#[test]
+fn disabling_crown_mod_preserves_authored_balance_and_practice() {
+    let authored = blank();
+    let plan = PatchPlan {
+        crown_mod: false,
+        ..PatchPlan::default()
+    };
+    let (out, summary) = transform(&authored, &plan, &RatioVector::derive(&authored));
+    assert_eq!(out, authored);
+    assert_eq!(summary.rows_changed, 0);
+    assert_eq!(summary.practice_rows, 0);
+    assert_eq!(summary.collapsed_rows, 0);
+}
+
+#[test]
+fn cosmetic_colours_without_crown_mod_add_crowns_without_changing_balance() {
+    let mut authored = blank();
+    authored.rarity[379] = 5;
+    authored.rarity[60] = 5; // Blossomon boss.
+    let plan = PatchPlan {
+        crown_mod: false,
+        random_crown_colours: true,
+        ..PatchPlan::default()
+    };
+    let (out, _) = transform(&authored, &plan, &RatioVector::derive(&authored));
+    assert_eq!(out.hp, authored.hp);
+    assert_eq!(out.stat, authored.stat);
+    assert_eq!(out.crit, authored.crit);
+    assert_eq!(out.para, authored.para);
+    assert_eq!(out.rarity[0], dw4vhp_core::crown_colours::RANDOM_MARKER);
+    assert_ne!(out.rarity[379], authored.rarity[379]);
+    assert_eq!(out.rarity[60], dw4vhp_core::crown_colours::RANDOM_MARKER);
+}

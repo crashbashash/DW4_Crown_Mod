@@ -1,6 +1,9 @@
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
+/// The final signed-short column of the authored enemy stat row.
+pub const EXP_COLUMN: usize = 11;
+
 /// The enemy stat table read out of the disc's three authored blocks.
 ///
 /// The fields mirror the authored encodings: `hp` is one `i32` per row, `stat`

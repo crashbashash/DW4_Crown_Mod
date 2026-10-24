@@ -8,7 +8,8 @@
 | --- | --- |
 | ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
 
-**Crown Mod** makes **Digimon World 4** harder on PS2 and GameCube.
+Patch **Digimon World 4** on PS2 and GameCube with optional Crown Mod difficulty,
+random enemies and cosmetic crowns.
 
 Open the app and choose your own copy of the game to create a new, modded copy.
 
@@ -16,27 +17,30 @@ Open the app and choose your own copy of the game to create a new, modded copy.
 
 1. [Download the app](#download) for Windows or Linux.
 2. Open it and choose your game disc image (`.iso`, or `.ciso` / `.rvz` for GameCube).
-3. Click **Patch ISO**.
-4. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
+3. Select at least one option in Settings. Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards.
+4. Click **Patch ISO**.
+5. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
 
 Patching a clean disc leaves your original file unchanged.
 
 ## What the mod does
 
-- **Five-digit EXP popups.** Rewards above 9,999 display correctly, up to 99,999.
+- **Optional Crown Mod.** Boost enemy health, combat stats and EXP, with crowns for every enemy. Its EXP popups display up to 99,999.
 
-- **Optional random crown colours.** Each crowned enemy spawn gets a random
-  colour. Bosses keep yellow. This changes the icon only; combat stats and drops
+- **Optional random enemies.** Randomize ordinary encounters while matching combat strength and preserving each original spawn’s EXP. Works with the original balance or Crown Mod.
+
+- **Optional random crown colours.** Every enemy and boss gets a cosmetic crown
+  in a random colour. Works with or without Crown Mod. This changes the icon only; combat stats and drops
   are unchanged. See [scope and validation](docs/testing/random-crowns.md).
 
-- **Optional custom crown drops.** Rebalance eligible enemy loot toward equipment,
+- **Crown Mod sub-option: custom crown drops.** Rebalance eligible enemy loot toward equipment,
   x-data and plugs while retaining area/difficulty item pools. Existing guaranteed
   and quest rewards stay intact. See [rates and exceptions](docs/testing/custom-drops.md).
 
 - **Optional four-player enemy spawns.** Use four-player spawn counts and wave
   limits with a smaller party. Enemy stats and per-kill drop tables are unchanged
   by this option. Stage scripts still use the actual party size.
-- **Tougher enemies.** Enemy health and other stats are boosted. Attack values are
+- **Crown Mod balance.** Enemy health and other stats are boosted when Crown Mod is selected. Attack values are
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.
 

@@ -134,6 +134,9 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
+    if plan.crown_drops && !plan.crown_mod {
+        return Err(Error::CrownData("Crown Drops requires Crown Mod.".into()));
+    }
     let mut resolved = plan.clone();
     if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
         let mut seed = [0u8; 4];
@@ -289,6 +292,11 @@ fn patch_file_internal(
     let (new_table, _) = derive_patch(&report, plan);
     let blocks = new_table.blocks();
     let (mut regions, summary) = plan_regions(&mmap[..], &report, plan, layout)?;
+    let reward_tables = crowns
+        .as_ref()
+        .map(|c| c.rewards.apply(&mut regions, &new_table))
+        .transpose()?
+        .unwrap_or_default();
 
     if let Some(crowns) = &crowns {
         regions.extend(crowns.regions.clone());
@@ -297,7 +305,7 @@ fn patch_file_internal(
         overwrite: opts.overwrite,
     };
     let verify = |path: &Path| {
-        verify_output(path, &blocks, layout)?;
+        verify_output(path, &blocks, layout, &reward_tables)?;
         if let Some(crowns) = &crowns {
             let file = File::open(path)?;
             // Safety: the completed private output is read-only during verification.
@@ -351,17 +359,52 @@ fn patch_file_internal(
 /// Re-reads the written file and confirms the computed table blocks are exactly
 /// what landed: the anchors hold them byte-for-byte and each occurs
 /// [`Layout::expected_copies`] times.
-fn verify_output(path: &Path, blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<()> {
+fn verify_output(
+    path: &Path,
+    blocks: &[Vec<u8>; 3],
+    layout: &Layout,
+    rewards: &[WriteRegion],
+) -> Result<()> {
     let file = File::open(path)?;
     // Safety: the mapping is read-only and `path` is not modified while mapped.
     let mmap = unsafe { Mmap::map(&file)? };
-    verify_blocks(&mmap[..], blocks, layout)
+    verify_blocks(&mmap[..], blocks, layout, rewards)
 }
 
 /// The block-level checks [`verify_output`] applies against an image in memory.
-fn verify_blocks(iso: &[u8], blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<()> {
+fn verify_blocks(
+    iso: &[u8],
+    blocks: &[Vec<u8>; 3],
+    layout: &Layout,
+    rewards: &[WriteRegion],
+) -> Result<()> {
+    let mut offsets = std::collections::BTreeSet::new();
+    for reward in rewards {
+        if !offsets.insert(reward.offset)
+            || !blocks
+                .iter()
+                .any(|b| b.len() == reward.bytes.len() && *b != reward.bytes)
+        {
+            return Err(Error::VerificationFailed(
+                "invalid local reward table override".into(),
+            ));
+        }
+        let start = usize::try_from(reward.offset)
+            .map_err(|_| Error::VerificationFailed("invalid reward offset".into()))?;
+        if iso.get(start..start.saturating_add(reward.bytes.len())) != Some(reward.bytes.as_slice())
+        {
+            return Err(Error::VerificationFailed(format!(
+                "local reward table at {start:#X} differs from plan"
+            )));
+        }
+    }
     let anchors = [layout.hp_off, layout.stat_off, layout.byte_off];
     for (index, (block, &anchor)) in blocks.iter().zip(anchors.iter()).enumerate() {
+        let block = rewards
+            .iter()
+            .find(|r| r.offset == anchor)
+            .map(|r| &r.bytes)
+            .unwrap_or(block);
         let name = BLOCK_NAMES[index];
         let start = usize::try_from(anchor).map_err(|_| {
             Error::VerificationFailed(format!("the {name} block offset {anchor:#X} is too large"))
@@ -386,10 +429,19 @@ fn verify_blocks(iso: &[u8], blocks: &[Vec<u8>; 3], layout: &Layout) -> Result<(
     for (index, block) in blocks.iter().enumerate() {
         let name = BLOCK_NAMES[index];
         let found = count_copies(iso, block);
-        if found != layout.expected_copies {
+        let expected = layout
+            .expected_copies
+            .checked_sub(
+                rewards
+                    .iter()
+                    .filter(|r| r.bytes.len() == block.len())
+                    .count(),
+            )
+            .ok_or_else(|| Error::VerificationFailed("too many local reward tables".into()))?;
+        if found != expected {
             return Err(Error::VerificationFailed(format!(
                 "found {found} copies of the {name} block in the written file, expected {}",
-                layout.expected_copies
+                expected
             )));
         }
     }
@@ -450,5 +502,56 @@ fn scaled(phase: Phase, done: u64, total: u64, start: u64, end: u64) -> Progress
         phase,
         done: start + fraction,
         total: 10000,
+    }
+}
+
+#[cfg(test)]
+mod reward_verification_tests {
+    use super::*;
+
+    #[test]
+    fn local_rewards_verify_at_the_anchor_and_other_copies_and_reject_tampering() {
+        let blocks = [vec![0x11; 8], vec![0x22; 48], vec![0x33; 6]];
+        let layout = Layout {
+            hp_off: 0,
+            stat_off: 8,
+            byte_off: 56,
+            rows: 2,
+            expected_copies: 2,
+        };
+        for (index, relative) in [0, 8, 56].into_iter().enumerate() {
+            for copy in [0, 64] {
+                let changed = copy + relative;
+                let mut image = vec![0xff; 128];
+                for offset in [0, 64] {
+                    image[offset..offset + 8].copy_from_slice(&blocks[0]);
+                    image[offset + 8..offset + 56].copy_from_slice(&blocks[1]);
+                    image[offset + 56..offset + 62].copy_from_slice(&blocks[2]);
+                }
+                let mut reward = WriteRegion {
+                    offset: changed as u64,
+                    bytes: blocks[index].clone(),
+                };
+                reward.bytes[0] ^= 1;
+                image[changed..changed + reward.bytes.len()].copy_from_slice(&reward.bytes);
+                let overrides = [reward];
+                verify_blocks(&image, &blocks, &layout, &overrides).unwrap();
+                for at in [
+                    changed,
+                    changed + blocks[index].len() - 1,
+                    64 - copy + relative,
+                ] {
+                    let mut damaged = image.clone();
+                    damaged[at] ^= 1;
+                    assert!(verify_blocks(&damaged, &blocks, &layout, &overrides).is_err());
+                }
+                let other = 64 - copy + relative;
+                image[other..other + blocks[index].len()].fill(0xaa);
+                assert!(
+                    verify_blocks(&image, &blocks, &layout, &overrides).is_err(),
+                    "an unmodified table must still be verified"
+                );
+            }
+        }
     }
 }

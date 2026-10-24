@@ -45,6 +45,8 @@ const CHARGEN_CAP: f64 = 60.0;
 /// define a build (spec §7).
 #[derive(PartialEq, Debug, Clone)]
 pub struct PatchPlan {
+    /// Apply Crown Mod balance, practice and crown changes.
+    pub crown_mod: bool,
     pub hp_mult: f64,
     pub stat_mult: [f64; 12],
     pub crit_mult: f64,
@@ -67,7 +69,7 @@ pub struct PatchPlan {
     pub four_player_spawns: bool,
     /// Rebalance enemy loot categories while preserving scripted rewards.
     pub crown_drops: bool,
-    /// Randomise enemy and river turret crowns on generation, preserving boss yellow.
+    /// Add cosmetic crowns and randomise their colours for every enemy and boss.
     pub random_crown_colours: bool,
     /// Optional reproducible private colour RNG seed; normally chosen per patch.
     pub crown_colour_seed: Option<u32>,
@@ -83,6 +85,7 @@ impl Default for PatchPlan {
     /// exclusions and the practice buff on, no ELF patch and no serial edit.
     fn default() -> Self {
         Self {
+            crown_mod: true,
             hp_mult: 1.0,
             stat_mult: [1.0; 12],
             crit_mult: 1.0,
@@ -148,6 +151,16 @@ pub fn transform(
         live_rows: authored.hp.iter().filter(|hp| **hp > 0).count(),
         ..PlanSummary::default()
     };
+
+    if !plan.crown_mod {
+        if plan.random_crown_colours {
+            crate::crown_colours::mark_rows(&mut out);
+        }
+        summary.rows_changed = (0..authored.len())
+            .filter(|&r| out.rarity[r] != authored.rarity[r])
+            .count();
+        return (out, summary);
+    }
 
     for r in 0..authored.len() {
         if is_excluded(r, plan) {
