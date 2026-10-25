@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.13.2
+
+- Fixed a stage-resource leak that could cause loading freezes after repeated area changes, including Mangrove Forest.
+
 ## v0.13.1
 
 - Fixed randomised Minotaurmon retreating to heal below 50% HP and getting stuck against walls. They now continue fighting.

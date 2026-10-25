@@ -13,8 +13,29 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 9. The same seed is reproducible within
+The current randomizer uses rules version 10. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 10 preserves the backing blocks of imported Lua script registries and the
+initial crown instance, animation, scene-child and visibility lists. The IGB
+loader resolves reference-bearing memory even when no list owns it. Replacing a
+list's backing block therefore left its original references alive after unload.
+The Lua registry now rewrites and grows its original block, preserving authored
+script order and imported callback insertions. Crown lists and their existing
+visibility mask grow in place. Verification permits only the planned Lua block
+rewrite and block growth; other original memory remains byte-identical.
+
+The ownership regression exercises GekoGeko Land and Mangrove Forest with seed
+`2162128323` on PS2 USA/Europe/Japan and GameCube USA/Japan. It requires the
+original crown/list/mask IDs and backing IDs, preserved script entries and order,
+and no unowned object-reference blocks retaining objects. The reported seed's
+complete PS2 USA build preserves its enemy-plan digest, all 2,003 generator
+decisions and 1,473 reward variants. An independent full-archive audit finds no
+orphaned object references in the corrected image, versus 15,881 previously.
+
+```sh
+cargo test --release --lib expanded_crowns_and_imported_scripts_keep_backing_blocks -- --nocapture
+```
 
 Rules 9 gives every generator assigned Minotaurmon (`e_minotaru`) the native
 `SQ_NENTR` entrance. It keeps the half-HP switch on the normal combat branch,
@@ -277,3 +298,54 @@ with Crown Mod disabled and Random enemies selected alone. The independent audit
 again checked 72,072 rewards per platform and the replacement combat variants
 across all difficulties and localized copies. Rewards matched the original
 unscaled spawn rows, and every originally occupied row retained native balance.
+
+## PS2 Mangrove loading regression (rules 10)
+
+The PS2 USA seed `2162128323` build was tested in PCSX2 with Crown Mod disabled,
+random enemies and four-player spawn counts, Normal difficulty and one joined player.
+The corrected image was cold-booted from a memory-card fixture; its opening
+dialogue was completed before the route began. No earlier-build savestate was
+loaded, since it would restore cached archive metadata and resources.
+
+The route completed Humid Cave and Blossomon, Cliff Dungeon and Mammothmon,
+then Goblin Fortress and Mecha Rogue after activating the room console. It used
+the first two dungeons' native end gates, rescued Leomon, completed the Commander
+Room Digi-Elf/Ophanimon dialogue and left through that room's gate. From the hub
+it entered Venom Jungle/GekoGeko Land, then Mangrove Forest. Player positions
+were adjusted to native triggers; bosses' current HP was set to zero before
+controller attacks finished them. Health was restored at the native Heal Circle.
+Boss-clear flags and stage arrivals were read from saved EE RAM.
+
+The earlier rules-9 image faulted on the fifth Geko-to-Mangrove return after
+this history. Replaying that final native boat prompt reproduced the guest TLB
+read fault at PC `0x002d891c`, invalid address `0x3c1a805d`. The private emulator
+then asserted; the original report described a loading freeze with PCSX2 open.
+
+Rules 10 completed the same dungeon history and 30 further Geko–Mangrove round
+trips (60 stage loads) without a failed load or the earlier fault. The table
+compares Mangrove arrivals after each round, excluding the initial arrival.
+
+| Build | Successful returns | First arrival | Last arrival | Growth per round |
+| --- | ---: | ---: | ---: | ---: |
+| Rules 9 | 4; fifth faulted | 15.762 MiB | 16.384 MiB | about 212 KiB |
+| Rules 10 | 30 | 14.431 MiB | 14.613 MiB | about 6.4 KiB |
+| Unmodified retail control | 10 | 11.307 MiB | 11.308 MiB | about 0.14 KiB |
+
+These values sum tracked game-pool counters; they are neither total physical
+RAM nor loading-time allocation peaks. Growth is fitted after the first round.
+The earlier fault did not recur in this run, while a smaller drift remains.
+
+The unmodified USA disc control cold-booted the same memory-card fixture,
+completed its opening dialogue, healed and entered Venom Jungle/Mangrove
+directly. It completed ten round trips without a failed load and stayed nearly
+flat. It omitted the dungeon history and the four-player spawn patch, so this
+control does not isolate expanded capacity from randomized resources. The
+remaining 6.4 KiB growth cannot be dismissed as ordinary retail background drift;
+further allocation tracing is needed to identify it.
+
+The core checks, resource-ownership regressions on all five supported releases,
+and full PS2 USA/Europe/Japan default-build verification passed. Independent
+comparison of the reported seed's old and corrected images found identical AREA
+data, all 243 generator packs, 7,640 Lua bytecodes, 98 Lua registry lookup orders
+and model-pool counts in all 164 model packs. The correction changes resource
+ownership without changing the seed's encounters or rewards.

@@ -99,12 +99,14 @@ pub(super) fn expand(b: &[u8]) -> Result<Vec<Edit>> {
         actions.push(newaction);
     }
     for (list, ids) in [(ramlist, &rams), (parent, &nodes), (actionlist, &actions)] {
-        let mem = builder.mem(words(ids), p.val(list, 4)?)?;
-        builder.modify(list, &[(2, CAPACITY), (3, CAPACITY), (4, mem)])?;
+        // The loader resolves old backing blocks even after their owner moves.
+        // Grow the owned block so its original four references are released on unload.
+        builder.grow_mem(p.val(list, 4)?, words(&ids[4..]))?;
+        builder.modify(list, &[(2, CAPACITY), (3, CAPACITY)])?;
     }
-    let mm = builder.mem(vec![0; 8], p.val(mask, 4)?)?;
-    let newmask = builder.obj(mask, &[(2, 2), (3, 2), (4, mm), (5, CAPACITY)])?;
-    builder.modify(switch, &[(8, newmask)])?;
+    builder.grow_mem(p.val(mask, 4)?, vec![0; 4])?;
+    builder.modify(mask, &[(2, 2), (3, 2), (5, CAPACITY)])?;
+    let grows = builder.grown();
     let edits = builder.finish(p.val(parent, 4)?)?;
     let out = materialize(b, &edits)?;
     let v = Pack::parse(&out)?;
@@ -118,19 +120,19 @@ pub(super) fn expand(b: &[u8]) -> Result<Vec<Edit>> {
     for (a, n) in actions.iter().zip(nodes.iter()) {
         need(v.val(*a, 11)? == *n, "expanded animation/node mismatch")?;
     }
+    graft::verify_pool(&p, &v, &grows)?;
     need(
-        b[p.pool..] == out[v.pool..v.pool + b.len() - p.pool],
-        "original memory pool changed",
-    )?;
-    need(
-        p.mapping == v.mapping[..p.mapping.len()],
+        p.ids == v.ids[..p.ids.len()]
+            && p.mapping.iter().enumerate().all(|(id, &entry)| {
+                v.mapping[id] == entry || (p.memory[id].is_some() && v.memory[id].is_some())
+            }),
         "original IDs changed",
     )?;
     for (id, old) in p.ids.iter().enumerate() {
         if let Some(idx) = old {
             let r = &p.objects[*idx];
             let new = v.rec(id as u32)?;
-            if ![ramlist, parent, actionlist, switch].contains(&(id as u32)) {
+            if ![ramlist, parent, actionlist, mask].contains(&(id as u32)) {
                 need(
                     b[r.range.clone()] == out[new.range.clone()],
                     "unrelated original object changed",
@@ -169,21 +171,28 @@ pub(super) fn expand(b: &[u8]) -> Result<Vec<Edit>> {
             need(v.memory[id].is_some(), "unknown generated resource")?;
         }
     }
-    // Split the insertion at the original pool: retain the large unchanged pool
-    // through a source range, so all 85 patch plans use only a few MB of RAM.
+    // Retain original pool segments around the growth insertions as source ranges,
+    // so all 85 patch plans use only a few MB of RAM.
     let mut compact = Vec::new();
     for e in edits {
         if e.range.start == p.pool && e.range.end == b.len() {
-            let added = e.bytes.len() - (b.len() - p.pool);
             let objadd = (u32at(&out, 16)? - u32at(b, 16)?) as usize;
-            need(added >= objadd, "bad insertion sizes")?;
             compact.push(Edit {
                 range: p.pool..p.pool,
                 bytes: e.bytes[..objadd].to_vec(),
             });
+            let mut grown = 0;
+            for &(at, len) in &grows {
+                let start = objadd + at + grown;
+                compact.push(Edit {
+                    range: p.pool + at..p.pool + at,
+                    bytes: e.bytes[start..start + len].to_vec(),
+                });
+                grown += len;
+            }
             compact.push(Edit {
                 range: b.len()..b.len(),
-                bytes: e.bytes[objadd + b.len() - p.pool..].to_vec(),
+                bytes: e.bytes[objadd + b.len() - p.pool + grown..].to_vec(),
             });
         } else {
             compact.push(e);

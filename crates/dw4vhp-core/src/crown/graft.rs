@@ -865,7 +865,8 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     report.registered = infos.len();
     // Grow the registry's own memory block in place. Giving the root list a new block makes
     // the engine keep the whole stage pack resident after the stage is left (about 6 MB
-    // each time, so the next stage runs out of memory); any other list may be replaced.
+    // each time, so the next stage runs out of memory). Other reference-bearing
+    // lists must retain their backing blocks too, including the script registry.
     builder.grow_mem(dp.val(root, 4)?, words(&list[registered..]))?;
     builder.modify(root, &[(2, list.len() as u32), (3, list.len() as u32)])?;
     let template = dp.val(root, 4)?;
@@ -888,15 +889,8 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         }
         report.scripts = scripts.len();
         let template = dp.val(lua, 4)?;
-        let block = builder.mem(words(&entries), template)?;
-        builder.modify(
-            lua,
-            &[
-                (2, entries.len() as u32),
-                (3, entries.len() as u32),
-                (4, block),
-            ],
-        )?;
+        builder.rewrite_mem(template, words(&entries))?;
+        builder.modify(lua, &[(2, entries.len() as u32), (3, entries.len() as u32)])?;
     }
     // Draw registration: the enemy model switches hang under a scene group of the stage.
     let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -934,9 +928,10 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         )?;
     }
     let grows = builder.grown();
+    let rewrites = builder.rewrites.clone();
     let edits = builder.finish(template)?;
     let out = materialize(dst, &edits)?;
-    verify(&dp, &sp, &out, &map, &owners, &grows)?;
+    verify(&dp, &sp, &out, &map, &owners, &grows, &rewrites)?;
     Ok((edits, report))
 }
 
@@ -1021,6 +1016,7 @@ pub(super) fn verify(
     map: &HashMap<u32, u32>,
     owners: &HashMap<u32, usize>,
     grows: &[(usize, usize)],
+    rewrites: &BTreeMap<u32, Vec<u8>>,
 ) -> Result<()> {
     let v = Pack::parse(out)?;
     need(
@@ -1030,7 +1026,7 @@ pub(super) fn verify(
             }),
         "graft changed original IDs",
     )?;
-    verify_pool(dp, &v, grows)?;
+    verify_pool_rewrites(dp, &v, grows, rewrites)?;
     for (&s, &d) in map {
         if let Some(si) = sp.ids[s as usize] {
             let di = v.ids[d as usize].ok_or_else(|| bad("copied object missing"))?;
@@ -1088,11 +1084,38 @@ pub(super) fn verify(
 
 /// Original memory stays byte-for-byte intact around additions to its blocks.
 pub(super) fn verify_pool(dp: &Pack, v: &Pack, grows: &[(usize, usize)]) -> Result<()> {
-    let (mut from, mut to, mut seen) = (dp.pool, v.pool, 0);
+    verify_pool_contents(&dp.b[dp.pool..], v, grows)
+}
+
+fn verify_pool_rewrites(
+    dp: &Pack,
+    v: &Pack,
+    grows: &[(usize, usize)],
+    rewrites: &BTreeMap<u32, Vec<u8>>,
+) -> Result<()> {
+    if rewrites.is_empty() {
+        return verify_pool(dp, v, grows);
+    }
+    let mut expected = dp.b[dp.pool..].to_vec();
+    for (&block, bytes) in rewrites {
+        let before = dp.memory[block as usize].as_ref().unwrap();
+        let after = v.memory[block as usize]
+            .as_ref()
+            .ok_or_else(|| bad("rewritten memory block missing"))?;
+        need(bytes.len() >= before.len(), "rewritten memory shrank")?;
+        need(&v.b[after.clone()] == bytes, "rewritten memory differs")?;
+        expected[before.start - dp.pool..before.end - dp.pool]
+            .copy_from_slice(&bytes[..before.len()]);
+    }
+    verify_pool_contents(&expected, v, grows)
+}
+
+fn verify_pool_contents(original: &[u8], v: &Pack, grows: &[(usize, usize)]) -> Result<()> {
+    let (mut from, mut to, mut seen) = (0, v.pool, 0);
     for &(at, len) in grows {
         let run = at - seen;
         need(
-            dp.b[from..from + run] == v.b[to..to + run],
+            original[from..from + run] == v.b[to..to + run],
             "changed original memory pool",
         )?;
         from += run;
@@ -1100,7 +1123,7 @@ pub(super) fn verify_pool(dp: &Pack, v: &Pack, grows: &[(usize, usize)]) -> Resu
         seen = at;
     }
     need(
-        dp.b[from..] == v.b[to..to + dp.b.len() - from],
+        original[from..] == v.b[to..to + original.len() - from],
         "changed original memory pool",
     )
 }

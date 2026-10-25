@@ -33,6 +33,27 @@ fn growing_one_block_keeps_other_owners_and_ids_intact() {
 }
 
 #[test]
+fn rewriting_a_registry_keeps_its_backing_id_and_shared_descriptor_peer() {
+    let bytes = fixtures::object_graph();
+    let p = Pack::parse(&bytes).unwrap();
+    let mut builder = Builder::new(&p);
+    // A sorted insertion can move old entries as well as extend the list.
+    builder.rewrite_mem(0, words(&[NULL, 2, 2])).unwrap();
+    builder.modify(1, &[(2, 3), (3, 3)]).unwrap();
+    let out = materialize(&bytes, &builder.finish(0).unwrap()).unwrap();
+    let q = Pack::parse(&out).unwrap();
+    assert_eq!(q.ids.len(), p.ids.len());
+    assert_eq!(q.val(1, 4).unwrap(), 0);
+    assert_eq!(q.array(1).unwrap(), [NULL, 2, 2]);
+    assert_eq!(
+        out[q.memory[3].clone().unwrap()],
+        bytes[p.memory[3].clone().unwrap()]
+    );
+    assert!(Builder::new(&p).rewrite_mem(0, words(&[2])).is_err());
+    assert!(Builder::new(&p).rewrite_mem(0, vec![0; 9]).is_err());
+}
+
+#[test]
 fn appending_an_object_uses_null_reference_padding_and_preserves_originals() {
     let bytes = fixtures::object_graph();
     let p = Pack::parse(&bytes).unwrap();

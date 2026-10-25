@@ -321,7 +321,7 @@ fn graft_bank(dst: &[u8], src: &[u8], model: &str, bank: &str) -> Result<Vec<u8>
     let grows = builder.grown();
     let edits = builder.finish(dp.val(root, 4)?)?;
     let out = materialize(&dst, &edits)?;
-    graft::verify(&dp, &sp, &out, &map, &owners, &grows)?;
+    graft::verify(&dp, &sp, &out, &map, &owners, &grows, &BTreeMap::new())?;
     Ok(out)
 }
 

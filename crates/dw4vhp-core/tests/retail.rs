@@ -98,7 +98,7 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         assert_eq!(count, 665);
     }
     let crowns = dw4vhp_core::crown::CrownPlan::build(&original).unwrap();
-    // Verify the historical archive independently of the new recovery footer.
+    // Verify the expanded archive independently of the recovery footer.
     let mut archive_view = patched[..unsigned_len].to_vec();
     archive_view[..head.len()].copy_from_slice(&head);
     crowns.verify(&original, &archive_view).unwrap();
@@ -153,7 +153,7 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "25215189ba7f252e15beb9dd3ea27ced",
+        "3654d8c20e50527871f379c5c13aa276",
     );
 }
 #[test]
@@ -162,7 +162,7 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "e2c59ac2b1e98f266ae97d4cdf9a8a4e",
+        "2d83475de0bd54e053b3781e02b8996b",
     );
 }
 #[test]
@@ -171,6 +171,6 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "df9b8f3a15fde1eade95f19fe7ca01f2",
+        "c08a56b436efe42d5060e096a47d5afe",
     );
 }

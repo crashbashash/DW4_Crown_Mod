@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 9;
+pub const RULES_VERSION: u32 = 10;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 3;
 

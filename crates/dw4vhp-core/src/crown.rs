@@ -22,6 +22,8 @@ mod rewards;
 mod sound;
 pub use random::Options as RandomOptions;
 pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
+#[cfg(test)]
+mod ownership;
 mod river;
 mod spawns;
 
@@ -103,7 +105,16 @@ mod synthetic_graph_tests {
         )
         .unwrap();
         let out = materialize(&bytes, &builder.finish(0).unwrap()).unwrap();
-        graft::verify(&destination, &source, &out, &map, &owners, &[]).unwrap();
+        graft::verify(
+            &destination,
+            &source,
+            &out,
+            &map,
+            &owners,
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let result = Pack::parse(&out).unwrap();
         assert_eq!(result.array(1).unwrap(), [2, NULL]);
         assert_eq!(result.array(map[&1]).unwrap(), [map[&2], NULL]);

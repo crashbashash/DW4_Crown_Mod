@@ -456,6 +456,8 @@ pub(crate) struct Builder<'p, 'a> {
     pub(crate) edits: Vec<Edit>,
     /// Bytes inserted at the end of existing memory blocks: (offset in the pool, bytes).
     pub(crate) grows: Vec<(usize, Vec<u8>)>,
+    /// Complete replacement contents of blocks whose IDs and owners stay intact.
+    pub(crate) rewrites: BTreeMap<u32, Vec<u8>>,
 }
 impl<'p, 'a> Builder<'p, 'a> {
     pub(crate) fn new(p: &'p Pack<'a>) -> Self {
@@ -471,6 +473,7 @@ impl<'p, 'a> Builder<'p, 'a> {
             remapped: BTreeMap::new(),
             edits: vec![],
             grows: vec![],
+            rewrites: BTreeMap::new(),
         }
     }
     /// Instance copies can share identical directory descriptors. The remap
@@ -550,6 +553,31 @@ impl<'p, 'a> Builder<'p, 'a> {
             });
         }
         self.grows.push((range.end - self.p.pool, extra));
+        Ok(())
+    }
+    /// Reorder and grow an owned block without abandoning its original references.
+    /// In particular, sorted registries can insert entries before existing ones.
+    pub(crate) fn rewrite_mem(&mut self, block: u32, bytes: Vec<u8>) -> Result<()> {
+        let range = self
+            .p
+            .memory
+            .get(block as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| bad("missing block to rewrite"))?;
+        need(
+            bytes.len() >= range.len() && bytes.len().is_multiple_of(4),
+            "memory rewrite must not shrink or misalign a block",
+        )?;
+        need(
+            !self.rewrites.contains_key(&block)
+                && !self
+                    .grows
+                    .iter()
+                    .any(|(at, _)| *at == range.end - self.p.pool),
+            "memory block already resized",
+        )?;
+        self.grow_mem(block, bytes[range.len()..].to_vec())?;
+        self.rewrites.insert(block, bytes);
         Ok(())
     }
     pub(crate) fn add(&mut self, dir: Vec<u8>, payload: Vec<u8>, memory: bool) -> Result<u32> {
@@ -653,6 +681,11 @@ impl<'p, 'a> Builder<'p, 'a> {
         let object_bytes = self.objects.len();
         let mut objects = self.objects;
         let mut pool = self.p.b[self.p.pool..].to_vec();
+        for (&block, bytes) in &self.rewrites {
+            let range = self.p.memory[block as usize].as_ref().unwrap();
+            pool[range.start - self.p.pool..range.end - self.p.pool]
+                .copy_from_slice(&bytes[..range.len()]);
+        }
         let mut grown = 0;
         self.grows.sort_by_key(|g| std::cmp::Reverse(g.0));
         for (at, extra) in &self.grows {
