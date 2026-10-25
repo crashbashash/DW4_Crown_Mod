@@ -99,6 +99,12 @@ pub fn plan_regions(
     }
 
     let gamecube = report.release.is_some_and(|release| release.is_gamecube());
+    if plan.random_enemies && gamecube {
+        regions.extend(crate::gc_memory::regions(iso, report)?);
+    }
+    if plan.random_enemies && !gamecube {
+        regions.extend(crate::ps2_memory::regions(iso, report)?);
+    }
     if (plan.force_very_hard || plan.serial.is_some()) && gamecube {
         return Err(Error::UnsupportedDifficulty);
     }

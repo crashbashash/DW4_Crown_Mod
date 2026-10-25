@@ -13,9 +13,13 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 10;
+pub const RULES_VERSION: u32 = 13;
 /// New models tried per stage by the shipped patch.
-pub const DONORS: usize = 3;
+pub const DONORS: usize = 4;
+
+/// Mangrove's sequential enemy waves have model-named waits/cleanup in stage Lua.
+/// Their completion callbacks belong to the generators, so they survive retargeting.
+const MANGROVE_WAVES: &[(&str, &str)] = &[("GENE-139", "e_otama"), ("GENE-131", "e_geko")];
 
 pub struct Options {
     pub seed: u64,
@@ -173,11 +177,9 @@ fn scripted_models(p: &Pack, entry: usize) -> Result<BTreeSet<&'static str>> {
         }
         for &model in REGULAR.iter().chain(REPLACEABLE) {
             if constants.iter().any(|c| c.text == model.as_bytes()) {
-                // Mangrove's boss-start wait and boss-end cleanup address the
-                // native add groups (GENE-131/139 and GENE-s01..s05), all pinned
-                // above. Their models and original instance pools stay loaded.
-                // Protecting those families across the whole map also locked
-                // every unrelated Otamamon/Gekomon patrol out of randomisation.
+                // Mangrove's wave wait and cleanup are explicitly retargeted
+                // below. They must not pin the wave or unrelated patrol families.
+                // ShogunGekomon and the scene's NPCs retain their native scripts.
                 if entry == 686
                     && matches!(
                         (name, model),
@@ -949,6 +951,33 @@ impl Randomiser {
             if !names.is_empty() {
                 let more = lua_names::rename_in_pack(&dst, &[intro.script.to_string()], &names)?;
                 dst = materialize(&dst, &more)?;
+            }
+        }
+        if entry == 686 {
+            // Do this after reward-slot fallback has finalized the choices, so
+            // a retained native wave keeps its native wait/cleanup target.
+            // Wave families may also appear in ordinary patrols, as they do in
+            // retail; reserving both would unnecessarily narrow patrol variety.
+            let waves: BTreeMap<String, String> = MANGROVE_WAVES
+                .iter()
+                .map(|&(generator, original)| {
+                    (
+                        original.to_string(),
+                        choice
+                            .get(generator)
+                            .cloned()
+                            .unwrap_or_else(|| original.into()),
+                    )
+                })
+                .collect();
+            for script in ["mate00.lua", "tim_g_orbz03.lua"] {
+                let names = waves
+                    .iter()
+                    .filter(|(original, _)| script != "mate00.lua" || *original == "e_otama")
+                    .map(|(a, b)| (a.clone(), b.clone()))
+                    .collect();
+                let edits = lua_names::rename_in_pack(&dst, &[script.into()], &names)?;
+                dst = materialize(&dst, &edits)?;
             }
         }
         if env::var("DW4_RANDOM_DUMP").is_ok_and(|v| v.split(',').any(|e| e == entry.to_string())) {

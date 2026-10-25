@@ -1272,6 +1272,12 @@ pub struct IntroStage {
 
 pub const INTRO_STAGES: &[IntroStage] = &[
     IntroStage {
+        model_entry: 187,
+        generators: &[191, 192, 193],
+        script: "first.lua",
+        sites: &[("GENE-01", "e_scum")],
+    },
+    IntroStage {
         model_entry: 257,
         generators: &[261, 262, 263],
         script: "matg05.lua",
@@ -1312,6 +1318,12 @@ pub const INTRO_STAGES: &[IntroStage] = &[
         generators: &[680, 681, 682],
         script: "first.lua",
         sites: &[("GENE-89", "e_otama"), ("GENE-90", "e_geko")],
+    },
+    IntroStage {
+        model_entry: 686,
+        generators: &[689, 690, 691],
+        script: "first.lua",
+        sites: &[("GENE-165", "e_torta")],
     },
     IntroStage {
         model_entry: 709,

@@ -43,7 +43,7 @@ fn randomised_minotaurmon_bypass_healing_for_native_and_imported_models() {
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
                 seed: 1520,
-                donors: 3,
+                donors: DONORS,
                 warp: None,
                 only: None,
             },

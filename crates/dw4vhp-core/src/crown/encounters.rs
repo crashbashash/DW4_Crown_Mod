@@ -43,7 +43,7 @@ pub struct EncounterProtection {
 }
 
 pub(crate) const PROTECTIONS: &[EncounterProtection] = &[
-    EncounterProtection { pack_entry: 187, name: "Humid Cave B2", stage: "dng101b2", generators: &["GENE-08", "GENE-01"], reason: "The introduction starts GENE-01, waits for Sukamon (e_scum), and freezes/unfreezes that family by name. The dynamic script guard also protects Sukamon across this floor." },
+    EncounterProtection { pack_entry: 187, name: "Humid Cave B2", stage: "dng101b2", generators: &["GENE-08"], reason: "Preserve the native Blossomon boss. Sukamon's introduction retargets its wait and freeze/unfreeze commands to the replacement, allowing the intro and ordinary patrols to randomize." },
     EncounterProtection { pack_entry: 210, name: "Cliff Dungeon B3", stage: "dng102b3", generators: &["GENE-12"], reason: "Preserve the native Mammothmon encounter generator." },
     EncounterProtection { pack_entry: 241, name: "Dungeon dng204b2", stage: "dng204b2", generators: &["GENE-13", "INTRO-01"], reason: "Preserve the native encounter and introduction generators used by stage scripts." },
     EncounterProtection { pack_entry: 265, name: "Dungeon dng205b3", stage: "dng205b3", generators: &["GENE-15"], reason: "Preserve the native scripted encounter; stage scripts also address several resident families." },
@@ -63,7 +63,7 @@ pub(crate) const PROTECTIONS: &[EncounterProtection] = &[
     EncounterProtection { pack_entry: 621, name: "Abyss of Grief", stage: "stag0102", generators: &["GENE-38"], reason: "Preserve the generator addressed by the native stage scripts." },
     EncounterProtection { pack_entry: 635, name: "Doom Dome", stage: "stag0104", generators: &["GENE-011", "GENE-013", "GENE-016"], reason: "Preserve the two native scripted generators." },
     EncounterProtection { pack_entry: 649, name: "Dry Land ruins", stage: "stag0202", generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve the native scripted encounter/add groups." },
-    EncounterProtection { pack_entry: 686, name: "Mangrove Forest", stage: "stag0302", generators: &["GENE-131", "GENE-139", "GENE-165", "GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve boss adds and the Tortamon introduction. Explicit script-guard exceptions allow unrelated Otamamon/Gekomon patrols to randomize." },
+    EncounterProtection { pack_entry: 686, name: "Mangrove Forest", stage: "stag0302", generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve ShogunGekomon's boss variants. The two preceding waves and Tortamon's introduction randomize with matching model-name waits and cleanup; generator callbacks retain wave progression." },
  ];
 
 /// Fixed protections are supplemented by authored entrances and model names
@@ -111,8 +111,8 @@ mod tests {
             .find(|r| r.pack_entry == 187)
             .unwrap();
         assert_eq!(humid.stage, "dng101b2");
-        assert_eq!(humid.generators, ["GENE-08", "GENE-01"]);
-        assert!(humid.reason.contains("Sukamon") && humid.reason.contains("across this floor"));
+        assert_eq!(humid.generators, ["GENE-08"]);
+        assert!(humid.reason.contains("Blossomon") && humid.reason.contains("retargets"));
     }
 
     #[test]

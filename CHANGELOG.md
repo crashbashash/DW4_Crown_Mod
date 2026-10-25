@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.14.0
+
+- Improve PS2 and GameCube memory handling to prevent the reproduced randomized-stage loading crashes, including Mangrove Forest.
+- Increase enemy variety with up to four imported enemy families per stage, up from three.
+- Randomize the Sukamon and Tortamon introductions while preserving their scripted progression.
+- Randomize Mangrove Forest's two pre-boss enemy waves while preserving boss progression and quest completion.
+
 ## v0.13.2
 
 - Fixed a stage-resource leak that could cause loading freezes after repeated area changes, including Mangrove Forest.

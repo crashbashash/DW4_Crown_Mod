@@ -13,8 +13,128 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 10. The same seed is reproducible within
+The current randomizer uses rules version 13. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 13 raises the per-stage import ceiling from three to four families and
+supports Humid Cave B2's Sukamon introduction (`GENE-01`). Its `first.lua`
+appearance wait and enemy freeze/unfreeze commands retarget together. The
+replacement is reserved from randomized patrols, while other Sukamon generators
+on the floor become eligible. Native entrance positions, camera, tutorial text,
+flag `300` and the `GENE-08` Blossomon boss remain intact.
+
+The Sukamon regression covers seeds `1520` and `2162128323`, every difficulty
+and all five supported releases. It checks the exact Lua constant rename,
+exclusive intro assignment, unchanged spawn configuration and native boss
+scripts. With seed `1520`, the introduction becomes MR03 on every release;
+seed `2162128323` selects Ogremon. Unused candidate models are still removed,
+and selected families retain their shared-capacity and resource-ownership checks.
+
+For the fully enabled seed-1520 GameCube build, imported stage/family pairs
+increase from 172 (rules 12) to 219, with no approximate or undrawn effects.
+The PS2 build imports 220 pairs. These totals count repeated use of a family in
+different stages, not distinct enemy types. Individual stages can use fewer
+than four imports when compatibility, the format's object limit or seeded
+selection leaves fewer used candidates. Authored entrances, kill-count quest
+restrictions and unsupported boss dependencies remain protected.
+
+The rules-13 USA PS2 and GameCube images cold-booted native-card fixtures on
+Hard with seed `1520`, Crown Mod, four-player spawns and random crown colours.
+Both ran at 100% speed with one joined player. The MR03 replacement completed
+Sukamon's introduction, set flag `300` and restored player control. The native
+camera and original Sukamon information card remained. Mangrove's first-visit
+and boss branches loaded; both randomized waves and ShogunGekomon were defeated,
+completion flag `371` was set, and movement worked afterward. Each platform
+then completed three further Geko–Mangrove round trips.
+
+Additional rules-13 loads and movement checks covered Power Plant, Mummy Desert
+and Ancient Ruins on both platforms, plus Abyss of Grief and Cliff Dungeon
+B1/B2 on PS2. These were stage/transition checks, not complete dungeon runs.
+Testing used healing, positioning and enemy HP reduction followed by ordinary
+attacks; PS2 also used increased defence. Native memory cards were unchanged.
+The guest logs contained no invalid reads/writes, and saved allocator checks
+passed for ownership, circularity and overlap. Final main-source builds were
+byte-identical to the live-tested images (GameCube MD5
+`afb71b16fcf8477e0738d5622c55010a`, PS2 MD5
+`6effb53b5471eb3ec1ea37e34a09dc46`).
+
+One GameCube diagnostic initially reported a four-byte foreign block after a
+return trip. The pointer was the native allocator's empty-top sentinel at
+`core + 72`, not a free block. Native instruction inspection confirmed this
+representation; correcting the private checker made the captured RAM and later
+samples pass. A negative control still rejected an actual foreign free block.
+No game change was needed for that diagnostic. A PS2 Mummy Desert movement
+probe also initially hit a spawn obstruction; movement in the opposite direction
+passed. The small repeated-load drift documented below remains unresolved.
+These results do not establish physical-console or four-joined-player coverage.
+
+Rules 12 randomizes Mangrove's two pre-boss waves (`GENE-139`, then
+`GENE-131`). The opening `mate00.lua` wait and the timeout cleanup in
+`tim_g_orbz03.lua` follow the final selected models, including native fallback
+if reward slots are unavailable. Generator completion callbacks, spawn points,
+counts, refill modes and drops stay authored. The same families are used on all
+three difficulties, with the existing combat/crown matching and original EXP.
+Wave replacements may also serve patrols, preserving the stage's choice pool;
+only the Tortamon intro keeps its existing exclusive replacement. The five
+ShogunGekomon variants and eight scene NPCs remain native.
+
+Retail-data regressions cover seeds `1520` and `1278675365` on all five
+supported releases and all difficulties. They verify wave choices, exact script
+renames, unchanged wave configuration and callbacks, native boss variants and
+other stage scripts. At rules 12, seed `1278675365` covered both waves choosing
+the same replacement family; seed `1520` covered a replacement using the other
+wave's native family, checking simultaneous name replacement without chained
+renames. With rules 13 and four imports, seed `1520` assigns both waves Ogremon;
+seed `1278675365` assigns MR03 and MR04 respectively. The current regional tests
+check these updated choices and exact script renames across all difficulties.
+
+USA PS2 and GameCube live tests with seed `1520`, Hard, Crown Mod, four-player
+spawns and random crown colours completed both randomized waves, spawned and
+defeated ShogunGekomon, set completion flag `371`, and restored movement. Both
+emulators were explicitly set to 100% speed for these checks. One player was
+joined; test assistance healed the player, reduced enemy HP before normal
+attacks, and repositioned the player. Checkpoints came from native-card cold
+boots of the corresponding rebuilt images; no memory-card changes were saved.
+Final free-list ownership/overlap checks passed without logged memory faults.
+
+The first PS2 attempt inherited an unlimited/3x profile and was superseded by
+normal-speed tests. A later attempt waited outside the native boss activation
+radius after clearing the waves, then timed out. Replaying the post-wave
+checkpoint and entering the boss's 115-unit radius spawned it and completed the
+encounter without further flag edits. The boss trigger remains authored. The
+relevant pre-fight flags matched across platforms (`64=1`, `361=1`,
+`371..373=0`); differing story flag `902` controls nearby NPC dialogue rather
+than the boss-wave progression/completion scripts.
+
+Rules 11 enables Mangrove's Tortamon introduction (`GENE-165`) to randomize.
+The `first.lua` model-name constant changes with the selected enemy, so both
+its appearance wait and its removal target the replacement. That model is
+reserved from randomized patrols so intro cleanup cannot remove them. The
+native camera, flags, information window and control restoration stay intact;
+the separate Tortamon preload is retained. At rules 11, `GENE-131/139` and
+`GENE-s01..s05` stayed protected; rules 12 enables the two waves. Retail-data regressions cover seeds `1520`
+and `1278675365`, all three difficulties and all five supported releases,
+checking the exact script rename, exclusive intro assignment, and unchanged
+boss groups and other scripts.
+
+USA GameCube and PS2 cold-boot tests also replayed the introduction with seed
+`1520`, Hard, Crown Mod, four-player spawns and random crown colours, with one
+joined player. Test-only RAM flags enabled the first-visit branch; native cards
+were unchanged. Both completed the randomized Ogremon introduction and restored
+movement, with clean allocator free lists and no logged guest memory faults.
+The PS2's initial capture caught the stage still loading; allowing the load to
+finish passed the check. The full boss fight was not replayed in this test.
+
+Mangrove's boss sequence uses authored stage generators: `mate00.lua` starts
+the Otamamon wave (`GENE-139`); its completion callback `gene139.lua` starts
+the Gekomon wave (`GENE-131`); `gene131.lua` then selects one of the five
+ShogunGekomon generators (`GENE-s01..s05`) and attaches the boss HP meter.
+The eight `n_gekoa` surrounding the arena are separately scripted NPCs.
+This differs from Pharaohmon's `cal_e_pharaoh.lua`, which directly generates
+Mummymon from its model callback at the summoner's position. Mangrove's end
+scripts addressed the native wave families until rules 12 added explicit
+retargeting. ShogunGekomon's boss variants remain protected independently of
+allocator fixes.
 
 Rules 10 preserves the backing blocks of imported Lua script registries and the
 initial crown instance, animation, scene-child and visibility lists. The IGB
@@ -88,10 +208,11 @@ state. See [the particle regression](particle-effects.md). Existing images need
 rebuilding; the extra render resources can affect donor fit at the object limit.
 
 Rules 7 also narrows Mangrove Forest's cutscene guard. Its `mate00.lua` wait and
-`tim_g_orbz03.lua` cleanup address Otamamon/Gekomon boss adds whose generators
-are already pinned (`GENE-131`, `GENE-139`, `GENE-s01..s05`). Those groups and
+`tim_g_orbz03.lua` cleanup address the Otamamon/Gekomon waves; their generators
+and the boss variants are already pinned (`GENE-131`, `GENE-139`, `GENE-s01..s05`). Those groups and
 their native model pools remain intact; unrelated patrols can now randomize.
-Tortamon's separate introduction and authored spawn sequences remain protected.
+At rules 7, Tortamon's separate introduction also remained protected; rules 11
+adds script retargeting for it. Authored spawn sequences remain protected.
 The seed `1278675365` regression changes 480 ordinary rows across the three
 difficulties on each of the five releases, preserves 12 protected groups and
 checks every original stage script byte-for-byte. It reproduces the original
@@ -349,3 +470,105 @@ comparison of the reported seed's old and corrected images found identical AREA
 data, all 243 generator packs, 7,640 Lua bytecodes, 98 Lua registry lookup orders
 and model-pool counts in all 164 model packs. The correction changes resource
 ownership without changing the seed's encounters or rewards.
+
+## GameCube Mangrove allocator regression (rules 10)
+
+Seed `1520`, Crown Mod, four-player spawn counts, random enemies and random
+crown colours reproduced a first-load Mangrove failure on Hard in both
+v0.13.1 and v0.13.2. The tests cold-booted their respective USA images and
+loaded a native character save. GekoGeko Land loading successfully did not
+establish that Mangrove Forest would load.
+
+The native string-reference list requested an 8,192-byte replacement buffer
+while growing from 1,024 to 2,048 references. That allocation returned null.
+The resize caller nevertheless freed the original buffer and recorded the
+larger capacity, so later appends overwrote freed heap metadata. At the
+recorded failure, the stage arena had 10,344 free bytes in total but its largest
+free block was only 5,192 bytes. The allocator's subsequent invalid access was
+a consequence of the failed resize, rather than evidence that a different
+previous stage was required to trigger the problem.
+
+The runtime hooks redirect individual IGB object allocations from the stage
+arena into the existing general arena while tracked general usage is below
+4 MiB on GameCube or 3 MiB on PS2. Serialized data and explicitly selected
+custom pools retain their existing allocation policy. These are soft object
+allocation thresholds: later buffer growth and temporary allocations need
+additional headroom.
+
+Existing buffers require an independent ownership check. A serialized list
+object can move to the general arena while its backing buffer remains in the
+stage arena. Some native list helpers pass the object's pool when resizing or
+freeing that buffer. Without correction, a stage block can enter the general
+arena's free lists, even before an emulator logs an invalid access. Both hooks
+therefore retain the verified native owner of existing stage/general buffers
+before the arena operation changes their bookkeeping. New allocations retain
+the requested pool; other allocator implementations retain native behaviour.
+
+The PS2 implementation reserves 1 KiB after the original BSS end using an
+additional ELF load segment. It advances the kernel heap setup, engine memory
+start/layout references and libc's initialized break pointer beyond that
+reservation. The original BSS-clearing boundary is preserved. The code occupies
+verified unused padding in the boot file's final ISO sector, without relocating
+another file. GameCube uses verified unused executable padding.
+
+These changes preserve randomizer rules 10, imported families, generator choices
+and resource archives. AREA and NDMW are byte-identical to their respective
+pre-hook seed-1520 builds on both platforms. The GameCube seed-1520 plan remains
+`fa32b8d9f637ac2c`, with 2,018 generator decisions, 172 copied models and three
+donors per stage. Those initial memory-hook checks used rules 10. Rules 11 and
+12 separately retarget Tortamon's introduction and Mangrove's two enemy waves;
+allocation routing itself does not change script dependencies or enemy choices.
+
+The PS2 USA prototype cold-booted a native save on Hard with seed `1520`, Crown
+Mod, random enemies, random crown colours, four-player spawn counts and one
+joined player. It completed ten Geko–Mangrove boat round trips, retained working
+movement and logged no guest memory faults. The final patcher-generated PS2
+image repeated the cold boot and three further round trips. At every saved
+arrival, both arenas' free lists were circular, their blocks belonged to the
+correct backing ranges and no free blocks overlapped. Stage-arena peak usage
+was approximately 9.28 MiB during the ten-round prototype run, versus 9.83 MiB
+in the earlier unpatched three-round run, out of a 10 MiB arena. These counters
+are not total physical RAM. The smaller repeated-load drift remains unresolved.
+
+The PS2 fixture finished its opening dialogue and enabled gate-access progression
+flags in test RAM. Player positions were adjusted to native transition triggers.
+Its native memory card was unchanged, and no prior-build savestate was loaded.
+
+The final GameCube USA image cold-booted its native save on Hard with the same
+seed-1520 options, loaded Geko and Mangrove, and completed five boat round trips
+with working movement, zero invalid reads/writes and clean ownership/overlap
+checks at every saved arrival. Its stage-arena peak reached approximately
+7.96 MiB out of 8.96 MiB. Earlier allocation-only results are superseded: zero
+logged invalid accesses alone did not establish correct free-list ownership.
+
+A second PS2 USA candidate used the original seed `2162128323`, Normal
+difficulty, Crown Mod off, random enemies and four-player spawn counts. It
+cold-booted and completed three direct Geko–Mangrove boat round trips with
+working movement, no logged guest memory faults and clean free-list checks.
+This second run did not replay the earlier Humid Cave/Cliff Dungeon/Fortress
+completion history. Difficulty was verified from the saved runtime integer on
+both PS2 cases.
+
+The emitted-instruction tests exercise native arguments, EE register width,
+stack/return preservation, pool eligibility, soft thresholds and existing-buffer
+ownership in both directions. The optional retail checks validate executable
+fingerprints and code reservations on PS2 USA/Europe/Japan and GameCube
+USA/Japan, and reject changed code or occupied padding:
+
+```sh
+cargo test -p dw4vhp-core --lib _memory::tests -- --nocapture
+```
+
+Additional rules-12 checks used seed `1520`, Hard, Crown Mod, four-player
+spawns and random crown colours, with one joined player and both emulators at
+100% speed. Eighteen stage/transition checks passed: PS2 covered Humid Cave B1/B2,
+hub returns, Mummy Desert, Ancient Ruins and Power Plant; GameCube additionally
+covered Abyss of Grief and Cliff Dungeon B1/B2/B3. Loads and movement worked,
+free-list ownership/circularity/non-overlap checks passed, and no guest memory
+faults were logged. These were load/transition checks, not complete dungeon
+combat runs. The small residual growth reported above remains unresolved.
+
+Set the corresponding `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`,
+`DW4_RETAIL_JAPAN_ISO`, `DW4_RETAIL_GC_USA_ISO` and
+`DW4_RETAIL_GC_JAPAN_ISO` variables for real-disc checks. Other regional gameplay,
+other seeds, longer stage histories and physical hardware are not covered by these runs.
