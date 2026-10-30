@@ -14,7 +14,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 15;
+pub const RULES_VERSION: u32 = 16;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -774,12 +774,17 @@ impl Randomiser {
             let options = pool
                 .iter()
                 .filter(|(m, ram, r)| {
-                    *ram >= g.most
+                    (*ram >= g.most || m == "e_pharaoh")
                         && r.contains(&rarity)
                         && !skip.contains(m)
-                        && required
-                            .get(&g.name)
-                            .is_none_or(|needed| needed.is_subset(&entrances[m]))
+                        && required.get(&g.name).is_none_or(|needed| {
+                            needed.iter().all(|sequence| {
+                                entrances[m].contains(sequence)
+                                    || (m == "e_pharaoh"
+                                        && matches!(sequence.as_str(), "SQ_SWON" | "SQ_NENTR")
+                                        && entrances[m].contains("SQ_ENTR"))
+                            })
+                        })
                 })
                 .map(|(m, _, _)| m.clone())
                 .collect::<Vec<_>>();
@@ -879,6 +884,41 @@ impl Randomiser {
                     .collect::<Vec<_>>()
             ));
         }
+        // A stage made entirely of Pharaohmon has no non-recursive summon
+        // family. Retain one compatible ordinary patrol in that case.
+        if allowed.is_none() && choice.values().any(|m| m == "e_pharaoh") {
+            let companion = |m: &str| {
+                m != "e_pharaoh"
+                    && REGULAR.contains(&m)
+                    && !reserved.contains(m)
+                    && !stage.pinned_families.contains(m)
+                    && entrances.get(m).is_some_and(|s| {
+                        s.contains("SQ_NENTR") || s.contains("SQ_ENTR") || s.contains("SQ_SWON")
+                    })
+            };
+            if !first.iter().any(|g| {
+                choice
+                    .get(&g.name)
+                    .map(String::as_str)
+                    .or_else(|| family(g.row))
+                    .is_some_and(companion)
+            }) {
+                if let Some(g) = first.iter().find(|g| {
+                    choice.get(&g.name).is_some_and(|m| m == "e_pharaoh")
+                        && family(g.row).is_some_and(companion)
+                        && !sites.iter().any(|(name, _)| *name == g.name)
+                        && !family_remap
+                            .is_some_and(|r| family(g.row).is_some_and(|m| r.models.contains(&m)))
+                }) {
+                    choice.remove(&g.name);
+                } else {
+                    // There is no safe stage-local summon source for imports.
+                    // Native Pharaohmon can retain its authored summon callback.
+                    choice.retain(|_, m| m != "e_pharaoh");
+                    names.retain(|_, m| m != "e_pharaoh");
+                }
+            }
+        }
         let tiers = stage
             .gens
             .iter()
@@ -942,6 +982,9 @@ impl Randomiser {
                     // branch instead of seeking donor-stage healing positions.
                     if model == "e_minotaru" {
                         plan.sequences.insert(name, "SQ_NENTR".into());
+                    } else if model == "e_pharaoh" {
+                        // NENTR omits the native CHECK label setup and disables summons.
+                        plan.sequences.insert(name, "SQ_ENTR".into());
                     }
                 }
             } else {
@@ -958,18 +1001,11 @@ impl Randomiser {
                 }
             }
         }
-        if !rewards.rows.is_empty() {
-            self.log.push(format!(
-                "stage {entry}: {} original-spawn EXP variants",
-                rewards.rows.len()
-            ));
-            self.rewards.insert(entry, rewards);
-        }
         // A model pool belongs to the stage, not to an individual generator.
         // Sum the largest authored party count for every user of that model,
         // including pinned/unchanged generators, and take the maximum over the
         // difficulty packs (only one difficulty is loaded at a time).
-        let mut tiers = Vec::new();
+        let mut capacity_tiers = Vec::new();
         for &pack in &stage.gens {
             let mut tier = Vec::new();
             for g in generators(&Pack::parse(data(pack)?)?)? {
@@ -982,9 +1018,9 @@ impl Randomiser {
                     tier.push((from, to, g.most));
                 }
             }
-            tiers.push(tier);
+            capacity_tiers.push(tier);
         }
-        let demand = shared_capacity(tiers, &stage.residents);
+        let demand = shared_capacity(capacity_tiers, &stage.residents);
         // Candidate imports make selection independent of how many generators
         // eventually use each family. Rebuild without unused candidates: even
         // unreachable objects are allocated by the game's IGB loader.
@@ -1032,6 +1068,99 @@ impl Randomiser {
                     "stage {entry}: {model} shared slots {old} -> {needed}"
                 ));
             }
+        }
+        // Summons use the final selected families, not speculative imports.
+        // Keep counter-aware quests and scripted exclusive families authored.
+        if allowed.is_none()
+            && !stage.pinned_families.contains("e_pharaoh")
+            && demand.get("e_pharaoh").copied().unwrap_or(0) > 0
+        {
+            let mut summons = Vec::new();
+            for model in demand.keys().map(String::as_str) {
+                if model == "e_pharaoh"
+                    || !REGULAR.contains(&model)
+                    || reserved.contains(model)
+                    || stage.pinned_families.contains(model)
+                    || !entrances.get(model).is_some_and(|s| {
+                        s.contains("SQ_NENTR") || s.contains("SQ_ENTR") || s.contains("SQ_SWON")
+                    })
+                {
+                    continue;
+                }
+                let mut attempt = rewards.clone();
+                let mut rows = Vec::new();
+                for original in [116, 120, 124] {
+                    if let Some(combat) = nearest_row(&self.table, original, model) {
+                        if let Some(row) = attempt.assign(combat as usize, original as usize) {
+                            rows.push(row);
+                        }
+                    }
+                }
+                if rows.len() != 3 {
+                    // Crowded stages can consume every local variant row on
+                    // their generators. Reuse a selected encounter per tier
+                    // rather than failing the build or using unbalanced donors.
+                    rows = tiers
+                        .iter()
+                        .filter_map(|(pack, gs)| {
+                            gs.iter().find_map(|g| {
+                                let combat =
+                                    self.plans[pack].rows.get(&g.name).copied().unwrap_or(g.row);
+                                if family(combat) != Some(model) {
+                                    return None;
+                                }
+                                Some(
+                                    rewards
+                                        .targets
+                                        .get(pack)
+                                        .and_then(|targets| targets.get(&g.name))
+                                        .copied()
+                                        .unwrap_or(combat)
+                                        as usize,
+                                )
+                            })
+                        })
+                        .collect();
+                    if rows.len() != 3 {
+                        continue;
+                    }
+                    self.log.push(format!(
+                        "stage {entry}: {model} summons reuse selected encounter rows {rows:?}"
+                    ));
+                } else {
+                    rewards = attempt;
+                }
+                let base = super::capacity::slots(&Pack::parse(&dst)?, model)?.max(demand[model]);
+                dst = super::capacity::expand(&dst, model, base + super::pharaoh::LIMIT)?;
+                summons.push(super::pharaoh::Target {
+                    model: model.to_string(),
+                    entrance: if entrances[model].contains("SQ_NENTR") {
+                        "SQ_NENTR"
+                    } else if entrances[model].contains("SQ_ENTR") {
+                        "SQ_ENTR"
+                    } else {
+                        "SQ_SWON"
+                    }
+                    .into(),
+                    base,
+                    rows: rows.try_into().unwrap(),
+                });
+            }
+            need(
+                !summons.is_empty(),
+                &format!("stage {entry}: no compatible Pharaohmon summons"),
+            )?;
+            dst = super::pharaoh::rewrite(&dst, &summons, entry)?;
+            self.log.push(format!(
+                "stage {entry}: Pharaohmon rolls each summon from {summons:?}"
+            ));
+        }
+        if !rewards.rows.is_empty() {
+            self.log.push(format!(
+                "stage {entry}: {} original-spawn EXP variants",
+                rewards.rows.len()
+            ));
+            self.rewards.insert(entry, rewards);
         }
         if assigned.contains(super::height::MODEL)
             && !stage.residents.contains_key(super::height::MODEL)
@@ -1169,3 +1298,6 @@ mod probe;
 #[cfg(test)]
 #[path = "random/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod pharaoh_tests;

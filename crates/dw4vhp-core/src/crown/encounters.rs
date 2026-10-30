@@ -23,10 +23,10 @@ pub(crate) const REGULAR: &[&str] = &[
     "e_impdra",
     "e_mecha4",
     "e_mecha5",
+    "e_pharaoh",
 ];
-/// Enemies a generator may be moved off, though they are never copied elsewhere: Pharaohmon
-/// summons Mummymon from its own script, and Tortamon loads from a separate file.
-pub(crate) const REPLACEABLE: &[&str] = &["e_pharaoh", "e_torta"];
+/// Tortamon loads from a separate file and is never copied elsewhere.
+pub(crate) const REPLACEABLE: &[&str] = &["e_torta"];
 /// Custom encounter and tutorial packs never supply models to other stages.
 pub(crate) const FORBIDDEN_SOURCES: &[usize] = &[449, 457, 464, 603, 607, 786];
 /// The developer world (603) and the final bosses: left as shipped.

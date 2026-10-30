@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.15.1
+
+- Pharaohmon can now appear in randomized stages and summon enemies from that stage’s selected enemy pool.
+- Consecutive summons choose different enemy types when multiple compatible types are available.
+
 ## v0.15.0
 
 - Fixed a GameCube crash that could happen when travelling to another area after fighting Apokarimon.

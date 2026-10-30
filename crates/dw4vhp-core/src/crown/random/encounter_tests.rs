@@ -422,9 +422,14 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     let target = r.plans[&pack].rows.get(&g.name).copied();
                     let changed_family = target.is_some_and(|row| family(row) != family(g.row));
                     if portable_entrance(&g) && changed_family {
+                        let expected = if target.and_then(family) == Some("e_pharaoh") {
+                            "SQ_ENTR"
+                        } else {
+                            &g.entrance
+                        };
                         assert!(model_sequences(&result, target.and_then(family).unwrap())
                             .unwrap()
-                            .contains(&g.entrance));
+                            .contains(expected));
                         let seq = after.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
                         let text = &after.b[seq.start + 4..seq.end];
                         if target.and_then(family) == Some("e_minotaru") {
@@ -432,7 +437,7 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                         } else {
                             assert_eq!(
                                 text.split(|b| *b == 0).next().unwrap(),
-                                g.entrance.as_bytes()
+                                expected.as_bytes()
                             );
                         }
                         entrances += 1;

@@ -535,6 +535,7 @@ impl<'p, 'a> Builder<'p, 'a> {
             .filter(|&&d| d as usize == idx)
             .count()
             > 1
+            || self.mapping.contains(&(idx as u16))
         {
             // Equal-sized blocks can share one directory descriptor. Give only the grown
             // block a private descriptor; its ID and the owning object's reference stay fixed.
@@ -547,6 +548,15 @@ impl<'p, 'a> Builder<'p, 'a> {
             self.directory_count += 1;
             self.dirs.extend(bytes);
         } else {
+            // Copies made later must not reuse the original descriptor using
+            // its old size after this descriptor has been patched in place.
+            if let Some(dirs) = &mut self.reusable_dirs {
+                let original = &self.p.b[dir.range.clone()];
+                if dirs.get(original).copied() == Some(idx as u16) {
+                    dirs.remove(original);
+                }
+                dirs.entry(bytes.clone()).or_insert(idx as u16);
+            }
             self.edits.push(Edit {
                 range: dir.range.clone(),
                 bytes,

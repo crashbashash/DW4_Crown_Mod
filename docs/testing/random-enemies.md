@@ -18,8 +18,86 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 15. The same seed is reproducible within
+The current randomizer uses rules version 16. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 16 adds Pharaohmon to the import pool. Its native `cal_e_pharaoh.lua`
+control flow stays in place: each `gen` call fills one of twelve logical summon
+slots. A fresh runtime `SYSgetRandom` roll chooses among compatible families
+actually selected for that stage, excluding the previous summon family when
+there is another choice. Build seeds determine the stage pool; gameplay RNG
+and timing determine the individual summons.
+
+Each eligible family has twelve reserved actors above its ordinary generator
+capacity; live checks follow the family/actor recorded for each logical summon.
+All Pharaohmon in the stage share the twelve-summon limit, as in retail.
+Summons inherit Mummymon's original summon encounters (rows 116/120/124), using
+the existing local-variant balance writer so selected Crown Mod settings apply
+once. When a crowded stage has no free variant rows, summons instead reuse
+that family’s selected encounter row for each difficulty. The original second
+GENERATE parameter, summoner position and rotation
+remain intact. Families use an available normal `SQ_NENTR`, `SQ_ENTR` or
+`SQ_SWON` entrance. Pharaohmon itself uses its native `SQ_ENTR` when replacing
+an ordinary activation; its authored attack/fall entrances remain protected.
+
+Intro and family-cleanup replacements stay exclusive and cannot be summoned.
+Pharaohmon cannot summon itself, bosses or unselected imports. Counter-aware
+quests and stages controlling Pharaohmon by name keep their native callbacks.
+Mummymon's hit and magic-request callbacks translate only the new summon actor
+indices back to logical indices 0..11; ordinary actors and later physical actor
+lookups keep their original indices. A stage change resets the summon tracking.
+
+The opt-in `retail_pharaoh_summons_follow_selected_families` regression exports
+scripts and pool/row metadata when `DW4_PHARAOH_AUDIT_DIR` is set. Run
+`tools/verify-pharaoh.lua` in a Lua 4.0.1 runtime after setting
+`pharaoh_audit_dir` to an exported stage directory. This checks per-summon rolls,
+no consecutive repeats, the twelve-enemy limit, partial refills, positions,
+difficulty rows and Mummymon's request/reset coordination. The focused disc
+regression passed for Abyss of Grief and dungeon pack 249 on all five releases.
+Their ten exported callback sets passed the Lua 4.0.1 runtime checks across all
+three difficulties, including Mummymon's hit/healing coordination and stage
+tracking reset. A full PS2 USA image with seed 67 and four donor families was
+written and verified. Core checks (bindings, generated rules, formatting,
+Clippy and workspace tests) passed.
+
+GameCube USA live validation then exposed a missing behavioral initialization:
+Pharaohmon's `SQ_NENTR` branch allows ordinary combat but omits the native
+`CHECK` label setup needed for summoning. Imported/replaced Pharaohmon now
+starts through `SQ_ENTR`; regression checks enforce that entrance on every
+difficulty. A diagnostic RAM change first established the cause. The final
+validation cold-booted a newly rebuilt disc and loaded the dungeon afresh,
+without that RAM change or any forced summon command/RNG.
+
+The focused live image randomizes only `dng205b1` (pack 249), seed 1520, with
+one import candidate prioritized to Pharaohmon. Crown Mod and four-player
+spawn overrides are off. A copied native level-316 character entered Hard mode;
+only the hub portal destination, player position and player health were edited
+for setup. `GENE-02` loaded `SQ_ENTR` from the new image. Pharaohmon naturally
+summoned Minotaurmon in reserved slot 15 and then Mummymon in reserved slot 17
+(row 120, HP 896). Mummymon remained alive and moved over the next four seconds;
+the player still had 99,754 HP. Evidence and native states are in the outer
+workspace's `outputs/pharaoh-live/`, particularly `fresh-live-result.json`,
+`fixed-summon-confirmed.sav` and the final encounter captures. Dolphin was left
+paused at the encounter.
+
+Release validation reproduced a broad GameCube seed-1520 build failure at pack
+335 (`memory block outside pool`). Growing a memory block could resize a
+previously unique directory descriptor which newly copied blocks also reused.
+The builder now gives the grown block a private descriptor when copies share
+it, and invalidates stale descriptor-cache entries before later copies.
+A synthetic regression reproduces the failure and checks copies both before
+and after growth. The same build then exposed exhausted variant space at pack
+709; summons now reuse selected encounter rows when additional variants do not
+fit. The five-release regression also repeats that stage with no spare variant
+rows and verifies the fallback.
+
+The final v0.15.1 GameCube USA build with seed 1520 and forced Pharaohmon/Otamamon
+import priority writes and verifies all 2,288,283,648 bytes (MD5
+`148b3eaae402e9a0cfc00c292aea3951`). The build log is in the outer workspace's
+`outputs/pharaoh-release/full-build-verified.log`. The complete engine,
+frontend and desktop checks pass. Wider gameplay, Crown Mod scaling of
+scripted GENERATE parameters, and live resource pressure in other stages
+remain to be checked.
 
 Rules 15 relaxes reviewed non-boss protections:
 

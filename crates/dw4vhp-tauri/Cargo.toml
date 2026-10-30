@@ -1,6 +1,6 @@
 [package]
 name = "dw4vhp-tauri"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Desktop shell for the Digimon World 4 Crown Mod ISO patcher"

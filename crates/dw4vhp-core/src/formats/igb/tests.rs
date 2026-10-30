@@ -33,6 +33,36 @@ fn growing_one_block_keeps_other_owners_and_ids_intact() {
 }
 
 #[test]
+fn growing_a_block_does_not_resize_copies_reusing_its_descriptor() {
+    let bytes = fixtures::object_graph();
+    let p = Pack::parse(&bytes).unwrap();
+    let mut prep = Builder::new(&p);
+    prep.grow_mem(0, words(&[2])).unwrap();
+    let bytes = materialize(&bytes, &prep.finish(0).unwrap()).unwrap();
+    let p = Pack::parse(&bytes).unwrap();
+    assert_eq!(p.mapping.iter().filter(|&&d| d == p.mapping[0]).count(), 1);
+    let payload = bytes[p.memory[0].clone().unwrap()].to_vec();
+    for copy_first in [true, false] {
+        let mut builder = Builder::new(&p).reuse_directories();
+        let copy = if copy_first {
+            Some(builder.mem(payload.clone(), 0).unwrap())
+        } else {
+            None
+        };
+        builder.grow_mem(0, words(&[NULL])).unwrap();
+        let copy = copy.unwrap_or_else(|| builder.mem(payload.clone(), 0).unwrap());
+        let out = materialize(&bytes, &builder.finish(0).unwrap()).unwrap();
+        let q = Pack::parse(&out).unwrap();
+        assert_eq!(q.memory[0].as_ref().unwrap().len(), payload.len() + 4);
+        assert_eq!(&out[q.memory[copy as usize].clone().unwrap()], &payload);
+        assert_eq!(
+            out[q.memory[3].clone().unwrap()],
+            bytes[p.memory[3].clone().unwrap()]
+        );
+    }
+}
+
+#[test]
 fn rewriting_a_registry_keeps_its_backing_id_and_shared_descriptor_peer() {
     let bytes = fixtures::object_graph();
     let p = Pack::parse(&bytes).unwrap();

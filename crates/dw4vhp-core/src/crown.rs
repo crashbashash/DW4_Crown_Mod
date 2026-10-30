@@ -16,6 +16,7 @@ pub mod graft;
 mod height;
 mod lua_names;
 mod model;
+mod pharaoh;
 mod practice;
 mod random;
 mod rewards;
