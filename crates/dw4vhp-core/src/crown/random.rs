@@ -1,10 +1,11 @@
 //! Experimental enemy randomiser. For every stage it copies a few extra enemy models into the
 //! stage's model pack, then points each regular generator at one of the models the stage now
-//! carries. The new enemy row is the one in the chosen model's family whose HP and attack are
-//! nearest the original's, so a stage keeps its difficulty. Bosses, generators that stage
+//! carries. Local rows inherit the original encounter's combat stats and rewards, with
+//! bounded elemental differences from the selected family. Bosses, generators that stage
 //! scripts wait on by name, and kill-count stages are left as shipped; cutscenes that wait on
 //! an intro enemy by name get their name constants renamed to the model now spawned.
-//! Authored spawn sequences keep their original enemies; imported models carry their audio.
+//! Model-specific entrances stay native; normal activations and reviewed script groups
+//! follow replacements. Imported models carry their audio.
 use super::graft::{self, Retarget, INTRO_STAGES};
 use super::lua_names;
 use super::*;
@@ -13,7 +14,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 13;
+pub const RULES_VERSION: u32 = 15;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -33,7 +34,7 @@ pub struct Options {
 
 pub(super) use super::encounters::REGULAR;
 use super::encounters::{
-    BOSS_REGULAR, FORBIDDEN_SOURCES, PROTECTIONS, REPLACEABLE, RESTRICTED, SKIPPED,
+    BOSS_REGULAR, FAMILY_REMAPS, FORBIDDEN_SOURCES, PROTECTIONS, REPLACEABLE, RESTRICTED, SKIPPED,
 };
 
 pub(super) fn family(row: u32) -> Option<&'static str> {
@@ -47,7 +48,8 @@ fn replaceable(model: &str) -> bool {
     REGULAR.contains(&model) || REPLACEABLE.contains(&model)
 }
 
-/// Match combat strength independently of EXP, which comes from the original spawn.
+/// Select a donor model row of matching rarity. Local variants inherit the
+/// original spawn's strength; this row supplies the model and elemental flavour.
 pub(super) fn nearest_row(table: &EnemyTable, row: u32, model: &str) -> Option<u32> {
     let group = ROW_GROUPS.iter().find(|g| g.model == model)?;
     let row = row as usize;
@@ -105,10 +107,36 @@ struct Gen {
     name: String,
     row: u32,
     seq: bool,
+    entrance: String,
     start: String,
     pos: [f32; 3],
     /// Most instances the generator keeps alive at once, over the player counts.
     most: u32,
+}
+
+/// Normal entrances can move only to models implementing the same named sequence.
+/// Geometry-specific waits, falls and jumps remain native.
+fn portable_entrance(g: &Gen) -> bool {
+    matches!(g.entrance.as_str(), "SQ_NENTR" | "SQ_SWON")
+}
+
+fn protected_entrance(g: &Gen) -> bool {
+    g.seq && !portable_entrance(g)
+}
+
+fn model_sequences(p: &Pack, model: &str) -> Result<BTreeSet<String>> {
+    let info = p.named("beModelCtrlInfo", model)?;
+    let mut sequences = BTreeSet::new();
+    for data in p.array(p.val(info, 5)?)? {
+        if p.class(data, "beModelCtrlInfoDataSeq").is_ok() {
+            for sequence in p.array(p.val(data, 4)?)? {
+                if let Some(name) = graft::name_of(p, p.rec(sequence)?) {
+                    sequences.insert(String::from_utf8_lossy(name).into_owned());
+                }
+            }
+        }
+    }
+    Ok(sequences)
 }
 
 /// Each tier lists (original family, selected family, maximum live count).
@@ -188,6 +216,13 @@ fn scripted_models(p: &Pack, entry: usize) -> Result<BTreeSet<&'static str>> {
                 {
                     continue;
                 }
+                if FAMILY_REMAPS.iter().any(|rule| {
+                    rule.entry == entry
+                        && rule.scripts.contains(&name)
+                        && rule.models.contains(&model)
+                }) {
+                    continue;
+                }
                 protected.insert(model);
             }
         }
@@ -205,8 +240,11 @@ fn generators(p: &Pack) -> Result<Vec<Gen>> {
         }
         let name = graft::name_of(p, r).map(|n| String::from_utf8_lossy(n).into_owned());
         let Some(name) = name else { continue };
-        let seq = r.field(graft::GENERATOR_SEQ)?;
-        let seq = seq.len() > 4 && p.b.get(seq.start + 4).is_some_and(|c| *c != 0);
+        let sequence = r.field(graft::GENERATOR_SEQ)?;
+        let entrance = String::from_utf8_lossy(&p.b[sequence.start + 4..sequence.end])
+            .trim_end_matches('\0')
+            .to_string();
+        let seq = !entrance.is_empty();
         let mut most = 0;
         for pd in p.array(p.val(id as u32, GENERATOR_PLAYERS)?)? {
             most = most.max(p.val(pd, PLAYER_MAX)?);
@@ -226,6 +264,7 @@ fn generators(p: &Pack) -> Result<Vec<Gen>> {
             name,
             row: p.val(id as u32, graft::GENERATOR_ROW)?,
             seq,
+            entrance,
             most,
         });
     }
@@ -394,13 +433,13 @@ impl Randomiser {
                 .flat_map(|rule| rule.generators.iter().map(|n| n.to_string()))
                 .collect();
             let first = generators(&Pack::parse(data(gens[0]).unwrap())?)?;
-            // Authored entrances (cannon waits, train falls, jumps) belong to the original
+            // Model-specific entrances (cannon waits, train falls, jumps) belong to the original
             // model's animation and movement controller. Keep those spawns intact.
             for &pack in &gens {
                 pinned.extend(
                     generators(&Pack::parse(data(pack).unwrap())?)?
                         .into_iter()
-                        .filter(|g| g.seq)
+                        .filter(protected_entrance)
                         .map(|g| g.name),
                 );
             }
@@ -704,16 +743,44 @@ impl Randomiser {
             return Ok(dst);
         }
 
+        let model_pack = Pack::parse(&dst)?;
+        let entrances = pool
+            .iter()
+            .map(|(model, _, _)| Ok((model.clone(), model_sequences(&model_pack, model)?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let mut required: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for &pack in &stage.gens {
+            for g in generators(&Pack::parse(data(pack)?)?)? {
+                if portable_entrance(&g) {
+                    required.entry(g.name).or_default().insert(g.entrance);
+                }
+            }
+        }
+
         // The first tier decides which generators change and what they become.
         let mut choice: BTreeMap<String, String> = BTreeMap::new();
-        let mut reserved: BTreeSet<String> = BTreeSet::new();
+        let family_remap = FAMILY_REMAPS.iter().find(|rule| rule.entry == entry);
+        // A retained native family must also remain exclusive to its scripted
+        // group. Otherwise an intro/patrol could be erased by the group's cleanup.
+        let mut reserved: BTreeSet<String> = family_remap
+            .into_iter()
+            .flat_map(|rule| rule.models.iter().map(|m| m.to_string()))
+            .collect();
+        let mut groups = Vec::new();
         let mut names: BTreeMap<String, String> = BTreeMap::new();
         let eligible = |g: &Gen, pool: &[(String, u32, BTreeSet<u8>)], skip: &BTreeSet<String>| {
             let rarity = self.table.rarity[g.row as usize];
             let own = family(g.row);
             let options = pool
                 .iter()
-                .filter(|(m, ram, r)| *ram >= g.most && r.contains(&rarity) && !skip.contains(m))
+                .filter(|(m, ram, r)| {
+                    *ram >= g.most
+                        && r.contains(&rarity)
+                        && !skip.contains(m)
+                        && required
+                            .get(&g.name)
+                            .is_none_or(|needed| needed.is_subset(&entrances[m]))
+                })
                 .map(|(m, _, _)| m.clone())
                 .collect::<Vec<_>>();
             // A generator always changes model when anything else will do.
@@ -741,6 +808,39 @@ impl Randomiser {
             choice.insert(gen.to_string(), pick.clone());
             names.insert(orig.to_string(), pick);
         }
+        if let Some(rule) = family_remap {
+            for &original in rule.models {
+                let members: Vec<_> = first
+                    .iter()
+                    .filter(|g| family(g.row) == Some(original))
+                    .collect();
+                if members.is_empty()
+                    || stage.pinned_families.contains(original)
+                    || members.iter().any(|g| stage.pinned.contains(&g.name))
+                {
+                    continue;
+                }
+                let options: Vec<_> = eligible(members[0], &pool, &reserved)
+                    .into_iter()
+                    .filter(|model| {
+                        members
+                            .iter()
+                            .all(|g| eligible(g, &pool, &reserved).contains(model))
+                    })
+                    .collect();
+                if options.is_empty() {
+                    continue;
+                }
+                let pick = options[(rng.next() % options.len() as u64) as usize].clone();
+                reserved.insert(pick.clone());
+                let mut group = Vec::new();
+                for g in members {
+                    choice.insert(g.name.clone(), pick.clone());
+                    group.push(g.name.clone());
+                }
+                groups.push(group);
+            }
+        }
         let mut why: BTreeMap<String, usize> = BTreeMap::new();
         for g in &first {
             if choice.contains_key(&g.name) || stage.pinned.contains(&g.name) {
@@ -751,7 +851,10 @@ impl Randomiser {
                 *why.entry("not an enemy row".into()).or_default() += 1;
                 continue;
             };
-            if !usable(fam) || stage.pinned_families.contains(fam) {
+            if !usable(fam)
+                || stage.pinned_families.contains(fam)
+                || family_remap.is_some_and(|rule| rule.models.contains(&fam))
+            {
                 *why.entry(format!("family {fam} unusable or pinned"))
                     .or_default() += 1;
                 continue;
@@ -794,52 +897,65 @@ impl Randomiser {
         for (pack, _) in &tiers {
             self.plans.insert(*pack, Retarget::default());
         }
-        // Commit a generator across all difficulty packs together. In the rare
-        // event that local slots run out, retain its original enemy and reward.
-        for name in choice.keys().cloned().collect::<Vec<_>>() {
-            let model = &choice[&name];
+        // Scripted family groups commit atomically across every generator and
+        // difficulty. If local slots run out, the entire group remains native.
+        let grouped: BTreeSet<_> = groups.iter().flatten().cloned().collect();
+        groups.extend(
+            choice
+                .keys()
+                .filter(|name| !grouped.contains(*name))
+                .map(|name| vec![name.clone()]),
+        );
+        for group in groups {
             let mut attempt = rewards.clone();
             let mut selected = Vec::new();
             let mut fits = true;
-            for (pack, gs) in &tiers {
-                let Some(g) = gs.iter().find(|g| g.name == name) else {
-                    continue;
-                };
-                let Some(combat) = nearest_row(&self.table, g.row, model) else {
-                    continue;
-                };
-                let Some(target) = attempt.assign(combat as usize, g.row as usize) else {
-                    fits = false;
-                    break;
-                };
-                attempt
-                    .targets
-                    .entry(*pack)
-                    .or_default()
-                    .insert(name.clone(), target as u32);
-                selected.push((*pack, combat));
+            'members: for name in &group {
+                let model = &choice[name];
+                for (pack, gs) in &tiers {
+                    let Some(g) = gs.iter().find(|g| g.name == *name) else {
+                        continue;
+                    };
+                    let Some(combat) = nearest_row(&self.table, g.row, model) else {
+                        fits = false;
+                        break 'members;
+                    };
+                    let Some(target) = attempt.assign(combat as usize, g.row as usize) else {
+                        fits = false;
+                        break 'members;
+                    };
+                    attempt
+                        .targets
+                        .entry(*pack)
+                        .or_default()
+                        .insert(name.clone(), target as u32);
+                    selected.push((*pack, name.clone(), combat));
+                }
             }
             if fits {
                 rewards = attempt;
-                for (pack, combat) in selected {
+                for (pack, name, combat) in selected {
+                    let model = &choice[&name];
                     let plan = self.plans.get_mut(&pack).unwrap();
                     plan.rows.insert(name.clone(), combat);
                     // Native SQ_NENTR keeps SQ_SWON on the normal combat
                     // branch instead of seeking donor-stage healing positions.
                     if model == "e_minotaru" {
-                        plan.sequences.insert(name.clone(), "SQ_NENTR".into());
+                        plan.sequences.insert(name, "SQ_NENTR".into());
                     }
                 }
             } else {
-                choice.remove(&name);
-                for &(gen, original) in &sites {
-                    if gen == name {
-                        names.remove(original);
+                for name in group {
+                    choice.remove(&name);
+                    for &(gen, original) in &sites {
+                        if gen == name {
+                            names.remove(original);
+                        }
                     }
+                    self.log.push(format!(
+                        "stage {entry}: retain {name}; local variants unavailable"
+                    ));
                 }
-                self.log.push(format!(
-                    "stage {entry}: retain {name}; local reward variants full"
-                ));
             }
         }
         if !rewards.rows.is_empty() {
@@ -952,6 +1068,28 @@ impl Randomiser {
                 let more = lua_names::rename_in_pack(&dst, &[intro.script.to_string()], &names)?;
                 dst = materialize(&dst, &more)?;
             }
+        }
+        if let Some(rule) = family_remap {
+            let names = rule
+                .models
+                .iter()
+                .map(|&original| {
+                    let replacement = first
+                        .iter()
+                        .find(|g| family(g.row) == Some(original))
+                        .and_then(|g| choice.get(&g.name))
+                        .cloned()
+                        .unwrap_or_else(|| original.to_string());
+                    (original.to_string(), replacement)
+                })
+                .collect();
+            let scripts = rule
+                .scripts
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>();
+            let edits = lua_names::rename_in_pack(&dst, &scripts, &names)?;
+            dst = materialize(&dst, &edits)?;
         }
         if entry == 686 {
             // Do this after reward-slot fallback has finalized the choices, so

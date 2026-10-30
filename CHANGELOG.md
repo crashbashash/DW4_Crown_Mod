@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.15.0
+
+- Fixed a GameCube crash that could happen when travelling to another area after fighting Apokarimon.
+- Randomized enemies now match the strength and EXP rewards of the enemies they replace. This prevents late-game enemies from becoming unfairly powerful in earlier areas.
+- More scripted encounters can now be randomized, including the Minotaurmon and Raremon introductions, Numenume River and Dry Land ruins.
+- More enemies with special entrances can now change, while keeping entrances that need a specific enemy working correctly.
+- Added enemy randomization to the practice stage while keeping the lessons, progression and practice settings working as before.
+
 ## v0.14.0
 
 - Improve PS2 and GameCube memory handling to prevent the reproduced randomized-stage loading crashes, including Mangrove Forest.

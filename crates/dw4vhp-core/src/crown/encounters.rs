@@ -27,10 +27,10 @@ pub(crate) const REGULAR: &[&str] = &[
 /// Enemies a generator may be moved off, though they are never copied elsewhere: Pharaohmon
 /// summons Mummymon from its own script, and Tortamon loads from a separate file.
 pub(crate) const REPLACEABLE: &[&str] = &["e_pharaoh", "e_torta"];
-/// Stage packs whose enemy scripts are not the generic ones, so models are never copied from them.
+/// Custom encounter and tutorial packs never supply models to other stages.
 pub(crate) const FORBIDDEN_SOURCES: &[usize] = &[449, 457, 464, 603, 607, 786];
-/// The developer world (603), the practice stage (607) and the final bosses: left as shipped.
-pub(crate) const SKIPPED: &[usize] = &[603, 607, 730, 737, 744, 751, 758, 765, 786];
+/// The developer world (603) and the final bosses: left as shipped.
+pub(crate) const SKIPPED: &[usize] = &[603, 730, 737, 744, 751, 758, 765, 786];
 /// A fixed generator protection, with the stage identity and rationale kept
 /// alongside the policy that the randomizer actually consumes.
 #[derive(Debug)]
@@ -45,12 +45,12 @@ pub struct EncounterProtection {
 pub(crate) const PROTECTIONS: &[EncounterProtection] = &[
     EncounterProtection { pack_entry: 187, name: "Humid Cave B2", stage: "dng101b2", generators: &["GENE-08"], reason: "Preserve the native Blossomon boss. Sukamon's introduction retargets its wait and freeze/unfreeze commands to the replacement, allowing the intro and ordinary patrols to randomize." },
     EncounterProtection { pack_entry: 210, name: "Cliff Dungeon B3", stage: "dng102b3", generators: &["GENE-12"], reason: "Preserve the native Mammothmon encounter generator." },
-    EncounterProtection { pack_entry: 241, name: "Dungeon dng204b2", stage: "dng204b2", generators: &["GENE-13", "INTRO-01"], reason: "Preserve the native encounter and introduction generators used by stage scripts." },
+    EncounterProtection { pack_entry: 241, name: "Dungeon dng204b2", stage: "dng204b2", generators: &["GENE-13"], reason: "Preserve the native SkullGreymon boss. The Minotaurmon tutorial introduction retargets its wait and control commands." },
     EncounterProtection { pack_entry: 265, name: "Dungeon dng205b3", stage: "dng205b3", generators: &["GENE-15"], reason: "Preserve the native scripted encounter; stage scripts also address several resident families." },
     EncounterProtection { pack_entry: 296, name: "Dungeon dng307b2", stage: "dng307b2", generators: &["GENE-11"], reason: "Preserve the native encounter generator." },
     EncounterProtection { pack_entry: 319, name: "Dungeon dng308b3", stage: "dng308b3", generators: &["GENE-19"], reason: "MR04 is the native boss on this floor; preserve its scripted encounter." },
     EncounterProtection { pack_entry: 349, name: "Dungeon dng309b4", stage: "dng309b4", generators: &["GENE-24"], reason: "Preserve the native scripted encounter generator." },
-    EncounterProtection { pack_entry: 394, name: "Dungeon dng411b3", stage: "dng411b3", generators: &["GENE-23", "INTRO-01"], reason: "MR05 is the native boss on this floor; preserve its encounter and introduction." },
+    EncounterProtection { pack_entry: 394, name: "Dungeon dng411b3", stage: "dng411b3", generators: &["GENE-23"], reason: "Preserve the native MR05 boss. The Raremon tutorial introduction retargets its wait and control commands." },
     EncounterProtection { pack_entry: 425, name: "Dungeon dng412b4", stage: "dng412b4", generators: &["GENE-21", "GENE-20"], reason: "Preserve the native scripted encounter and associated generator." },
     EncounterProtection { pack_entry: 441, name: "Quest 1, stage 2", stage: "dngq1b2e", generators: &["GENE-06"], reason: "Preserve the native quest encounter generator." },
     EncounterProtection { pack_entry: 510, name: "Quest 4, stage 2 (Normal)", stage: "dngq4b2e", generators: &["GENE-11"], reason: "Preserve the native quest encounter generator." },
@@ -88,6 +88,34 @@ pub(crate) const RESTRICTED: &[(usize, &[&str])] = &[
 
 /// Models that are a stage's boss though they are ordinary enemies elsewhere.
 pub(crate) const BOSS_REGULAR: &[(usize, &str)] = &[(319, "e_mecha4"), (394, "e_mecha5")];
+
+/// Reviewed stage commands which only erase/freeze these families. All spawns
+/// of each family must share one replacement so the commands retain their scope.
+pub(crate) struct FamilyRemap {
+    pub entry: usize,
+    pub models: &'static [&'static str],
+    pub scripts: &'static [&'static str],
+}
+
+pub(crate) const FAMILY_REMAPS: &[FamilyRemap] = &[
+    FamilyRemap {
+        entry: 628,
+        models: &["e_nume"],
+        scripts: &[
+            "matb03.lua",
+            "matb06.lua",
+            "matb08.lua",
+            "matb09.lua",
+            "matb12.lua",
+            "matf00.lua",
+        ],
+    },
+    FamilyRemap {
+        entry: 649,
+        models: &["e_mummy", "e_tyrano"],
+        scripts: &["mata00.lua", "mata01.lua"],
+    },
+];
 
 #[cfg(test)]
 mod tests {

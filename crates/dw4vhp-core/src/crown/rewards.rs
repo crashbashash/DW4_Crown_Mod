@@ -1,17 +1,39 @@
-//! Per-spawn rewards without global changes to a replacement enemy's EXP.
+//! Per-spawn balance without global changes to the replacement enemy's native rows.
 //! Each localized AREA pack owns its enemy database. Its unfilled rows can
-//! represent a combat variant with the original spawn's reward independently.
+//! carry the replacement model with the original encounter's stats and rewards.
 use super::*;
-use crate::{
-    region::WriteRegion,
-    table::{EnemyTable, EXP_COLUMN},
-};
+use crate::{region::WriteRegion, table::EnemyTable};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Variant {
+    /// Supplies the model and bounded elemental resistance differences only.
     pub combat: usize,
+    /// Original encounter: supplies all other stats, including speed and EXP.
     pub reward: usize,
+}
+
+impl Variant {
+    /// Both callers supply final table bytes: authored for the archive-only
+    /// writer, transformed once for the application. Never multiply here.
+    fn write(self, index: usize, base: &[u8], row: usize, bytes: &mut [u8]) {
+        let stride = [4, 24, 3][index];
+        bytes[row * stride..(row + 1) * stride]
+            .copy_from_slice(&base[self.reward * stride..(self.reward + 1) * stride]);
+        if index == 1 {
+            // Fire, ice, thunder and dark only. Stun and poison stay native.
+            for column in 5..9 {
+                let read = |source| {
+                    let at = source * 24 + column * 2;
+                    i16::from_le_bytes(base[at..at + 2].try_into().unwrap()) as i32
+                };
+                let original = read(self.reward);
+                let resistance = read(self.combat).clamp(original - 100, original + 100) as i16;
+                let at = row * 24 + column * 2;
+                bytes[at..at + 2].copy_from_slice(&resistance.to_le_bytes());
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -248,7 +270,7 @@ impl Plan {
     }
 
     /// The experimental archive-only writer has no stat transform. Give its
-    /// generators equivalent unscaled variants from each original local block.
+    /// generators balanced variants from each original local block.
     pub(super) fn unscaled(&self, iso: &[u8]) -> Result<Vec<WriteRegion>> {
         let mut regions = Vec::new();
         if self.blocks.is_empty() {
@@ -263,21 +285,15 @@ impl Plan {
                 .ok_or_else(|| bad("local reward block outside image"))?;
             let mut bytes = base.to_vec();
             for (&row, variant) in &block.rows {
-                bytes[row * stride..(row + 1) * stride]
-                    .copy_from_slice(&base[variant.combat * stride..(variant.combat + 1) * stride]);
-                if block.index == 1 {
-                    let to = row * 24 + EXP_COLUMN * 2;
-                    let from = variant.reward * 24 + EXP_COLUMN * 2;
-                    bytes[to..to + 2].copy_from_slice(&base[from..from + 2]);
-                }
+                variant.write(block.index, base, row, &mut bytes);
             }
             regions.push(WriteRegion { offset, bytes });
         }
         Ok(regions)
     }
 
-    /// Merge variants into full-block writes. Read both combat and EXP from
-    /// the final transformed table, so multipliers, exclusions and caps apply
+    /// Merge variants into full-block writes. Read encounter stats and donor
+    /// resistances from the final table, so multipliers, exclusions and caps apply
     /// exactly once, in the same way as the unrandomized original encounter.
     pub(crate) fn apply(
         &self,
@@ -285,7 +301,6 @@ impl Plan {
         table: &EnemyTable,
     ) -> Result<Vec<WriteRegion>> {
         let base = table.blocks();
-        let strides = [4, 24, 3];
         let mut seen = BTreeSet::new();
         let mut changed = Vec::new();
         for region in regions {
@@ -297,7 +312,6 @@ impl Plan {
                 region.bytes == base[block.index],
                 "reward write differs from computed table",
             )?;
-            let stride = strides[block.index];
             for (&row, variant) in &block.rows {
                 need(
                     row < table.len()
@@ -305,14 +319,7 @@ impl Plan {
                         && variant.reward < table.len(),
                     "invalid reward table row",
                 )?;
-                region.bytes[row * stride..(row + 1) * stride].copy_from_slice(
-                    &base[block.index][variant.combat * stride..(variant.combat + 1) * stride],
-                );
-                if block.index == 1 {
-                    let at = row * 24 + EXP_COLUMN * 2;
-                    region.bytes[at..at + 2]
-                        .copy_from_slice(&table.stat[variant.reward][EXP_COLUMN].to_le_bytes());
-                }
+                variant.write(block.index, &base[block.index], row, &mut region.bytes);
             }
             if region.bytes != base[block.index] {
                 changed.push(region.clone());
@@ -329,6 +336,7 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::table::EXP_COLUMN;
 
     #[test]
     fn same_combat_variant_can_preserve_two_different_original_rewards() {
@@ -371,9 +379,10 @@ mod tests {
         assert_eq!(plan.apply(&mut regions, &table).unwrap().len(), 3);
         assert_eq!(regions[3], unrelated);
         for clone in [2, 3] {
+            let original = if clone == 2 { 1 } else { 4 };
             assert_eq!(
                 &regions[0].bytes[clone * 4..clone * 4 + 4],
-                &100i32.to_le_bytes()
+                &table.hp[original].to_le_bytes()
             );
             assert_eq!(
                 &regions[1].bytes[clone * 24..clone * 24 + 22],
@@ -386,6 +395,72 @@ mod tests {
             );
         }
         assert!(plan.apply(&mut [], &table).is_err());
+    }
+
+    #[test]
+    fn original_encounter_controls_combat_with_only_bounded_elemental_differences() {
+        let table = EnemyTable {
+            hp: vec![805, 58, 0],
+            stat: vec![
+                [
+                    4461,
+                    144,
+                    3122,
+                    227,
+                    492,
+                    650,
+                    0,
+                    320,
+                    i16::MAX,
+                    22,
+                    400,
+                    404,
+                ],
+                [
+                    18,
+                    90,
+                    13,
+                    74,
+                    108,
+                    450,
+                    250,
+                    300,
+                    i16::MAX - 20,
+                    10,
+                    150,
+                    18,
+                ],
+                [0; 12],
+            ],
+            crit: vec![18, 4, 0],
+            para: vec![18, 4, 0],
+            rarity: vec![0, 0, 0],
+        };
+        let variant = Variant {
+            combat: 0,
+            reward: 1,
+        };
+        let base = table.blocks();
+        let mut blocks = base.clone();
+        for (index, bytes) in blocks.iter_mut().enumerate() {
+            variant.write(index, &base[index], 2, bytes);
+        }
+        assert_eq!(&blocks[0][8..12], &58i32.to_le_bytes());
+        let stats: Vec<_> = blocks[1][48..72]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect();
+        assert_eq!(
+            stats,
+            [18, 90, 13, 74, 108, 550, 150, 320, i16::MAX, 10, 150, 18]
+        );
+        assert_eq!(&blocks[2][6..9], &[4, 4, 0]);
+        // Native rows remain untouched, including the much stronger donor.
+        for (index, stride) in [4, 24, 3].into_iter().enumerate() {
+            assert_eq!(&blocks[index][..2 * stride], &base[index][..2 * stride]);
+        }
     }
 
     #[test]

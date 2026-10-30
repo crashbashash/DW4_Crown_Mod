@@ -27,7 +27,7 @@ Patching a clean disc leaves your original file unchanged.
 
 - **Optional Crown Mod.** Boost enemy health, combat stats and EXP, with crowns for every enemy. Its EXP popups display up to 99,999.
 
-- **Optional random enemies.** Randomize ordinary encounters while matching combat strength and preserving each original spawn’s EXP. Works with the original balance or Crown Mod.
+- **Optional random enemies.** Randomize ordinary encounters while preserving each original spawn’s combat stats and EXP, with elemental resistance differences limited to ±100 points. Works with the original balance or Crown Mod.
 
 - **Optional random crown colours.** Every enemy and boss gets a cosmetic crown
   in a random colour. Works with or without Crown Mod. This changes the icon only; combat stats and drops

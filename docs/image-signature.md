@@ -49,7 +49,7 @@ given); the object holds what the build did:
 | `modelsCopied` | Enemy models copied from one stage pack into another. |
 | `approximateEffects` | Bullets and effects hung in the nearest matching node of a differently shaped effect tree. |
 | `undrawnEffects` | Bullets and effects that could not be hung at all (expected 0). |
-| `rewardVariants` | Area-local combat/reward variants preserving each original spawn’s EXP. |
+| `rewardVariants` | Area-local replacement variants preserving each original spawn’s combat stats and EXP, with bounded elemental resistance differences. |
 | `planDigest` | First 8 bytes of a SHA-1 over every decision, hex. Equal seed, rules version and mod version give equal digests. |
 
 All five releases support the randomiser. The three PS2 discs share game data and therefore a plan

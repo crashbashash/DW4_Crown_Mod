@@ -1,20 +1,88 @@
 # Random enemies
 
-The randomizer swaps ordinary generators between enemy families while matching
-HP, attack and crown rarity. Imported models also carry their resident sound
+The randomizer swaps ordinary generators between enemy families while preserving
+the original encounter’s combat stats, speed, status rates/resistances and rewards.
+Fire, ice, thunder and dark resistances follow the replacement within ±100 points
+of the original encounter after selected Crown Mod settings. Imported models also carry their resident sound
 selectors, embedded banks and action bindings. Sound filename indices are local
 to each stage and are remapped when a bank is added. Shared banks are resolved
 from the model's actual action bindings rather than guessed from its model name.
 
-Generators with an authored spawn sequence keep their original enemy and sequence
-on every difficulty. These include the cannon Numemon in Goblin Pass (`SQ_WAIT`)
+Generators with a model-specific spawn sequence keep their original enemy and
+sequence on every difficulty. Normal `SQ_NENTR` and `SQ_SWON` overrides may
+randomize only when the replacement implements that same named sequence on
+every difficulty. The override is preserved; Minotaurmon uses its reviewed
+`SQ_NENTR` bypass. These include the cannon Numemon in Goblin Pass (`SQ_WAIT`)
 and MR01 falling onto the train (`SQ_FALL`). Their entrance motion belongs to the
 original model's animation/controller; clearing the sequence or assigning another
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 13. The same seed is reproducible within
+The current randomizer uses rules version 15. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 15 relaxes reviewed non-boss protections:
+
+- Normal entrance/activation overrides may randomize only to models implementing
+  the same named sequence on every difficulty; cannon waits, train falls,
+  jumps, Pharaohmon attack entrances and Otamamon’s special entrance stay native.
+- The Minotaurmon (`dng204b2`) and Raremon (`dng411b3`) tutorial introductions
+  retarget their named waits, control commands and cleanup. Intro replacement
+  families are reserved from ordinary patrols. SkullGreymon and MR05 remain native.
+- Numenume River’s six erase/freeze scripts follow one exclusive replacement for
+  all Numemon generators. Dry Land ruins’ two erase scripts follow separate,
+  exclusive replacements for its Mummymon and Tyrannomon groups. All generators
+  and difficulty tiers in a family commit together; insufficient local table
+  slots retain the entire native group and its original script targets.
+- Boss protections and the unsupported Anomalocarimon/Pharaohmon summon logic
+  remain intact. Kill-count quest model restrictions are unchanged.
+
+The policy audit on both USA platforms changes the count of protected enemy
+spawn points from 450 to 173 (difficulty copies excluded). This makes 277 more
+spawn points eligible; it does not guarantee that every seed changes each one.
+The two-platform retail regression verifies the reviewed script bytes differ
+only by their model-name constants, normal activation overrides use the expected
+entrance, other generator fields stay intact, and native bosses/custom entrances
+remain protected. The broader dependency audit passes on both USA platforms.
+
+GameCube USA live checks on seed 67, Hard, Crown Mod off: a fresh boot using a
+copied native level-316 save loaded the new image. Test-only hub portal destination
+changes accessed the stages; loaded stage data came from that image, not an older
+savestate. Minotaurmon and Raremon tutorial flags 301/303 changed from 0 to 1,
+their introduction dialogs completed, and controller movement resumed afterward.
+Numenume River ran through Otamamon waves, the bomb/freeze sequence set flag 489,
+and the native transition returned to Abyss of Grief. Electro Mine B2 loaded and
+allowed movement with the newly eligible activation generators. Both ruins
+cleanup triggers (`mata00`/`mata01`) ran and started GENE-61/GENE-63 with the
+replacement rows. The first activation trial exposed a hang when default entrance
+fallback sent an SQ_NENTR encounter to MR02 (which lacks SQ_NENTR); the candidate
+was tightened to require the same named sequence. A freshly booted rebuilt image
+(MD5 `148aa992e93ed4b0e852f7175a92bcef`) passed the exact live trigger again:
+Electro Mine B2 GENE-08 spawned Minotaurmon and GENE-10 spawned Raremon, with live
+actors moving in subsequent frames. The original failed trial and its native
+state are retained as evidence; it is not a passing validation case. Captures and
+native runtime snapshots are under `outputs/scripted-spawn-relaxation/` in the
+outer workspace. The public-build boss-death crash report is being investigated
+separately against unmodified v0.14.0 source. Three initial controlled public-build runs
+(two Normal boss phases and one Hard route through preceding Death Valley areas)
+passed, but the player-supplied state reproduced the crash after both boss death
+and boss victory. See the allocator regression below.
+
+Rules 14 replaces nearest-variant combat stats with original-encounter stats.
+The donor row still supplies the model and bounded elemental resistances; its
+native HP, attack, wisdom, defence, spirit, speed and status values cannot leak
+into the replacement. Both archive-only and application writers use the same
+balance function. Application writes read the final transformed original row,
+so Crown Mod scaling, exclusions and caps apply once.
+
+The opt-in `seed_67_abyss_inherits_encounter_stats_with_and_without_crowns`
+regression passed on PS2 USA and GameCube USA retail images. On each platform it
+checked 54 area-local variants across Abyss of Grief’s difficulty packs, with
+Crown Mod off and on, and confirmed archive/application agreement with Crown Mod
+off. On PS2 it also confirmed the reported MR04 donor rows (57, 58, 62 and 65).
+Synthetic checks cover elemental bounds in both directions, unchanged native
+rows, and signed-short limits. These are disc-data checks; damage per hit,
+overlapping attacks and dodge opportunities still need gameplay validation.
 
 Rules 13 raises the per-stage import ceiling from three to four families and
 supports Humid Cave B2's Sukamon introduction (`GENE-01`). Its `first.lua`
@@ -572,3 +640,101 @@ Set the corresponding `DW4_RETAIL_USA_ISO`, `DW4_RETAIL_EUROPE_ISO`,
 `DW4_RETAIL_JAPAN_ISO`, `DW4_RETAIL_GC_USA_ISO` and
 `DW4_RETAIL_GC_JAPAN_ISO` variables for real-disc checks. Other regional gameplay,
 other seeds, longer stage histories and physical hardware are not covered by these runs.
+
+
+## GameCube fragmented-buffer allocation after Apokarimon
+
+The player-supplied Hard-mode `GDJEB2.s02` (SHA-256
+`2fb4fd5d4fab303d32819f6a700b29e4001b8c89a2a0fa4ede991b655911146f`)
+starts in Doom Dome F2 before the boss portal, with public v0.14.0 seed 67,
+random enemies and cosmetic crown colours, and no Crown Mod stat boost.
+The original input is preserved in the outer workspace’s
+`outputs/seed67-public-crash/player-input/`.
+
+From that state, both native boss death and native boss victory, followed by
+hub → Death Valley, reproduce a null read at PC `0x80042a28`. The loader’s
+object-reference list has 65,605 entries and capacity 66,560, requiring a
+260 KiB contiguous buffer. At the captured death-route fault, the general
+arena has 2,747,756 free bytes in total but its largest block is only 138,288
+bytes; the list’s buffer pointer is null. The scene arena still has a
+1,353,064-byte free block, and both arenas’ free-list ownership and overlap
+checks pass. This is allocation failure under fragmentation, rather than an
+observed corrupted free list.
+
+The allocation hook now retries **fresh** positive-size general/scene buffer
+allocations in the other arena after native allocation failure. It validates
+the alternate arena and allocator class, preserves the requested size/alignment,
+and returns the native failure if neither arena can allocate. Existing buffers
+never migrate on resize/free: the ownership hook first resolves their actual
+arena. Zero-size, native `-1` free, custom-pool and existing-pointer operations
+keep their native allocation behavior.
+
+Instruction-level regressions exercise success, fallback in both directions,
+both-arena failure, absent/incompatible alternate arenas, free/zero-size calls,
+existing pointers, and stack/return-address/callee-saved-register preservation.
+Retail patch sites and unused code space pass checks on GameCube USA and Japan.
+The core gate passes. A built public-rules control plus allocator fix retains an
+identical NDMW.AFS offset, size and SHA-256 to the unfixed control, isolating this
+change from the stat and scripted-encounter work.
+
+Both captured fragmented hub states (death and victory) load Death Valley with
+the fix, allow movement, and log no invalid accesses with healthy free-list checks.
+The death-route replay additionally passes a Humid Cave → Death Valley unload/reload
+cycle, exercising cleanup of the fallback-allocated buffers. Native test states
+and detailed results are in `outputs/seed67-public-crash/` outside the repository.
+Boss victory was accelerated with pillar/boss HP edits followed by normal attacks,
+retaining native victory callbacks and the return gate. Death was accelerated
+by lowering player HP before a normal boss hit. No story flags were changed for
+the supplied-state reproduction or fixed replay. Old savestates contain the old
+executable patch; testing a new disc through an old state therefore also requires
+applying the new code to a separate state copy.
+
+## Practice-stage eligibility (v0.15.0, rules 15)
+
+The practice model pack (607, `stag0001`) is now a destination for ordinary
+seeded enemy replacements. It remains forbidden as a donor. Generator packs
+608–610 each contain 14 enemy generators (`GENE-a00`–`a06`, `GENE-b00`–`b06`)
+and four box generators. Enemy families are Goburimon, Ogremon, Numemon and
+Kokatorimon. Special technique/charge damage handlers belong to lesson rocks
+and boxes; the enemies use normal combat hit scripts. Progression is attached
+to generator callbacks rather than hard-coded enemy family names.
+
+`practice_randomisation_preserves_lessons_and_party_branches` was run against
+clean USA PS2 and GameCube discs with seed 67, normal and four-player spawns.
+For each release/option pair, all 42 enemy generator records across three
+difficulties changed, while box rows, counts, positions, callback references,
+drops and all original Lua payloads remained intact. The four-player check
+compares against the already-transformed graduation script, retaining its
+party-size threshold edits. Real practice-local stat/model databases resolve;
+variant writes preserve the original practice row's HP, non-elemental stats,
+status rates, rarity and EXP after each configuration's single transform.
+The matrix covers Crown Mod off, Crown Mod on with practice excluded, and
+practice buffs/speed enabled. Elemental differences use the shared ±100 bound.
+
+Rules version 15 covers this eligibility addition together with the other
+v0.15.0 changes. Other stage seeds use
+stage-local RNGs; practice models remain outside the donor pool.
+
+Live GameCube USA validation cold-booted a fully rebuilt seed-67 image with
+random enemies, Crown Mod off and normal party counts. In an isolated Dolphin
+profile, a copied save and a temporary hub-portal target entered `stag0001`;
+practice entry flag 503 was reset for the test. Teleports shortened travel
+between targets. Native controller attacks defeated the three lesson targets:
+MR01 at 20 HP, MR01 at 25 HP, and Goburimon at 30 HP. Each advanced the original
+lesson callback. A charged attack on the original box set flag 514 and started
+the native graduation wave: one MR01 at 30 HP and two Ogremon at 20 HP each.
+After native kills, the exit offered **Go to Death Valley? / Practice again?**,
+confirming that the graduation clear reached the native completion condition.
+Confirming the exit loaded Death Valley (`stag0101`) successfully, with player
+movement verified afterwards. Rocks and teaching scripts were not modified. This is an accelerated progression
+check, not a complete manual lesson walkthrough. PS2 gameplay, other seeds and
+multiplayer gameplay were not exercised by this live run; the disc audit above
+covers the PS2 data and four-player option composition.
+
+Private evidence: `outputs/practice-randomization/` in the outer workspace;
+`retail-check.log`, `core-check.log`, native checkpoints, screenshots and
+`live-result.json`. The verified temporary image was 2,271,340,544 bytes,
+MD5 `3d5b4a587cfd0f183845a241656d4d90`. The isolated emulator was stopped
+after validation; the temporary image, redundant decoded RAM dumps and copied
+test-card data were removed (about 2.80 GB reclaimed). Original player inputs
+and the separate public crash-fix playtest image were retained.

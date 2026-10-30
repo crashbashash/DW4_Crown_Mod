@@ -247,7 +247,7 @@ fn mangrove_randomises_intro_and_boss_waves_with_matching_scripts() {
                             );
                         }
                     }
-                    if stage.pinned.contains(&g.name) || g.seq {
+                    if stage.pinned.contains(&g.name) || protected_entrance(&g) {
                         assert_eq!(g.row, new, "{variable}: scripted group {}", g.name);
                         let a = source.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
                         let b = result.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
@@ -711,6 +711,133 @@ fn sukamon_intro_retargets_wait_and_control_on_every_release() {
                 }
             }
             eprintln!("SUKAMON {variable}, seed {seed}, donors {DONORS}: intro -> {replacement}; all difficulties and boss scripts preserved");
+        }
+    }
+}
+
+#[test]
+fn seed_67_abyss_inherits_encounter_stats_with_and_without_crowns() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let (base, size) = if variable == "DW4_RETAIL_USA_ISO" {
+            let file = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (file.lba as usize * 2048, file.size as usize)
+        } else {
+            let file = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (file.offset as usize, file.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let (offset, len) = entries[621];
+        let data = &afs[offset..offset + len];
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let table = EnemyTable::read(&iso, &layout).unwrap();
+        let mut random = Randomiser::scan(
+            afs,
+            &entries,
+            table.clone(),
+            Options {
+                seed: 67,
+                donors: DONORS,
+                warp: None,
+                only: Some(vec![621]),
+            },
+        )
+        .unwrap();
+        let expanded = materialize(data, &expand(data).unwrap()).unwrap();
+        random.stage(621, expanded, afs, &entries).unwrap();
+        let variants = &random.rewards[&621].rows;
+        if variable == "DW4_RETAIL_USA_ISO" {
+            let mecha: BTreeSet<_> = variants
+                .values()
+                .filter(|v| family(v.combat as u32) == Some("e_mecha4"))
+                .map(|v| v.combat)
+                .collect();
+            assert_eq!(mecha, BTreeSet::from([57, 58, 62, 65]));
+        }
+        let plan = random.reward_plan(&iso).unwrap();
+        let unscaled = plan.unscaled(&iso).unwrap();
+        assert!(!unscaled.is_empty());
+        for crown_mod in [false, true] {
+            let settings = crate::plan::PatchPlan {
+                crown_mod,
+                ..Default::default()
+            };
+            let (expected, _) = crate::plan::transform(
+                &table,
+                &settings,
+                &crate::ratio::RatioVector::derive(&table),
+            );
+            let blocks = expected.blocks();
+            let mut regions: Vec<_> = unscaled
+                .iter()
+                .map(|region| {
+                    let index = blocks
+                        .iter()
+                        .position(|b| b.len() == region.bytes.len())
+                        .unwrap();
+                    crate::region::WriteRegion {
+                        offset: region.offset,
+                        bytes: blocks[index].clone(),
+                    }
+                })
+                .collect();
+            plan.apply(&mut regions, &expected).unwrap();
+            if !crown_mod {
+                assert_eq!(
+                    regions, unscaled,
+                    "archive and application writers must agree"
+                );
+            }
+            for region in &regions {
+                let index = blocks
+                    .iter()
+                    .position(|b| b.len() == region.bytes.len())
+                    .unwrap();
+                let stride = [4, 24, 3][index];
+                for (&row, variant) in variants {
+                    if index == 1 {
+                        let stats: Vec<_> = region.bytes[row * 24..(row + 1) * 24]
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|b| i16::from_le_bytes(*b))
+                            .collect();
+                        assert_eq!(&stats[..5], &expected.stat[variant.reward][..5]);
+                        assert_eq!(&stats[9..], &expected.stat[variant.reward][9..]);
+                        for (column, value) in stats.iter().enumerate().take(9).skip(5) {
+                            assert!(
+                                (i32::from(*value)
+                                    - i32::from(expected.stat[variant.reward][column]))
+                                .abs()
+                                    <= 100
+                            );
+                        }
+                    } else {
+                        assert_eq!(
+                            &region.bytes[row * stride..(row + 1) * stride],
+                            &blocks[index][variant.reward * stride..(variant.reward + 1) * stride]
+                        );
+                    }
+                }
+            }
+            eprintln!(
+                "PASS {variable} seed 67: {} balanced variants, crown stats {crown_mod}",
+                variants.len()
+            );
         }
     }
 }

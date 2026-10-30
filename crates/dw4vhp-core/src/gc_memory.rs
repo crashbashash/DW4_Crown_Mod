@@ -16,6 +16,8 @@ use md5::{Digest, Md5};
 
 const CODE: u32 = 0x8000_4b00;
 const OWNER_CODE: u32 = 0x8000_4c00;
+const ALLOCATION_CODE: u32 = 0x8000_4d00;
+const ORIGINAL_CODE: u32 = 0x8000_4e00;
 const GENERAL_OBJECT_LIMIT: u32 = 4 * 1024 * 1024;
 
 fn bad() -> Error {
@@ -58,7 +60,7 @@ fn branch(from: u32, to: u32) -> u32 {
     0x4800_0000 | (to.wrapping_sub(from) & 0x03ff_fffc)
 }
 
-fn owner_stub(operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
+fn owner_stub(_operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
     let mut w = Vec::new();
     let mut labels = std::collections::BTreeMap::new();
     let mut fixups = Vec::new();
@@ -136,11 +138,108 @@ fn owner_stub(operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
     emit!(0x8001004c);
     emit!(0x7c0803a6);
     emit!(0x38210050);
-    // Replay the displaced native stack allocation. Its untouched MFLR and
-    // register-save prologue then observe the original caller's return address.
+    // Ownership is resolved before the fresh-allocation fallback. Tail call it
+    // with the original caller's stack and return address intact.
+    mark!("original");
+    emit!(branch(OWNER_CODE + w.len() as u32 * 4, ALLOCATION_CODE));
+    for (index, op, label) in fixups {
+        let offset = (labels[label] as isize - index as isize) * 4;
+        w[index] = op
+            | if op == 0x48000000 {
+                offset as u32 & 0x03fffffc
+            } else {
+                offset as u32 & 0xfffc
+            };
+    }
+    encoded(&w)
+}
+
+/// A fragmented arena can have ample total free space yet fail a large fresh
+/// array allocation. Retry that allocation in the other existing arena. Never
+/// retry a resize/free with a foreign pointer; owner_stub handles those first.
+fn allocation_stub(operation: u32, pools_sda: u16) -> Vec<u8> {
+    let mut w = Vec::new();
+    let mut labels = std::collections::BTreeMap::new();
+    let mut fixups = Vec::new();
+    macro_rules! emit {
+        ($op:expr) => {
+            w.push($op)
+        };
+    }
+    macro_rules! mark {
+        ($name:literal) => {
+            labels.insert($name, w.len());
+        };
+    }
+    macro_rules! jump {
+        ($op:expr, $name:literal) => {{
+            fixups.push((w.len(), $op, $name));
+            emit!($op);
+        }};
+    }
+    macro_rules! call_original {
+        () => {
+            emit!(branch(ALLOCATION_CODE + w.len() as u32 * 4, ORIGINAL_CODE) | 1);
+        };
+    }
+    emit!(0x28040000); // old buffer
+    jump!(0x40820000, "original");
+    emit!(0x28050000); // zero-size operations retain native behavior
+    jump!(0x41820000, "original");
+    emit!(0x2c05ffff); // -1 is the native free operation
+    jump!(0x41820000, "original");
+    emit!(0x800300b4);
+    emit!(0x2c00000a);
+    jump!(0x41820000, "setup");
+    emit!(0x2c00000c);
+    jump!(0x40820000, "original");
+    mark!("setup");
+    emit!(0x9421ffb0);
+    emit!(0x7c0802a6);
+    emit!(0x9001004c);
+    for (reg, offset) in [(3, 40), (4, 44), (5, 48), (6, 52)] {
+        emit!(0x90010000 | reg << 21 | offset);
+    }
+    call_original!();
+    emit!(0x28030000);
+    jump!(0x40820000, "return");
+    emit!(0x816d0000 | u32::from(pools_sda));
+    emit!(0x280b0000);
+    jump!(0x41820000, "failure");
+    emit!(0x800b0004);
+    emit!(0x28000007);
+    jump!(0x41800000, "failure");
+    emit!(0x816b0000);
+    emit!(0x81810028);
+    emit!(0x800c00b4);
+    emit!(0x2c00000a);
+    jump!(0x40820000, "general");
+    emit!(0x806b0018);
+    jump!(0x48000000, "candidate");
+    mark!("general");
+    emit!(0x806b0014);
+    mark!("candidate");
+    emit!(0x28030000);
+    jump!(0x41820000, "failure");
+    emit!(0x80030000);
+    emit!(0x816c0000);
+    emit!(0x7c005800); // matching allocator class
+    jump!(0x40820000, "failure");
+    for (reg, offset) in [(4, 44), (5, 48), (6, 52)] {
+        emit!(0x80010000 | reg << 21 | offset);
+    }
+    call_original!();
+    jump!(0x48000000, "return");
+    mark!("failure");
+    emit!(0x38600000);
+    mark!("return");
+    emit!(0x8001004c);
+    emit!(0x7c0803a6);
+    emit!(0x38210050);
+    emit!(0x4e800020);
     mark!("original");
     emit!(0x9421ffb0);
-    emit!(branch(OWNER_CODE + w.len() as u32 * 4, operation + 4));
+    emit!(branch(ALLOCATION_CODE + w.len() as u32 * 4, operation + 4));
     for (index, op, label) in fixups {
         let offset = (labels[label] as isize - index as isize) * 4;
         w[index] = op
@@ -258,6 +357,17 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
     if owner.len() > 256 || iso[owner_at..owner_at + 256].iter().any(|byte| *byte != 0) {
         return Err(bad());
     }
+    let allocation = allocation_stub(operation, word(iso, getter_at + 8 * 4)? as u16);
+    let allocation_at = map(iso, ALLOCATION_CODE, 256)?;
+    let original_at = map(iso, ORIGINAL_CODE, 8)?;
+    if allocation.len() > 256
+        || iso[allocation_at..allocation_at + 256]
+            .iter()
+            .any(|b| *b != 0)
+        || iso[original_at..original_at + 8].iter().any(|b| *b != 0)
+    {
+        return Err(bad());
+    }
     Ok(vec![
         WriteRegion {
             offset: (at + 24) as u64,
@@ -274,6 +384,14 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
         WriteRegion {
             offset: owner_at as u64,
             bytes: owner,
+        },
+        WriteRegion {
+            offset: allocation_at as u64,
+            bytes: allocation,
+        },
+        WriteRegion {
+            offset: original_at as u64,
+            bytes: encoded(&[0x9421ffb0, branch(ORIGINAL_CODE + 4, operation + 4)]),
         },
     ])
 }
@@ -482,7 +600,7 @@ mod tests {
                             pc = ((target - OWNER_CODE) / 4) as usize;
                             continue;
                         } else {
-                            assert_eq!(target, 0x80085008);
+                            assert_eq!(target, ALLOCATION_CODE);
                             returned = true;
                             break;
                         }
@@ -496,8 +614,190 @@ mod tests {
             assert_eq!(regs[3], expected);
             assert_eq!(&regs[4..7], &before[4..7]);
             assert_eq!(&regs[13..32], &before[13..32]);
-            assert_eq!(regs[1], before[1] - 80);
+            assert_eq!(regs[1], before[1]);
             assert_eq!(lr, 0x80012344);
+        }
+    }
+
+    #[test]
+    fn fresh_buffer_fallback_preserves_native_contract_and_never_moves_existing_buffers() {
+        let general = 0x805803d0u32;
+        let main = 0x805804a8u32;
+        let custom = 0x80582000u32;
+        // (requested pool, old pointer, size, first succeeds, second succeeds,
+        //  pool count, table present, alternate class matches, alternate exists)
+        let cases = [
+            (general, 0, 0x41000, true, false, 7, true, true, true),
+            (general, 0, 0x41000, false, true, 7, true, true, true),
+            (main, 0, 0x41000, false, true, 7, true, true, true),
+            (general, 0, 0x41000, false, false, 7, true, true, true),
+            (general, 0, 0x41000, false, true, 6, true, true, true),
+            (general, 0, 0x41000, false, true, 7, false, true, true),
+            (general, 0, 0x41000, false, true, 7, true, false, true),
+            (general, 0, 0x41000, false, true, 7, true, true, false),
+            (
+                general, 0x81000000, 0x41000, false, true, 7, true, true, true,
+            ),
+            (general, 0, 0, false, true, 7, true, true, true),
+            (general, 0, u32::MAX, false, true, 7, true, true, true),
+            (custom, 0, 0x41000, false, true, 7, true, true, true),
+        ];
+        for (requested, old, size, first_ok, second_ok, count, present, same_class, exists) in cases
+        {
+            let words: Vec<_> = allocation_stub(0x80085004, 0xd258)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|w| u32::from_be_bytes(*w))
+                .collect();
+            assert!(words.len() * 4 <= 256);
+            let mut regs = std::array::from_fn::<_, 32, _>(|i| 0x81000000 + i as u32 * 256);
+            regs[1] = 0x817ff000;
+            regs[3] = requested;
+            regs[4] = old;
+            regs[5] = size;
+            regs[6] = 16;
+            regs[13] = 0x80564f00;
+            let before = regs;
+            let caller = 0x80012344;
+            let mut lr = caller;
+            let alternate = if requested == general { main } else { general };
+            let mut mem = BTreeMap::from([
+                (
+                    regs[13].wrapping_add_signed(-11688),
+                    if present { 0x80700000 } else { 0 },
+                ),
+                (0x80700004, count),
+                (0x80700000, 0x80701000),
+                (
+                    0x80701014,
+                    if exists || requested == general {
+                        general
+                    } else {
+                        0
+                    },
+                ),
+                (
+                    0x80701018,
+                    if exists || requested == main { main } else { 0 },
+                ),
+                (general, 0x80473928),
+                (main, 0x80473928),
+                (custom, 0x80473928),
+                (general + 180, 10),
+                (main + 180, 12),
+                (custom + 180, 14),
+            ]);
+            if !same_class {
+                mem.insert(alternate, 0x80470000);
+            }
+            let mut compare = std::cmp::Ordering::Equal;
+            let mut pc = 0usize;
+            let mut calls = Vec::new();
+            let mut tail = false;
+            let mut returned = false;
+            for _ in 0..160 {
+                let w = words[pc];
+                let rd = ((w >> 21) & 31) as usize;
+                let ra = ((w >> 16) & 31) as usize;
+                let rb = ((w >> 11) & 31) as usize;
+                let address = regs[ra].wrapping_add_signed(w as i16 as i32);
+                match w >> 26 {
+                    32 => {
+                        regs[rd] = *mem
+                            .get(&address)
+                            .unwrap_or_else(|| panic!("unexpected read {address:08x}"))
+                    }
+                    36 => {
+                        mem.insert(address, regs[rd]);
+                    }
+                    37 => {
+                        let value = regs[rd];
+                        mem.insert(address, value);
+                        regs[ra] = address;
+                    }
+                    14 => {
+                        regs[rd] = if ra == 0 {
+                            w as i16 as i32 as u32
+                        } else {
+                            address
+                        }
+                    }
+                    10 => compare = regs[ra].cmp(&(w & 65535)),
+                    11 => compare = (regs[ra] as i32).cmp(&(w as i16 as i32)),
+                    31 if w == 0x7c0802a6 => regs[0] = lr,
+                    31 if w == 0x7c0803a6 => lr = regs[0],
+                    31 if (w >> 1) & 1023 == 0 => {
+                        compare = (regs[ra] as i32).cmp(&(regs[rb] as i32))
+                    }
+                    16 => {
+                        let take = match w & 0xffff0000 {
+                            0x41820000 => compare.is_eq(),
+                            0x40820000 => !compare.is_eq(),
+                            0x41800000 => compare.is_lt(),
+                            _ => panic!("unexpected branch {w:08x}"),
+                        };
+                        if take {
+                            pc = (pc as isize + w as i16 as isize / 4) as usize;
+                            continue;
+                        }
+                    }
+                    18 => {
+                        let offset = ((w & 0x03fffffc) << 6) as i32 >> 6;
+                        let target = (ALLOCATION_CODE + pc as u32 * 4).wrapping_add_signed(offset);
+                        if w & 1 != 0 {
+                            assert_eq!(target, ORIGINAL_CODE);
+                            calls.push((regs[3], regs[4], regs[5], regs[6]));
+                            let success = if calls.len() == 1 {
+                                first_ok
+                            } else {
+                                second_ok
+                            };
+                            lr = ALLOCATION_CODE + pc as u32 * 4 + 4;
+                            for reg in [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+                                regs[reg] = 0xdead0000 + reg as u32;
+                            }
+                            regs[3] = if success { 0x81110000 } else { 0 };
+                        } else if (ALLOCATION_CODE..ALLOCATION_CODE + words.len() as u32 * 4)
+                            .contains(&target)
+                        {
+                            pc = ((target - ALLOCATION_CODE) / 4) as usize;
+                            continue;
+                        } else {
+                            assert_eq!(target, 0x80085008);
+                            tail = true;
+                            returned = true;
+                            break;
+                        }
+                    }
+                    19 if w == 0x4e800020 => {
+                        assert_eq!(lr, caller);
+                        returned = true;
+                        break;
+                    }
+                    _ => panic!("unexpected instruction {w:08x}"),
+                }
+                pc += 1;
+            }
+            assert!(returned);
+            assert_eq!(&regs[13..32], &before[13..32]);
+            assert_eq!(lr, caller);
+            let eligible = old == 0 && size != 0 && size != u32::MAX && requested != custom;
+            assert_eq!(tail, !eligible);
+            if tail {
+                assert!(calls.is_empty());
+                assert_eq!(&regs[3..7], &before[3..7]);
+                assert_eq!(regs[1], before[1] - 80);
+            } else {
+                assert_eq!(regs[1], before[1]);
+                assert_eq!(calls[0], (requested, 0, size, 16));
+                let retry = !first_ok && count >= 7 && present && same_class && exists;
+                assert_eq!(calls.len(), if retry { 2 } else { 1 });
+                if retry {
+                    assert_eq!(calls[1], (alternate, 0, size, 16));
+                }
+                assert_eq!(regs[3] != 0, first_ok || retry && second_ok);
+            }
         }
     }
 
@@ -540,7 +840,7 @@ mod tests {
             let file = std::fs::File::open(path).unwrap();
             let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
             let edits = regions(&iso, &report(release)).unwrap();
-            assert_eq!(edits.len(), 4);
+            assert_eq!(edits.len(), 6);
             assert_eq!(edits[0].bytes.len(), 4);
             assert_eq!(edits[1].bytes.len(), stub(0, 0).len());
             // Only the executable is needed for these refusal checks.
