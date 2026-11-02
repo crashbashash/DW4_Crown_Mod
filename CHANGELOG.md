@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.16.0
+
+- Added settings import/export, including the randomizer seed, without including file paths.
+- Added Arukenimon to the regular random enemy pool while preserving her original encounter.
+- Restricted Numenume River replacements to confirmed projectile-capable enemies and expanded its compatible donor pool.
+- Fixed a GameCube crash during encounters deeper in Mangrove Forest and improved memory handling during area changes.
+- Practice-stage Kokatorimon now receive their Crown stats when Crown Mod is enabled.
+
 ## v0.15.1
 
 - Pharaohmon can now appear in randomized stages and summon enemies from that stage’s selected enemy pool.
