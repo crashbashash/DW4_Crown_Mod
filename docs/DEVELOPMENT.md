@@ -174,46 +174,14 @@ Europe/Japan. The desktop app does not use it.
 See the [changelog](../CHANGELOG.md) for release notes and the
 [crown expansion validation](testing/crowns-v0.8.0.md).
 
-## Driving the desktop app with an agent
+## Desktop validation
 
-The optional `agent-control` build exposes the real webview through a
-token-protected loopback endpoint. Ordinary builds do not include it. It drives the
-rendered UI and the native patch engine, not the browser mock backend.
-
-```sh
-npm run build
-cargo build --manifest-path crates/dw4vhp-tauri/Cargo.toml --features agent-control,tauri/custom-protocol
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json start --binary crates/dw4vhp-tauri/target/debug/dw4-crown-mod
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json snapshot
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "disc path" "/path/to/clean.iso"
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json fill "output path" "/tmp/patched.iso"
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json option "Crown Mod" on
-python3 tools/agent.py --session /tmp/dw4vhp-agent.json click "Patch ISO"
-```
-
-`eval` accepts a JavaScript expression and returns its JSON result.
-`screenshot /tmp/app.png` uses `xdotool` and ImageMagick on an X11/XWayland window
-(launch with `GDK_BACKEND=x11`). The session file contains private credentials and
-the app's PID, so use a fresh session path for each launch and remove the file
-afterward.
-
-Run the full UI test on a freshly launched app. It first checks the empty
-selection and explicitly enables Crown Mod for its reference build:
-
-```sh
-python3 tools/e2e.py --session /tmp/dw4vhp-agent.json --iso "/path/to/clean.iso" --expected-md5 9527d77a65fd4411598761dfa5468a26 --expected-size 2179444736
-```
-
-The example checksum is the v0.13.0 PS2 USA Crown-Mod-only reference; use a
-private input copy for the input/output-refusal check. See the completed
-[contributor-refactor validation](testing/contributor-refactor.md).
-
-The test checks invalid and already-modded inputs, patching, overwrite cancellation
-and confirmation, and refusal to overwrite the input. It verifies the output
-checksum and that the original is unchanged. Reports, screenshots and test ISOs go
-to a new directory under `/tmp`. The UI needs a working desktop display, and
-screenshots need the X11 tools above. Pass `--region europe` or `--region japan`
-and the matching checksum to test those releases.
+Check the packaged desktop app with a private copy of a supported disc. Verify
+invalid-input handling, patching, overwrite cancellation and confirmation, and
+refusal to overwrite the input. Confirm the output checksum and that the input
+remains unchanged. Record the app version, region and options with the results.
+See [contributor-refactor validation](testing/contributor-refactor.md) for an
+example of recorded desktop and full-image checks.
 
 Optional loot rebalance details: [custom crown drops](testing/custom-drops.md).
 
