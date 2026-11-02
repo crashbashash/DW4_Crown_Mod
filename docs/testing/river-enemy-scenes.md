@@ -1,5 +1,9 @@
 # Numenume River enemy scenes
 
+The later [river-only ranged attack policy](river-ranged-ai.md) restricts attack
+choices as well as enemy eligibility. The resource-adapter checks below describe
+the earlier behavior with unmodified enemy AI.
+
 Rules 17 restricts river replacements to projectile-capable families. A separate
 scene-layout limitation previously excluded seven of those families: Sukamon,
 Minotaurmon, MR03, MR04, Raremon, MR05 and Imperialdramon.

@@ -14,7 +14,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 18;
+pub const RULES_VERSION: u32 = 19;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -569,6 +569,18 @@ impl Randomiser {
         entries: &[(usize, usize)],
     ) -> Result<Vec<u8>> {
         let mut dst = self.plan_stage(entry, dst, afs, entries)?;
+        if entry == super::river_ai::ENTRY
+            && self
+                .opts
+                .only
+                .as_ref()
+                .is_none_or(|only| only.contains(&entry))
+        {
+            dst = super::river_ai::apply(&dst, entry)?;
+            self.stats
+                .trace
+                .push("river ranged-only attack policy".into());
+        }
         if let (614, Some(target)) = (entry, self.opts.warp.clone()) {
             let names = BTreeMap::from([("stag0102".to_string(), target)]);
             let more = lua_names::rename_in_pack(&dst, &["matz02.lua".to_string()], &names)?;

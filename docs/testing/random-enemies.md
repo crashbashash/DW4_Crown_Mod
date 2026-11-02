@@ -882,6 +882,12 @@ can fail fresh buffer allocations while other arenas retain free space. The
 extended allocator fallback, ownership handling and validation are documented
 in [the seed-151 regression](mangrove-seed151.md).
 
+## River-only attack behavior
+
+Randomized river enemies now use their verified firing choices in place of
+melee attacks, while retaining movement, idle and lifecycle behavior. See
+[river attack policy and validation](river-ranged-ai.md).
+
 ## Arukenimon donor
 
 Rules 18 assembles Arukenimon's separately loaded body with its native stage's

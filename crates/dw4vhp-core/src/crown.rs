@@ -20,6 +20,7 @@ mod pharaoh;
 mod practice;
 mod random;
 mod rewards;
+mod river_ai;
 mod sound;
 mod split_models;
 pub use random::Options as RandomOptions;

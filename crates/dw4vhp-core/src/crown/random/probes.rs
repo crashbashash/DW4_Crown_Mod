@@ -958,12 +958,44 @@ fn probe_river_donors() {
 #[ignore]
 fn probe_build_river_image() {
     let input = env::var_os("DW4_RIVER_INPUT").expect("DW4_RIVER_INPUT");
-    let output = env::var_os("DW4_RIVER_OUTPUT").expect("DW4_RIVER_OUTPUT");
+    let output =
+        std::path::PathBuf::from(env::var_os("DW4_RIVER_OUTPUT").expect("DW4_RIVER_OUTPUT"));
     let model = env::var("DW4_RANDOM_FORCE").expect("DW4_RANDOM_FORCE");
     assert!(super::super::encounters::RIVER_RANGED.contains(&model.as_str()));
-    let file = std::fs::File::open(input).unwrap();
+    let file = std::fs::File::open(&input).unwrap();
     let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let gc = crate::gcm::game_id(&iso).is_ok();
+    if model == "e_nume" {
+        // Exercise the retained native family without importing a different
+        // donor. The ranged-only transform keeps the original pack size.
+        let base = if gc {
+            crate::gcm::find_file(&iso, "NDMW.AFS").unwrap().offset as usize
+        } else {
+            crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap().lba as usize * 2048
+        };
+        let offset = u32at(&iso, base + 8 + 628 * 8).unwrap() as usize;
+        let size = u32at(&iso, base + 12 + 628 * 8).unwrap() as usize;
+        let bytes =
+            super::super::river_ai::apply(&iso[base + offset..base + offset + size], 628).unwrap();
+        assert_eq!(bytes.len(), size);
+        use std::io::{Seek, SeekFrom, Write};
+        let mut out = std::fs::File::create_new(&output).unwrap();
+        out.write_all(&iso).unwrap();
+        out.seek(SeekFrom::Start((base + offset) as u64)).unwrap();
+        out.write_all(&bytes).unwrap();
+        std::fs::write(
+            output.with_extension("bindings.json"),
+            serde_json::to_vec_pretty(&river_firing_bindings(
+                &Pack::parse(&bytes).unwrap(),
+                &model,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        eprintln!("RIVER IMAGE {model}: native family, river-only AI bytes verified");
+        return;
+    }
+
     let options = Options {
         seed: 67,
         donors: 1,
@@ -992,6 +1024,11 @@ fn probe_build_river_image() {
     let offset = u32at(afs, 8 + 8 * 628).unwrap() as usize;
     let size = u32at(afs, 12 + 8 * 628).unwrap() as usize;
     let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+    std::fs::write(
+        output.with_extension("bindings.json"),
+        serde_json::to_vec_pretty(&river_firing_bindings(&p, &model)).unwrap(),
+    )
+    .unwrap();
     let info = p.named("beAction2Info", &model).unwrap();
     let (parent, _) = graft::parent_group(&p, p.val(info, 7).unwrap()).unwrap();
     assert!(p.rec(parent).unwrap().named(p.b, "EM01"));
@@ -1326,4 +1363,219 @@ fn probe_build_arukenimon_native_image() {
     )
     .unwrap();
     eprintln!("ARUKENIMON NATIVE IMAGE {evidence}");
+}
+
+/// Inspect the native sequence decision graphs for the river's projectile pool.
+#[test]
+#[ignore]
+fn probe_river_attack_choices() {
+    let file = std::fs::File::open(env::var_os("DW4_RIVER_AI_INPUT").unwrap()).unwrap();
+    let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+        let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+        (f.offset as usize, f.size as usize)
+    } else {
+        let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        (f.lba as usize * 2048, f.size as usize)
+    };
+    let afs = &iso[base..base + size];
+    for (entry, model) in [
+        (628, "e_nume"),
+        (187, "e_scum"),
+        (241, "e_minotaru"),
+        (265, "e_mecha2"),
+        (288, "e_otama"),
+        (312, "e_mecha3"),
+        (319, "e_mecha4"),
+        (335, "e_maridevi"),
+        (379, "e_megadra"),
+        (387, "e_infermo"),
+        (394, "e_rare"),
+        (394, "e_mecha5"),
+        (723, "e_impdra"),
+    ] {
+        if env::var("DW4_RIVER_AI_MODEL").is_ok_and(|wanted| wanted != model) {
+            continue;
+        }
+        let o = u32at(afs, 8 + entry * 8).unwrap() as usize;
+        let n = u32at(afs, 12 + entry * 8).unwrap() as usize;
+        let p = Pack::parse(&afs[o..o + n]).unwrap();
+        let info = p.named("beModelCtrlInfo", model).unwrap();
+        eprintln!("MODEL {model} {entry}");
+        for data in p.array(p.val(info, 5).unwrap()).unwrap() {
+            eprintln!("DATA {}", p.classes[p.rec(data).unwrap().class].name);
+            if p.class(data, "beModelCtrlInfoDataAIM").is_ok() {
+                for map in p.array(p.val(data, 4).unwrap()).unwrap() {
+                    eprintln!(
+                        "TABLE {model} {} ranges {:?}",
+                        String::from_utf8_lossy(graft::name_of(&p, p.rec(map).unwrap()).unwrap()),
+                        (3..=6)
+                            .map(|f| f32::from_bits(p.val(map, f).unwrap()))
+                            .collect::<Vec<_>>()
+                    );
+                    for field in 7..=10 {
+                        eprintln!(
+                            " BAND {field} {:?}",
+                            p.array(p.val(map, field).unwrap())
+                                .unwrap()
+                                .iter()
+                                .map(|&id| (
+                                    String::from_utf8_lossy(
+                                        graft::name_of(&p, p.rec(id).unwrap()).unwrap()
+                                    )
+                                    .to_string(),
+                                    f32::from_bits(p.val(id, 3).unwrap()),
+                                    f32::from_bits(p.val(id, 4).unwrap()),
+                                    p.val(id, 5).unwrap()
+                                ))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                }
+
+                for id in graft::closure(&p, &[data]).unwrap().0 {
+                    if let Ok(r) = p.rec(id) {
+                        let fields = r
+                            .fields
+                            .iter()
+                            .map(|(k, v)| format!("{k}:{:?}", &p.b[v.clone()]))
+                            .collect::<Vec<_>>();
+                        eprintln!(
+                            " AIMOBJ {id} {} {}",
+                            p.classes[r.class].name,
+                            fields.join(" ")
+                        );
+                    }
+                }
+            }
+            if p.class(data, "beModelCtrlInfoDataSeq").is_err() {
+                continue;
+            }
+            for seq in p.array(p.val(data, 4).unwrap()).unwrap() {
+                eprintln!(
+                    "SEQ {} {}",
+                    seq,
+                    String::from_utf8_lossy(
+                        graft::name_of(&p, p.rec(seq).unwrap()).unwrap_or(b"?")
+                    )
+                );
+                for cmd in p
+                    .array(p.val(seq, 3).unwrap())
+                    .unwrap()
+                    .into_iter()
+                    .filter(|&id| id != NULL)
+                {
+                    let r = p.rec(cmd).unwrap();
+                    let mut fields = Vec::new();
+                    for (&k, v) in &r.fields {
+                        if k == 0 {
+                            continue;
+                        }
+                        let raw = &p.b[v.clone()];
+                        let text = if raw.len() > 4
+                            && raw[4..].iter().all(|&b| b == 0 || (32..127).contains(&b))
+                        {
+                            String::from_utf8_lossy(&raw[4..])
+                                .trim_end_matches('\0')
+                                .to_string()
+                        } else {
+                            format!(
+                                "{:?}",
+                                raw.as_chunks::<4>()
+                                    .0
+                                    .iter()
+                                    .map(|b| u32::from_le_bytes(*b))
+                                    .collect::<Vec<_>>()
+                            )
+                        };
+                        fields.push(format!("{k}:{text}"));
+                    }
+                    eprintln!(
+                        " CMD {cmd} {} {}",
+                        p.classes[r.class].name,
+                        fields.join(" ")
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Verified firing bindings for focused native observation images.
+fn river_firing_bindings(p: &Pack<'_>, model: &str) -> Vec<serde_json::Value> {
+    let policy = super::super::river_ai::POLICIES
+        .iter()
+        .find(|v| v.model == model)
+        .unwrap();
+    let name =
+        |id| String::from_utf8_lossy(graft::name_of(p, p.rec(id).unwrap()).unwrap()).to_string();
+    let info = p.named("beModelCtrlInfo", model).unwrap();
+    let mut actions = BTreeSet::new();
+    for data in p.array(p.val(info, 5).unwrap()).unwrap() {
+        if p.class(data, "beModelCtrlInfoDataSeq").is_err() {
+            continue;
+        }
+        for seq in p.array(p.val(data, 4).unwrap()).unwrap() {
+            if !policy.allowed.contains(&name(seq).as_str()) {
+                continue;
+            }
+            for cmd in p.array(p.val(seq, 3).unwrap()).unwrap() {
+                if p.class(cmd, "beModelCtrlACTION").is_ok() {
+                    actions.insert(name(cmd));
+                }
+            }
+        }
+    }
+    let mut result = Vec::new();
+    let root = u32at(p.b, p.table + 8 + 2 * p.ids.len()).unwrap();
+    for starter in p.array(root).unwrap() {
+        if p.class(starter, "beActionStarterInfo").is_err() {
+            continue;
+        }
+        let Some(projectile) = graft::find_named(p, "beModelCtrlInfo", &name(starter)).unwrap()
+        else {
+            continue;
+        };
+        for target in p.array(p.val(starter, 7).unwrap()).unwrap() {
+            if !p.rec(target).unwrap().named(p.b, model) {
+                continue;
+            }
+            for binding in p.array(p.val(target, 3).unwrap()).unwrap() {
+                if !actions.contains(&name(binding)) || p.val(binding, 6).unwrap() != 0 {
+                    continue;
+                }
+                let f = p.rec(binding).unwrap().field(3).unwrap();
+                let seq =
+                    std::str::from_utf8(p.b[f.start + 4..f.end].split(|b| *b == 0).next().unwrap())
+                        .unwrap();
+                for data in p.array(p.val(projectile, 5).unwrap()).unwrap() {
+                    if p.class(data, "beModelCtrlInfoDataSeq").is_err() {
+                        continue;
+                    }
+                    for id in p.array(p.val(data, 4).unwrap()).unwrap() {
+                        if !p.rec(id).unwrap().named(p.b, seq) {
+                            continue;
+                        }
+                        let cmds = p.array(p.val(id, 3).unwrap()).unwrap();
+                        let moves = cmds.iter().any(|&c| {
+                            p.class(c, "beModelCtrlMOVE").is_ok()
+                                && (p.rec(c).unwrap().named(p.b, "Move")
+                                    || p.rec(c).unwrap().named(p.b, "Push"))
+                        });
+                        let hits = cmds.iter().any(|&c| {
+                            p.class(c, "beModelCtrlHITBOX").is_ok() && p.val(c, 3).unwrap() != 0
+                        });
+                        if moves && hits {
+                            result.push(serde_json::json!({"model":name(projectile),"sequence":seq,"action":name(binding)}));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        !result.is_empty(),
+        "no moving damaging firing bindings for {model}"
+    );
+    result
 }
