@@ -16,7 +16,7 @@ fn blank() -> EnemyTable {
 #[test]
 fn default_plan_is_the_base_very_hard_plus_mode() {
     let p = PatchPlan::default();
-    assert!(p.practice_buff && p.exclude_destructibles && p.exclude_tripwire);
+    assert!(p.practice_buff && p.exclude_destructibles && !p.exclude_tripwire);
     assert!(!p.four_player_spawns && !p.crown_drops);
     assert!(!p.exclude_practice && !p.force_very_hard && p.serial.is_none() && p.crown_rank == 5);
 }
@@ -56,7 +56,7 @@ fn exclusions_are_left_byte_identical_and_every_other_row_gets_the_crown() {
             para_delta: 0.0,
         },
     );
-    for r in DESTRUCTIBLE_ROWS.chain(TRIPWIRE_ROWS) {
+    for r in DESTRUCTIBLE_ROWS {
         assert_eq!(
             (out.hp[r], out.rarity[r]),
             (100, 0),
@@ -82,7 +82,7 @@ fn the_summary_counts_live_rows_by_non_zero_authored_hp() {
     assert_eq!(all.live_rows, 649); // every blank row has HP, so every row is live
 
     t.hp[5] = 0; // a slot the disc never filled
-    t.hp[644] = 0; // an *excluded* row: the live base is the authored table, not the handled rows
+    t.hp[644] = 0; // the live base counts authored rows, even when practice buffs fill a row
     let (_, s) = transform(&t, &PatchPlan::default(), &ratio);
     assert_eq!(s.live_rows, 649 - 2);
     assert_eq!(s.rows_changed, 649 - 9);
@@ -170,7 +170,8 @@ fn the_practice_rows_become_an_ordinary_row_of_their_type() {
     assert_eq!(out.stat[638], expected);
     assert_eq!(out.crit[638], out.crit[0]);
     assert_eq!(s.practice_rows, PRACTICE_MAP.len());
-    assert_eq!((out.hp[644], out.rarity[644]), (100, 0)); // the tripwire survives the buff
+    assert_eq!((out.hp[644], out.rarity[644]), (out.hp[91], 5));
+    assert_eq!((out.hp[645], out.rarity[645]), (out.hp[91], 5));
 }
 
 #[test]
@@ -377,4 +378,104 @@ fn cosmetic_colours_without_crown_mod_add_crowns_without_changing_balance() {
     assert_eq!(out.rarity[0], dw4vhp_core::crown_colours::RANDOM_MARKER);
     assert_ne!(out.rarity[379], authored.rarity[379]);
     assert_eq!(out.rarity[60], dw4vhp_core::crown_colours::RANDOM_MARKER);
+}
+
+#[test]
+fn active_practice_kokatorimon_receive_their_ordinary_crown_stats() {
+    use dw4vhp_core::options::PatchSelection;
+    let mut authored = blank();
+    authored.hp[91] = 90;
+    authored.stat[91] = [58, 93, 40, 83, 126, 300, 500, 250, 650, 0, 300, 36];
+    authored.hp[644] = 35;
+    authored.hp[645] = 35;
+    let plan = PatchSelection {
+        crown_mod: true,
+        ..Default::default()
+    }
+    .into_plan()
+    .unwrap();
+    assert!(!plan.exclude_tripwire);
+    let ratio = RatioVector {
+        hp: 2.0,
+        stat: [2.0; 12],
+        crit_delta: 4.0,
+        para_delta: 6.0,
+    };
+    let (out, summary) = transform(&authored, &plan, &ratio);
+    assert_eq!(summary.practice_rows, 8);
+    for row in TRIPWIRE_ROWS {
+        assert_eq!(out.hp[row], 180);
+        assert_eq!(out.rarity[row], 5);
+        let mut stats = out.stat[91];
+        stats[4] = 126; // ordinary Crown speed 252, then the shared practice half-speed rule
+        assert_eq!(out.stat[row], stats);
+        assert_eq!((out.crit[row], out.para[row]), (6, 8));
+    }
+    let vanilla = PatchSelection {
+        random_enemies: true,
+        enemy_seed: Some(1),
+        ..Default::default()
+    }
+    .into_plan()
+    .unwrap();
+    assert_eq!(transform(&authored, &vanilla, &ratio).0, authored);
+    let excluded = PatchPlan {
+        exclude_practice: true,
+        ..plan
+    };
+    let kept = transform(&authored, &excluded, &ratio).0;
+    for row in 638..=645 {
+        assert_eq!(
+            (kept.hp[row], kept.stat[row], kept.rarity[row]),
+            (authored.hp[row], authored.stat[row], authored.rarity[row])
+        );
+    }
+}
+
+#[test]
+fn retail_practice_kokatorimon_match_ordinary_crowns_on_supported_releases() {
+    use dw4vhp_core::{options::PatchSelection, release};
+    for variable in [
+        "DW4_RETAIL_USA_ISO",
+        "DW4_RETAIL_EUROPE_ISO",
+        "DW4_RETAIL_JAPAN_ISO",
+        "DW4_RETAIL_GC_USA_ISO",
+        "DW4_RETAIL_GC_JAPAN_ISO",
+    ] {
+        let Some(path) = std::env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let layout = release::detect(&iso).unwrap().layout_in(&iso).unwrap();
+        let authored = EnemyTable::read(&iso, &layout).unwrap();
+        let ratio = RatioVector::derive(&authored);
+        let plan = PatchSelection {
+            crown_mod: true,
+            ..Default::default()
+        }
+        .into_plan()
+        .unwrap();
+        let out = transform(&authored, &plan, &ratio).0;
+        for row in TRIPWIRE_ROWS {
+            assert_eq!(out.hp[row], out.hp[91]);
+            assert!(out.hp[row] > authored.hp[row]);
+            assert_eq!(
+                (out.crit[row], out.para[row], out.rarity[row]),
+                (out.crit[91], out.para[91], 5)
+            );
+            for column in 0..12 {
+                let expected = if column == 4 {
+                    (out.stat[91][4] as f64 * 0.5).round_ties_even() as i16
+                } else {
+                    out.stat[91][column]
+                };
+                assert_eq!(out.stat[row][column], expected);
+            }
+            eprintln!(
+                "PRACTICE {variable}: row {row} HP {} -> {}, crown {}",
+                authored.hp[row], out.hp[row], out.rarity[row]
+            );
+        }
+    }
 }

@@ -44,3 +44,14 @@ test("update acceptance names only the offered version, never a webview-supplied
   await backend.acceptUpdate("0.10.0");
   expect(invoke).toHaveBeenLastCalledWith("accept_update", { version: "0.10.0" });
 });
+
+test("settings transport sends only the selection and treats cancellation as a normal result", async () => {
+  const backend = new TauriBackend();
+  vi.mocked(invoke).mockResolvedValueOnce(null);
+  expect(await backend.importSettings()).toBeNull();
+  expect(invoke).toHaveBeenLastCalledWith("import_settings");
+  const options = selection({ randomEnemies: true, enemySeed: 0 });
+  vi.mocked(invoke).mockResolvedValueOnce(false);
+  expect(await backend.exportSettings(options)).toBe(false);
+  expect(invoke).toHaveBeenLastCalledWith("export_settings", { selection: options });
+});

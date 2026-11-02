@@ -22,6 +22,17 @@ export class MockBackend implements Backend {
   seedSummary: PlanSummary | null = null;
   private listeners: Record<string, Set<(...args: never[]) => void>> = {};
 
+  /** In-memory stand-in for native settings files in browser development. */
+  savedSettings: PatchSelection | null = null;
+  async importSettings(): Promise<PatchSelection | null> {
+    return this.savedSettings === null ? null : { ...this.savedSettings };
+  }
+
+  async exportSettings(selection: PatchSelection): Promise<boolean> {
+    this.savedSettings = { ...selection };
+    return true;
+  }
+
   async chooseIso(): Promise<string | null> {
     return "/mock/game.iso";
   }

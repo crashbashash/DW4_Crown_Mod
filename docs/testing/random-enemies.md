@@ -18,8 +18,65 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 16. The same seed is reproducible within
+The current randomizer uses rules version 17. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+Rules 17 limits Numenume River replacements to the thirteen projectile-capable
+families below. The restriction applies to both resident
+replacement candidates and imports. Incompatible donors are skipped in shuffled
+order; the river exhausts its available ranged candidates without the ordinary
+failed-import attempt cap before falling back. Numemon's exclusive family assignment,
+six cleanup/freeze script rewrites, native scripted entrances and atomic
+fallback when variant slots run out remain in place.
+
+The pool requires native projectile spawn evidence, rather than an effect name:
+
+| Family | Firing action | Spawned model | Projectile sequence |
+| --- | --- | --- | --- |
+| Numemon | `BLST01` | `x_003eblst01a` | `SQ_ATCK` |
+| Sukamon | `BLST01` | `x_005eblst01a` | `SQ_BLST` |
+| Minotaurmon | `NATK01` | `x_012eblst01a` | `SQ_ATCK` |
+| MR02 | `BLST01` | `x_014eblst01b` | `SQ_ATCK01` |
+| Otamamon | `BLST01` | `x_018eblst01a` | `SQ_ATCK` |
+| MR03 | `BLST01` | `x_021eblst01a` | `SQ_ATCK` |
+| MR04 | `BLST01` | `x_023enatk01a` | `SQ_BLST01a` |
+| MarineDevimon | `MAGC01` | `x_020emagc01c` | `SQ_ATCK` |
+| Megadramon | `BLST01` | `x_027emagc01a` | `SQ_ATCK` |
+| Infermon | `BLST01` | `x_026eblst01a` | `SQ_ATCK` |
+| Raremon | `BLST01` | `x_028eblst01a` | `SQ_ATCK` |
+| MR05 | `BLST01` | `x_029eblst01a` | `SQ_BLST01a` |
+| Imperialdramon | `BLST02` | `x_025eblst02a` | `SQ_BLST02` |
+
+`river_pool_has_native_moving_projectile_spawns` checks that each enemy plays
+the listed firing action, a registered action starter binds that action to the separate model,
+and the spawned sequence moves forward and enables a damaging hitbox.
+Mummymon's companion effects do not establish a moving ranged projectile;
+it is excluded. Compatibility checks may reject an import even when its
+projectile evidence passes.
+
+`river_replacements_use_only_ranged_families` exercises multiple seeds and individual
+donor supplies, verifies family consistency across difficulties, and checks
+that a melee-only donor supply leaves native enemies in place. The existing
+reviewed-script regression checks the river's exact cleanup/freeze renames and
+atomic fallback. Data checks establish projectile capability; the live checks
+below additionally exercise rendering, collision and stage unloading. Natural
+hit accuracy throughout the route is not exhaustively measured.
+
+The initial river compatibility audit (`probe_river_donors`, devtools) finds the
+same source-layout exclusions on PS2 USA and GameCube USA: seven of the twelve
+nonresident projectile families have no compatible source scene. Sukamon,
+Minotaurmon, MR03, MR04, Raremon, MR05 and Imperialdramon require the missing
+shared `EM01` enemy group. MR02, Otamamon, MarineDevimon, Megadramon and Infermon
+each have a standalone-scene donor source. Numemon is already resident. These
+are scene-registration exclusions, not measured runtime RAM exhaustion; actual
+imports, actor capacity, entrance compatibility and local variant allocation
+still run afterward. Adapting grouped models to the river's standalone scenes
+is now implemented for the river: its native scene gains a plain shared enemy
+group while preserving the original model switch, objects and backing blocks.
+All twelve nonresident ranged families now have a compatible grouped donor
+source. The seven previously blocked families also have explicit import and
+cross-difficulty selection coverage. See [river scene validation](river-enemy-scenes.md)
+for rendering, collision and stage-unload evidence and test assistance.
 
 Rules 16 adds Pharaohmon to the import pool. Its native `cal_e_pharaoh.lua`
 control flow stays in place: each `gen` call fills one of twelve logical summon
@@ -816,3 +873,16 @@ MD5 `3d5b4a587cfd0f183845a241656d4d90`. The isolated emulator was stopped
 after validation; the temporary image, redundant decoded RAM dumps and copied
 test-card data were removed (about 2.80 GB reclaimed). Original player inputs
 and the separate public crash-fix playtest image were retained.
+
+## GameCube Mangrove seed 151 encounter crash
+
+The public v0.15.1 randomizer-only report fails during encounters deeper in
+Mangrove, after a successful stage entrance. The system and rendering pools
+can fail fresh buffer allocations while other arenas retain free space. The
+extended allocator fallback, ownership handling and validation are documented
+in [the seed-151 regression](mangrove-seed151.md).
+
+## Arukenimon donor
+
+Rules 18 assembles Arukenimon's separately loaded body with its native stage's
+attack resources and audio. See [resource preparation and platform validation](arukenimon-donor.md).

@@ -6,8 +6,8 @@ use crate::table::EnemyTable;
 /// byte-identical so they still break normally.
 pub const DESTRUCTIBLE_ROWS: std::ops::RangeInclusive<usize> = 370..=378;
 
-/// The `e_cockatri` tutorial pair: excluded from the general buffs. The separate
-/// practice-only Speed adjustment also applies to these rows.
+/// Legacy "tripwire" name for the active practice-stage Kokatorimon pair.
+/// These receive Crown Mod stats by default; custom plans can still exclude them.
 pub const TRIPWIRE_ROWS: [usize; 2] = [644, 645];
 
 /// The practice stage's lesson rows: when [`PatchPlan::exclude_practice`] is
@@ -19,17 +19,18 @@ pub const PRACTICE_ENEMY_ROWS: std::ops::RangeInclusive<usize> = 638..=645;
 pub const SPEED_COLUMN: usize = 4;
 
 /// Practice-stage overrides, `(destination, source)`: the tutorial rows
-/// 638–643 are authored as token values, so each is replaced by an ordinary
-/// tier-0 row of the same type. Sources are read from the *computed* table
-/// (after scaling) and the whole row is copied. Rows 644/645 are not in this
-/// map, so the tripwire survives the buff.
-pub const PRACTICE_MAP: [(usize, usize); 6] = [
+/// 638–645 are authored as token values, so each is replaced by an ordinary
+/// tier-0 row of the same type, including the active Kokatorimon pair. Sources
+/// come from the computed table after scaling, and the whole row is copied.
+pub const PRACTICE_MAP: [(usize, usize); 8] = [
     (638, 0),
     (639, 1),
     (640, 33),
     (641, 34),
     (642, 12),
     (643, 13),
+    (644, 91),
+    (645, 91),
 ];
 
 /// HP is an `i32` that must never go negative, so its clamp floor is 0.
@@ -54,13 +55,13 @@ pub struct PatchPlan {
     pub crown_rank: u8,
     pub exclude_destructibles: bool,
     pub exclude_tripwire: bool,
-    /// Leaves the practice stage's lesson rows ([`PRACTICE_ROWS`]) byte-
+    /// Leaves all practice enemies ([`PRACTICE_ENEMY_ROWS`]) byte-
     /// identical, so the training enemies are the vanilla ones. When set,
     /// the practice buff never fires.
     pub exclude_practice: bool,
     pub practice_buff: bool,
     /// Applied to practice Speed after the normal buffs, including the two
-    /// otherwise-excluded Kokatorimon rows. `exclude_practice` still wins.
+    /// Kokatorimon rows. `exclude_practice` still wins.
     pub practice_speed_mult: f64,
     pub collapse_to_top: bool,
     pub force_very_hard: bool,
@@ -81,8 +82,8 @@ pub struct PatchPlan {
 }
 
 impl Default for PatchPlan {
-    /// The base Very Hard Plus mode: derived factors unchanged, crown rank 5, both
-    /// exclusions and the practice buff on, no ELF patch and no serial edit.
+    /// The base Very Hard Plus mode: derived factors unchanged, crown rank 5,
+    /// destructibles excluded and practice buffs on, no ELF or serial edit.
     fn default() -> Self {
         Self {
             crown_mod: true,
@@ -92,7 +93,7 @@ impl Default for PatchPlan {
             para_mult: 1.0,
             crown_rank: 5,
             exclude_destructibles: true,
-            exclude_tripwire: true,
+            exclude_tripwire: false,
             exclude_practice: false,
             practice_buff: true,
             practice_speed_mult: 0.5,
@@ -130,7 +131,7 @@ pub struct PlanSummary {
 fn is_excluded(r: usize, plan: &PatchPlan) -> bool {
     (plan.exclude_destructibles && DESTRUCTIBLE_ROWS.contains(&r))
         || (plan.exclude_tripwire && TRIPWIRE_ROWS.contains(&r))
-        || (plan.exclude_practice && PRACTICE_ROWS.contains(&r))
+        || (plan.exclude_practice && PRACTICE_ENEMY_ROWS.contains(&r))
 }
 
 /// Applies `plan` and `ratio` to `authored`, returning the table that gets

@@ -357,6 +357,10 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                 let names: BTreeMap<_, _> = intro
                     .sites
                     .iter()
+                    .filter(|(generator, model)| {
+                        !stage.pinned.contains(*generator)
+                            && !stage.pinned_families.contains(*model)
+                    })
                     .map(|&(generator, model)| {
                         let target = r.plans[&stage.gens[0]].rows[generator];
                         let selected = family(target).unwrap();
@@ -374,7 +378,8 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     for &pack in &stage.gens {
                         for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
                             if family(g.row) == Some(model) {
-                                let target = r.plans[&pack].rows[&g.name];
+                                let target =
+                                    r.plans[&pack].rows.get(&g.name).copied().unwrap_or(g.row);
                                 selected.insert(family(target).unwrap());
                                 count += 1;
                             }
@@ -386,8 +391,11 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                         "one replacement must cover the whole family"
                     );
                     let target = *selected.first().unwrap();
-                    assert_ne!(target, model);
-                    names.insert(model.to_string(), target.to_string());
+                    // Earlier stages may consume the available variant rows.
+                    // An unchanged whole family is the documented atomic fallback.
+                    if target != model {
+                        names.insert(model.to_string(), target.to_string());
+                    }
                     eprintln!(
                         "FAMILY {variable} {entry}: {model} -> {target}, {count} difficulty rows"
                     );
@@ -408,7 +416,9 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     };
                     assert_eq!(
                         raw(&result),
-                        lua_names::rename(&raw(&original), &names).unwrap().unwrap(),
+                        lua_names::rename(&raw(&original), &names)
+                            .unwrap()
+                            .unwrap_or_else(|| raw(&original)),
                         "{variable} {entry} {script}: only reviewed constants may change"
                     );
                 }
@@ -422,11 +432,12 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     let target = r.plans[&pack].rows.get(&g.name).copied();
                     let changed_family = target.is_some_and(|row| family(row) != family(g.row));
                     if portable_entrance(&g) && changed_family {
-                        let expected = if target.and_then(family) == Some("e_pharaoh") {
-                            "SQ_ENTR"
-                        } else {
-                            &g.entrance
-                        };
+                        let expected =
+                            if matches!(target.and_then(family), Some("e_pharaoh" | "e_arachne")) {
+                                "SQ_ENTR"
+                            } else {
+                                &g.entrance
+                            };
                         assert!(model_sequences(&result, target.and_then(family).unwrap())
                             .unwrap()
                             .contains(expected));
@@ -661,5 +672,424 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
             }
             eprintln!("PRACTICE {variable}: {changed} changed generators, four-player={four_players}; scripts and callbacks preserved");
         }
+    }
+}
+
+/// Exercise the actual import and selection paths, including a melee-only donor
+/// supply. Read-only retail inputs enable these cases; no image is written.
+#[test]
+fn river_replacements_use_only_ranged_families() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let data = |entry: usize| {
+            let (offset, size) = entries[entry];
+            &afs[offset..offset + size]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let table = EnemyTable::read(&iso, &layout).unwrap();
+        for (seed, donor) in [
+            (0, None),
+            (67, None),
+            (1520, None),
+            (67, Some("e_scum")),
+            (67, Some("e_mecha3")),
+            (67, Some("e_minotaru")),
+            (67, Some("e_mecha4")),
+            (67, Some("e_rare")),
+            (67, Some("e_mecha5")),
+            (67, Some("e_impdra")),
+            (67, Some("e_infermo")),
+            (67, Some("e_goburi")),
+        ] {
+            let mut r = Randomiser::scan(
+                afs,
+                &entries,
+                table.clone(),
+                Options {
+                    seed,
+                    donors: DONORS,
+                    warp: None,
+                    only: Some(vec![628]),
+                },
+            )
+            .unwrap();
+            if let Some(donor) = donor {
+                r.donors.retain(|(model, _), _| *model == donor);
+            }
+            let adapted = graft::add_enemy_group(data(628), data(187), "e_nume").unwrap();
+            let destination = Pack::parse(&adapted).unwrap();
+            assert_eq!(
+                graft::add_enemy_group(&adapted, data(187), "e_nume").unwrap(),
+                adapted
+            );
+            let native = Pack::parse(data(628)).unwrap();
+            let scene = native.named("igSceneInfo", "e_nume").unwrap();
+            let native_switch = native.val(scene, 5).unwrap();
+            let root_group = destination.val(scene, 5).unwrap();
+            assert!(destination
+                .rec(root_group)
+                .unwrap()
+                .named(destination.b, "EM01"));
+            assert_eq!(
+                graft::parent_group(&destination, native_switch).unwrap().0,
+                root_group
+            );
+            for id in 0..native.ids.len() as u32 {
+                if id == scene || native.ids[id as usize].is_none() {
+                    continue;
+                }
+                assert_eq!(
+                    native.b[native.rec(id).unwrap().range.clone()],
+                    destination.b[destination.rec(id).unwrap().range.clone()]
+                );
+            }
+
+            let compatible = donor.is_none_or(|model| {
+                replacement_allowed(628, model)
+                    && r.donors
+                        .values()
+                        .any(|d| d.profile.misfit(&destination).is_none())
+            });
+            r.stage(628, data(628).to_vec(), afs, &entries).unwrap();
+            let mut changed = 0;
+            let mut numemon = BTreeSet::new();
+            for &pack in &r.stages[&628].gens {
+                for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                    let native = family(g.row).unwrap();
+                    let selected = r
+                        .plans
+                        .get(&pack)
+                        .and_then(|p| p.rows.get(&g.name))
+                        .copied()
+                        .and_then(family)
+                        .unwrap_or(native);
+                    if native == "e_nume" {
+                        assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
+                        numemon.insert(selected);
+                    }
+                    if protected_entrance(&g) {
+                        assert_eq!(selected, native, "{} entrance", g.name);
+                    }
+                    if selected != native {
+                        assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
+                        changed += 1;
+                    }
+                }
+            }
+            assert_eq!(numemon.len(), 1, "cleanup/freeze family must stay atomic");
+            if !compatible {
+                assert_eq!(changed, 0, "incompatible supply must keep native enemies");
+                assert!(!r
+                    .stats
+                    .trace
+                    .iter()
+                    .any(|line| line.starts_with("copy 628 ")));
+            } else {
+                assert!(
+                    changed > 0,
+                    "{variable}: seed {seed}, donor {donor:?}, log {:?}",
+                    r.log
+                );
+                if let Some(donor) = donor {
+                    assert_eq!(numemon, BTreeSet::from([donor]));
+                }
+            }
+            eprintln!("RIVER {variable}: seed {seed}, donor {donor:?}, {changed} replacements, family {numemon:?}");
+        }
+    }
+}
+
+#[test]
+fn river_pool_has_native_moving_projectile_spawns() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let cases = [
+            (628, "e_nume", "x_003eblst01a", "BLST01", "SQ_ATCK"),
+            (187, "e_scum", "x_005eblst01a", "BLST01", "SQ_BLST"),
+            (241, "e_minotaru", "x_012eblst01a", "NATK01", "SQ_ATCK"),
+            (265, "e_mecha2", "x_014eblst01b", "BLST01", "SQ_ATCK01"),
+            (288, "e_otama", "x_018eblst01a", "BLST01", "SQ_ATCK"),
+            (312, "e_mecha3", "x_021eblst01a", "BLST01", "SQ_ATCK"),
+            (319, "e_mecha4", "x_023enatk01a", "BLST01", "SQ_BLST01a"),
+            (335, "e_maridevi", "x_020emagc01c", "MAGC01", "SQ_ATCK"),
+            (379, "e_megadra", "x_027emagc01a", "BLST01", "SQ_ATCK"),
+            (387, "e_infermo", "x_026eblst01a", "BLST01", "SQ_ATCK"),
+            (394, "e_rare", "x_028eblst01a", "BLST01", "SQ_ATCK"),
+            (394, "e_mecha5", "x_029eblst01a", "BLST01", "SQ_BLST01a"),
+            (723, "e_impdra", "x_025eblst02a", "BLST02", "SQ_BLST02"),
+        ];
+        assert_eq!(
+            cases.map(|(_, model, _, _, _)| model),
+            super::super::encounters::RIVER_RANGED
+        );
+        for (entry, model, projectile, action, projectile_sequence) in cases {
+            let offset = u32at(afs, 8 + entry * 8).unwrap() as usize;
+            let size = u32at(afs, 12 + entry * 8).unwrap() as usize;
+            let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+            let commands = |model: &str, sequence: Option<&str>| {
+                let info = p.named("beModelCtrlInfo", model).unwrap();
+                let mut commands = Vec::new();
+                for data in p.array(p.val(info, 5).unwrap()).unwrap() {
+                    if p.class(data, "beModelCtrlInfoDataSeq").is_err() {
+                        continue;
+                    }
+                    for seq in p.array(p.val(data, 4).unwrap()).unwrap() {
+                        if sequence.is_none_or(|name| p.rec(seq).unwrap().named(p.b, name)) {
+                            commands.extend(
+                                p.array(p.val(seq, 3).unwrap())
+                                    .unwrap()
+                                    .into_iter()
+                                    .filter(|id| *id != NULL),
+                            );
+                        }
+                    }
+                }
+                commands
+            };
+            assert!(
+                commands(model, None).iter().any(|id| {
+                    p.class(*id, "beModelCtrlACTION").is_ok()
+                        && p.rec(*id).unwrap().named(p.b, action)
+                }),
+                "{model}: enemy must play the firing action"
+            );
+            let starter = p.named("beActionStarterInfo", projectile).unwrap();
+            let root = u32at(p.b, p.table + 8 + 2 * p.ids.len()).unwrap();
+            assert!(
+                p.array(root).unwrap().contains(&starter),
+                "spawn event must be registered"
+            );
+            let target = p
+                .array(p.val(starter, 7).unwrap())
+                .unwrap()
+                .into_iter()
+                .find(|id| p.rec(*id).unwrap().named(p.b, model))
+                .unwrap();
+            assert!(
+                p.array(p.val(target, 3).unwrap())
+                    .unwrap()
+                    .iter()
+                    .any(|id| {
+                        let r = p.rec(*id).unwrap();
+                        let seq = r.field(3).unwrap();
+                        r.named(p.b, action)
+                            && p.b[seq.start + 4..seq.end]
+                                .starts_with(projectile_sequence.as_bytes())
+                            && p.val(*id, 6).unwrap() == 0
+                    }),
+                "{model}: firing action must spawn the independently moving projectile"
+            );
+            let flight = commands(projectile, Some(projectile_sequence));
+            assert!(flight
+                .iter()
+                .any(|id| p.class(*id, "beModelCtrlMOVE").is_ok()
+                    && (p.rec(*id).unwrap().named(p.b, "Move")
+                        || p.rec(*id).unwrap().named(p.b, "Push"))));
+            assert!(
+                flight
+                    .iter()
+                    .any(|id| p.class(*id, "beModelCtrlHITBOX").is_ok()
+                        && p.val(*id, 3).unwrap() != 0)
+            );
+            eprintln!("CONFIRMED {variable}: {model} {action} -> {projectile} {projectile_sequence}: spawn, movement, hitbox");
+        }
+    }
+}
+
+#[test]
+fn river_scene_adapter_preserves_native_resources_on_every_release() {
+    for variable in [
+        "DW4_RETAIL_USA_ISO",
+        "DW4_RETAIL_EUROPE_ISO",
+        "DW4_RETAIL_JAPAN_ISO",
+        "DW4_RETAIL_GC_USA_ISO",
+        "DW4_RETAIL_GC_JAPAN_ISO",
+    ] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let base = if crate::gcm::game_id(&iso).is_ok() {
+            crate::gcm::find_file(&iso, "NDMW.AFS").unwrap().offset as usize
+        } else {
+            crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap().lba as usize * 2048
+        };
+        let afs = &iso[base..];
+        let data = |entry: usize| {
+            let offset = u32at(afs, 8 + 8 * entry).unwrap() as usize;
+            let size = u32at(afs, 12 + 8 * entry).unwrap() as usize;
+            &afs[offset..offset + size]
+        };
+        let native = Pack::parse(data(628)).unwrap();
+        let scene = native.named("igSceneInfo", "e_nume").unwrap();
+        let switch = native.val(scene, 5).unwrap();
+        let adapted = graft::add_enemy_group(data(628), data(187), "e_nume").unwrap();
+        assert_eq!(
+            graft::add_enemy_group(&adapted, data(187), "e_nume").unwrap(),
+            adapted
+        );
+        let after = Pack::parse(&adapted).unwrap();
+        assert_eq!(native.ids, after.ids[..native.ids.len()]);
+        let (group, children) = graft::parent_group(&after, switch).unwrap();
+        assert!(after.rec(group).unwrap().named(after.b, "EM01"));
+        assert_eq!(after.val(scene, 5).unwrap(), group);
+        assert_eq!(after.array(children).unwrap(), [switch]);
+        for id in 0..native.ids.len() as u32 {
+            if native.ids[id as usize].is_some() {
+                let old = native.rec(id).unwrap();
+                let new = after.rec(id).unwrap();
+                for (&field, range) in &old.fields {
+                    if id == scene && field == 5 {
+                        continue;
+                    }
+                    assert_eq!(
+                        native.b[range.clone()],
+                        after.b[new.field(field).unwrap()],
+                        "{variable}: original {id} field {field}"
+                    );
+                }
+            } else if let Some(range) = &native.memory[id as usize] {
+                assert_eq!(
+                    native.b[range.clone()],
+                    after.b[after.memory[id as usize].clone().unwrap()],
+                    "{variable}: original memory {id}"
+                );
+            }
+        }
+        for id in native.ids.len()..after.ids.len() {
+            if let Some(index) = after.ids[id] {
+                assert!(matches!(
+                    after.classes[after.objects[index].class].name.as_str(),
+                    "igGroup" | "igNodeList"
+                ));
+            }
+        }
+        eprintln!(
+            "RIVER SCENE {variable}: {} new IDs, {} added bytes; native resources preserved",
+            after.ids.len() - native.ids.len(),
+            adapted.len() - native.b.len()
+        );
+    }
+}
+
+#[test]
+fn retail_arukenimon_is_a_complete_expandable_donor_and_keeps_its_native_encounter() {
+    for variable in [
+        "DW4_RETAIL_USA_ISO",
+        "DW4_RETAIL_EUROPE_ISO",
+        "DW4_RETAIL_JAPAN_ISO",
+        "DW4_RETAIL_GC_USA_ISO",
+        "DW4_RETAIL_GC_JAPAN_ISO",
+    ] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let release = crate::release::detect(&iso).unwrap();
+        let (base, size) = if release.is_gamecube() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries: Vec<_> = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + i * 8).unwrap() as usize,
+                    u32at(afs, 12 + i * 8).unwrap() as usize,
+                )
+            })
+            .collect();
+        let data = |entry: usize| {
+            let (o, n) = entries[entry];
+            &afs[o..o + n]
+        };
+        let layout = release.layout_in(&iso).unwrap();
+        let r = Randomiser::scan(
+            afs,
+            &entries,
+            EnemyTable::read(&iso, &layout).unwrap(),
+            Options {
+                seed: 151,
+                donors: DONORS,
+                warp: None,
+                only: Some(vec![614]),
+            },
+        )
+        .unwrap();
+        let donor = &r.donors[&("e_arachne", false)];
+        assert_eq!(donor.source, 649);
+        assert_eq!(r.audio_sources["e_arachne"], 648);
+        assert!(r.stages[&649].pinned.contains("GENE-00"));
+        assert!(r.stages[&649].pinned_families.contains("e_arachne"));
+        let source = &r.prepared_sources[&649];
+        let source_pack = Pack::parse(source).unwrap();
+        assert!(model_sequences(&source_pack, "e_arachne")
+            .unwrap()
+            .contains("SQ_ENTR"));
+        assert!(
+            graft::companion_models(&source_pack, None, &["e_arachne".into()])
+                .unwrap()
+                .contains(&"x_009eblst01a".to_string())
+        );
+        let expanded = super::super::capacity::expand(source, "e_arachne", 48).unwrap();
+        assert_eq!(
+            super::super::capacity::slots(&Pack::parse(&expanded).unwrap(), "e_arachne").unwrap(),
+            48
+        );
+        let before = Pack::parse(data(649)).unwrap();
+        let original_hit = before.named("beLuaData", "hit_e_arachne.lua").unwrap();
+        assert_eq!(
+            &before.b[before.rec(original_hit).unwrap().range.clone()],
+            &source_pack.b[source_pack.rec(original_hit).unwrap().range.clone()]
+        );
+        let original_asset = Pack::parse(data(650)).unwrap();
+        assert_eq!(
+            super::super::capacity::slots(&original_asset, "e_arachne").unwrap(),
+            1
+        );
+        assert!(graft::find_named(&before, "beModelCtrlInfo", "e_arachne")
+            .unwrap()
+            .is_none());
+        eprintln!("ARUKENIMON {variable}: complete source {}, native intro preserved, independent capacity 1 -> 48",source.len());
     }
 }

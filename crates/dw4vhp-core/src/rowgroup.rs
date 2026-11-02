@@ -12,8 +12,8 @@
 
 use std::ops::RangeInclusive;
 
-/// Rows the collapse never writes: the practice stage's own lesson rows and its
-/// 2-player graduation tripwire.
+/// Rows the collapse never writes directly: the practice lessons and active
+/// farewell Kokatorimon pair. Practice buffs copy their computed source rows.
 pub const COLLAPSE_SKIP_ROWS: RangeInclusive<usize> = 638..=645;
 
 /// One enemy model's authored rows. `top` is the row with the maximum authored

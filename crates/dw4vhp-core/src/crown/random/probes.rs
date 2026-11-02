@@ -883,3 +883,447 @@ fn probe_fields() {
         }
     }
 }
+
+/// Report river donor layout exclusions separately from successful graft sizes.
+#[test]
+#[ignore]
+fn probe_river_donors() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let file = std::fs::File::open(path).unwrap();
+        let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries: Vec<_> = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect();
+        let data = |e: usize| {
+            let (o, l) = entries[e];
+            &afs[o..o + l]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let r = Randomiser::scan(
+            afs,
+            &entries,
+            EnemyTable::read(&iso, &layout).unwrap(),
+            Options {
+                seed: 67,
+                donors: DONORS,
+                warp: None,
+                only: Some(vec![628]),
+            },
+        )
+        .unwrap();
+        let native = Pack::parse(data(628)).unwrap();
+        let adapted = graft::add_enemy_group(data(628), data(187), "e_nume").unwrap();
+        let p = Pack::parse(&adapted).unwrap();
+        let mut blocked = 0;
+        for &model in super::super::encounters::RIVER_RANGED {
+            if r.stages[&628].residents.contains_key(model) {
+                eprintln!("DONOR {variable} {model}: resident");
+                continue;
+            }
+            let variants: Vec<_> = r.donors.iter().filter(|((m, _), _)| *m == model).collect();
+            let compatible = variants.iter().any(|(_, d)| d.profile.misfit(&p).is_none());
+            if !compatible {
+                blocked += 1;
+            }
+            for ((_, own), d) in variants {
+                eprintln!("DONOR {variable} {model}: source={} own_scene={own} actor_slots={} scene={:?} excluded_before={:?} excluded_after={:?}", d.source, d.ram, d.profile.scene, d.profile.misfit(&native), d.profile.misfit(&p));
+            }
+        }
+        eprintln!("DONOR TOTAL {variable}: {blocked} nonresident families excluded");
+    }
+}
+
+/// Build a read-only-input, single-stage image for emulator verification.
+/// Requires DW4_RIVER_INPUT, DW4_RIVER_OUTPUT and DW4_RANDOM_FORCE (one model).
+#[test]
+#[ignore]
+fn probe_build_river_image() {
+    let input = env::var_os("DW4_RIVER_INPUT").expect("DW4_RIVER_INPUT");
+    let output = env::var_os("DW4_RIVER_OUTPUT").expect("DW4_RIVER_OUTPUT");
+    let model = env::var("DW4_RANDOM_FORCE").expect("DW4_RANDOM_FORCE");
+    assert!(super::super::encounters::RIVER_RANGED.contains(&model.as_str()));
+    let file = std::fs::File::open(input).unwrap();
+    let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let gc = crate::gcm::game_id(&iso).is_ok();
+    let options = Options {
+        seed: 67,
+        donors: 1,
+        warp: None,
+        only: Some(vec![628]),
+    };
+    let crowns = env::var_os("DW4_RIVER_CROWNS").is_some();
+    let plan = if gc {
+        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), crowns)
+    } else {
+        CrownPlan::build_with_balance(&iso, false, false, false, 0, None, Some(options), crowns)
+    }
+    .unwrap();
+    let mut out = std::fs::File::create_new(&output).unwrap();
+    plan.write_image(&iso, &mut out).unwrap();
+    drop(out);
+    let file = std::fs::File::open(&output).unwrap();
+    let written = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    plan.verify(&iso, &written).unwrap();
+    let base = if gc {
+        crate::gcm::find_file(&written, "NDMW.AFS").unwrap().offset as usize
+    } else {
+        crate::iso9660::find_file(&written, "NDMW.AFS").unwrap().lba as usize * 2048
+    };
+    let afs = &written[base..];
+    let offset = u32at(afs, 8 + 8 * 628).unwrap() as usize;
+    let size = u32at(afs, 12 + 8 * 628).unwrap() as usize;
+    let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+    let info = p.named("beAction2Info", &model).unwrap();
+    let (parent, _) = graft::parent_group(&p, p.val(info, 7).unwrap()).unwrap();
+    assert!(p.rec(parent).unwrap().named(p.b, "EM01"));
+    eprintln!(
+        "RIVER IMAGE {model}: {} bytes verified; shared enemy scene registered",
+        written.len()
+    );
+}
+
+/// Build through the same complete Crown Mod + randomizer pipeline as the app.
+#[test]
+#[ignore]
+fn probe_build_river_production_image() {
+    let input = std::path::PathBuf::from(env::var_os("DW4_RIVER_INPUT").expect("DW4_RIVER_INPUT"));
+    let output =
+        std::path::PathBuf::from(env::var_os("DW4_RIVER_OUTPUT").expect("DW4_RIVER_OUTPUT"));
+    let plan = crate::plan::PatchPlan {
+        random_enemies: true,
+        enemy_seed: Some(67),
+        ..Default::default()
+    };
+    let outcome = crate::patch::patch_file(
+        &input,
+        &output,
+        &plan,
+        &crate::patch::PatchOptions { overwrite: false },
+        &mut |_| {},
+    )
+    .unwrap();
+    let signed = crate::signature::read_raw(&output).unwrap().unwrap();
+    assert_eq!(signed["options"]["crownMod"], true);
+    assert_eq!(signed["randomEnemies"]["rulesVersion"], RULES_VERSION);
+    eprintln!(
+        "PRODUCTION IMAGE {} bytes, MD5 {}; randomizer {}",
+        outcome.bytes, outcome.md5, signed["randomEnemies"]
+    );
+}
+
+/// Inspect split-file enemy resources before adding a donor adapter.
+#[test]
+#[ignore]
+fn probe_external_enemy_resources() {
+    let path = env::var_os("DW4_EXTERNAL_INPUT").expect("DW4_EXTERNAL_INPUT");
+    let file = std::fs::File::open(path).unwrap();
+    let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let release = crate::release::detect(&iso).unwrap();
+    let base = if release.is_gamecube() {
+        crate::gcm::find_file(&iso, "NDMW.AFS").unwrap().offset as usize
+    } else {
+        crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap().lba as usize * 2048
+    };
+    let afs = &iso[base..];
+    for entry in [649, 650, 651] {
+        let offset = u32at(afs, 8 + 8 * entry).unwrap() as usize;
+        let size = u32at(afs, 12 + 8 * entry).unwrap() as usize;
+        let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+        eprintln!(
+            "PACK {entry}: bytes {size}, ids {}, profile {:?}",
+            p.ids.len(),
+            graft::profile(&p, "e_arachne").map(|v| (v.ram, v.scene))
+        );
+        for (id, directory) in p.mapping.iter().enumerate() {
+            let d = &p.dirs[*directory as usize];
+            let class = &p.classes[d.class].name;
+            if class.starts_with("igExternal") {
+                eprintln!(
+                    "EXTERNAL id={id} {class} {:?}",
+                    d.fields
+                        .iter()
+                        .map(|(n, r)| (*n, format!("{:?}", &p.b[r.clone()])))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        for (id, index) in p.ids.iter().enumerate() {
+            let Some(index) = index else { continue };
+            let record = &p.objects[*index];
+            let class = &p.classes[record.class].name;
+            let name = graft::name_of(&p, record)
+                .map(|n| String::from_utf8_lossy(n).into_owned())
+                .unwrap_or_default();
+            if name.to_ascii_lowercase().contains("arachne")
+                || class == "beModelCtrlInfo"
+                || class == "igSceneInfo"
+            {
+                eprintln!("OBJECT {id} {class} {name:?}");
+                for (&slot, range) in &record.fields {
+                    let bytes = &p.b[range.clone()];
+                    if bytes.len() <= 128 {
+                        eprintln!("  slot {slot}: {bytes:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Prototype a self-contained Arukenimon donor without changing pool eligibility.
+#[test]
+#[ignore]
+fn probe_arukenimon_composed_source() {
+    let file = std::fs::File::open(env::var_os("DW4_EXTERNAL_INPUT").unwrap()).unwrap();
+    let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let release = crate::release::detect(&iso).unwrap();
+    let base = if release.is_gamecube() {
+        crate::gcm::find_file(&iso, "NDMW.AFS").unwrap().offset as usize
+    } else {
+        crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap().lba as usize * 2048
+    };
+    let afs = &iso[base..];
+    let data = |entry: usize| {
+        let o = u32at(afs, 8 + 8 * entry).unwrap() as usize;
+        let n = u32at(afs, 12 + 8 * entry).unwrap() as usize;
+        &afs[o..o + n]
+    };
+    let grouped = graft::add_enemy_group(data(650), data(187), "e_arachne").unwrap();
+    let asset = Pack::parse(&grouped).unwrap();
+    let main = Pack::parse(data(649)).unwrap();
+    let profile = graft::profile(&asset, "e_arachne").unwrap();
+    eprintln!(
+        "GROUPED profile ram={} scene={:?}; misfit={:?}",
+        profile.ram,
+        profile.scene,
+        profile.misfit(&main)
+    );
+    assert!(profile.misfit(&main).is_none());
+    let base = add_classes(data(649), &profile.missing(&main)).unwrap();
+    let (edits, report) = graft::graft(&base, &grouped, &["e_arachne".into()]).unwrap();
+    let combined = materialize(&base, &edits).unwrap();
+    eprintln!("COMBINED bytes={} report={report:?}", combined.len());
+    let p = Pack::parse(&combined).unwrap();
+    let profile = graft::profile(&p, "e_arachne").unwrap();
+    eprintln!(
+        "COMPLETE profile ram={} scene={:?}, ids={}",
+        profile.ram,
+        profile.scene,
+        p.ids.len()
+    );
+    assert!(graft::find_named(&p, "beLuaData", "hit_e_arachne.lua")
+        .unwrap()
+        .is_some());
+    if let Some(path) = env::var_os("DW4_ARUK_OUTPUT") {
+        std::fs::write(path, &combined).unwrap();
+    }
+    let (roots, _) = graft::model_roots(&p, "e_arachne").unwrap();
+    let (ids, _) = graft::closure(&p, &roots).unwrap();
+    for id in ids {
+        if p.class(id, "beLuaData").is_err() {
+            continue;
+        }
+        let name = graft::name_of(&p, p.rec(id).unwrap()).unwrap();
+        let object = p.val(id, 3).unwrap();
+        let size = p.val(object, 2).unwrap() as usize;
+        let range = p.memory[p.val(object, 3).unwrap() as usize]
+            .clone()
+            .unwrap();
+        let constants = lua_names::constants(&p.b[range.start..range.start + size]).unwrap();
+        eprintln!(
+            "SCRIPT {} {:?}",
+            String::from_utf8_lossy(name),
+            constants
+                .into_iter()
+                .map(|c| String::from_utf8_lossy(&c.text).into_owned())
+                .collect::<BTreeSet<_>>()
+        );
+    }
+    for target in [614, 621, 642, 679, 686] {
+        let native = Pack::parse(data(target)).unwrap();
+        eprintln!("TARGET {target} misfit={:?}", profile.misfit(&native));
+        if profile.misfit(&native).is_some() {
+            continue;
+        }
+        let missing = profile.missing(&native);
+        let base = if missing.is_empty() {
+            data(target).to_vec()
+        } else {
+            add_classes(data(target), &missing).unwrap()
+        };
+        let (edits, report) = graft::graft(&base, &combined, &["e_arachne".into()]).unwrap();
+        let out = materialize(&base, &edits).unwrap();
+        eprintln!("TARGET {target} bytes={} report={report:?}", out.len());
+    }
+}
+
+/// Build a focused native-playtest image with Arukenimon on Goblin Pass's first generator.
+#[test]
+#[ignore]
+fn probe_build_arukenimon_native_image() {
+    let input = std::path::PathBuf::from(env::var_os("DW4_ARUK_INPUT").unwrap());
+    let output = std::path::PathBuf::from(env::var_os("DW4_ARUK_OUTPUT").unwrap());
+    let file = std::fs::File::open(&input).unwrap();
+    let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let release = crate::release::detect(&iso).unwrap();
+    let (base, size) = if release.is_gamecube() {
+        let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+        (f.offset as usize, f.size as usize)
+    } else {
+        let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+        (f.lba as usize * 2048, f.size as usize)
+    };
+    let afs = &iso[base..base + size];
+    let entries: Vec<_> = (0..u32at(afs, 4).unwrap() as usize)
+        .map(|i| {
+            (
+                u32at(afs, 8 + i * 8).unwrap() as usize,
+                u32at(afs, 12 + i * 8).unwrap() as usize,
+            )
+        })
+        .collect();
+    let data = |entry: usize| {
+        let (o, n) = entries[entry];
+        &afs[o..o + n]
+    };
+    let layout = release.layout_in(&iso).unwrap();
+    let stage = env::var("DW4_ARUK_STAGE")
+        .ok()
+        .map(|v| v.parse::<usize>().unwrap())
+        .unwrap_or(614);
+    let stages = if stage == 686 {
+        vec![679, 686]
+    } else {
+        vec![stage]
+    };
+    let donors = if stage == 686 { 4 } else { 1 };
+    let mut random = Randomiser::scan(
+        afs,
+        &entries,
+        EnemyTable::read(&iso, &layout).unwrap(),
+        Options {
+            seed: 1,
+            donors,
+            warp: None,
+            only: Some(stages.clone()),
+        },
+    )
+    .unwrap();
+    let generator_packs = random.stages[&stage].gens.clone();
+    let expanded = materialize(data(stage), &expand(data(stage)).unwrap()).unwrap();
+    let mut selected = None;
+    for seed in 1..=64 {
+        random.opts.seed = seed;
+        random.plans.clear();
+        random.rewards.clear();
+        random.sounds.clear();
+        random.stats = Stats::default();
+        random.log.clear();
+        let model = random
+            .stage(stage, expanded.clone(), afs, &entries)
+            .unwrap();
+        let sites: &[&str] = if stage == 686 {
+            &["GENE-139", "GENE-131"]
+        } else {
+            &["GENE-00"]
+        };
+        if sites.iter().any(|site| {
+            random.plans[&generator_packs[0]]
+                .rows
+                .get(*site)
+                .copied()
+                .and_then(family)
+                == Some("e_arachne")
+        }) {
+            selected = Some((seed, model));
+            break;
+        }
+    }
+    let (seed, model) = selected.expect("no first-generator Arukenimon seed found");
+    let mut spawns = Vec::new();
+    for pack in generator_packs {
+        let before = Pack::parse(data(pack)).unwrap();
+        for gen in generators(&before).unwrap() {
+            if random.plans[&pack]
+                .rows
+                .get(&gen.name)
+                .copied()
+                .and_then(family)
+                == Some("e_arachne")
+            {
+                let row = random.rewards[&stage].targets[&pack][&gen.name];
+                spawns.push(serde_json::json!({"pack":pack,"name":gen.name,"row":row,"position":gen.pos,"most":gen.most,"sequence":random.plans[&pack].sequences.get(&gen.name)}));
+            }
+        }
+    }
+    let slots = super::super::capacity::slots(&Pack::parse(&model).unwrap(), "e_arachne").unwrap();
+    let options = Options {
+        seed,
+        donors,
+        warp: None,
+        only: Some(stages),
+    };
+    let plan = if release.is_gamecube() {
+        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), false)
+    } else {
+        CrownPlan::build_with_balance(&iso, false, false, false, 0, None, Some(options), false)
+    }
+    .unwrap();
+    let mut out = std::fs::File::create_new(&output).unwrap();
+    plan.write_image(&iso, &mut out).unwrap();
+    drop(out);
+    let file = std::fs::File::open(&output).unwrap();
+    let written = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    plan.verify(&iso, &written).unwrap();
+    drop(written);
+    drop(file);
+    let settings = crate::plan::PatchPlan {
+        crown_mod: false,
+        random_enemies: true,
+        enemy_seed: Some(seed as u32),
+        ..Default::default()
+    };
+    let report = crate::disc::inspect_retail_bytes(&iso).unwrap();
+    let (regions, _) = crate::patch::plan_regions(&iso, &report, &settings, &layout).unwrap();
+    use std::io::{Seek, SeekFrom, Write};
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&output)
+        .unwrap();
+    for region in regions {
+        let start = region.offset as usize;
+        // Unchanged authored table copies must not overwrite the area-local
+        // variants already verified by the archive writer.
+        if iso[start..start + region.bytes.len()] == region.bytes {
+            continue;
+        }
+        out.seek(SeekFrom::Start(region.offset)).unwrap();
+        out.write_all(&region.bytes).unwrap();
+    }
+    let evidence = serde_json::json!({"seed":seed,"stage":stage,"forcedDonor":"e_arachne","actorSlots":slots,"spawns":spawns,"summary":random.summary(),"imageBytes":std::fs::metadata(&output).unwrap().len()});
+    std::fs::write(
+        output.with_extension("json"),
+        serde_json::to_vec_pretty(&evidence).unwrap(),
+    )
+    .unwrap();
+    eprintln!("ARUKENIMON NATIVE IMAGE {evidence}");
+}

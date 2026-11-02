@@ -463,7 +463,7 @@ pub(super) fn model_scene(sp: &Pack, model: &str) -> Result<ModelScene> {
 /// The effect number each enemy model owns: its bullets and magic are `x_NNNe...` models and
 /// `y_NNNe...` effects (Infermon is 026). Read off which models every stage using the number
 /// carries (`probe_numbers`).
-pub(super) const EFFECT_NUMBERS: [(&str, &str); 29] = [
+pub(super) const EFFECT_NUMBERS: [(&str, &str); 30] = [
     ("e_goburi", "001"),
     ("e_cockatri", "002"),
     ("e_nume", "003"),
@@ -472,6 +472,7 @@ pub(super) const EFFECT_NUMBERS: [(&str, &str); 29] = [
     ("e_blosso", "006"),
     ("e_mammos", "007"),
     ("e_mecha1", "008"),
+    ("e_arachne", "009"),
     ("e_tyrano", "010"),
     ("e_mummy", "011"),
     ("e_minotaru", "012"),
@@ -766,6 +767,89 @@ fn effect_switches(
     Ok(out)
 }
 
+/// Give a standalone enemy scene the ordinary shared enemy group. The native
+/// switch remains a child of the same scene; later imports can join EM01 using
+/// the normal graft path. Copy only the donor's plain group and an empty list,
+/// never the donor's actors, world scene or their texture/animation resources.
+pub(super) fn add_enemy_group(dst: &[u8], src: &[u8], native: &str) -> Result<Vec<u8>> {
+    let dp = Pack::parse(dst)?;
+    if group_children(&dp, b"EM01").is_ok() {
+        return Ok(dst.to_vec());
+    }
+    let scene = dp.named("igSceneInfo", native)?;
+    let switch = dp.val(dp.named("beAction2Info", native)?, 7)?;
+    need(
+        dp.val(scene, 5)? == switch,
+        "native scene root is not its model switch",
+    )?;
+    need(
+        dp.array(dp.val(scene, 11)?)?.is_empty(),
+        "native scene has additional roots",
+    )?;
+    let source = Pack::parse(src)?;
+    let group = source.named("igGroup", "EM01")?;
+    let list = group_children(&source, b"EM01")?;
+    let block = source.val(list, 4)?;
+    // The temporary source keeps all old backing references neutral. Its new
+    // zero-length list owns no sibling actors and can grow normally after copy.
+    let mut prune = Builder::new(&source);
+    let empty = prune.mem(Vec::new(), block)?;
+    prune.modify(list, &[(2, 0), (3, 0), (4, empty)])?;
+    let old = source.memory[block as usize]
+        .as_ref()
+        .ok_or_else(|| bad("missing enemy group block"))?;
+    prune.rewrite_mem(block, words(&vec![NULL; old.len() / 4]))?;
+    let pruned = materialize(src, &prune.finish(block)?)?;
+    let sp = Pack::parse(&pruned)?;
+    let (ids, owners) = closure(&sp, &[group])?;
+    check_blocks(&sp, &ids, &owners)?;
+    need(
+        ids.iter().all(|&id| {
+            sp.ids[id as usize].is_none_or(|index| {
+                matches!(
+                    sp.classes[sp.objects[index].class].name.as_str(),
+                    "igGroup" | "igNodeList"
+                )
+            })
+        }),
+        "enemy scene template contains more than a plain group",
+    )?;
+
+    let mut builder = Builder::new(&dp);
+    let map = copy_graph(
+        &dp,
+        &sp,
+        &mut builder,
+        &ids,
+        &owners,
+        &mut Report::default(),
+    )?;
+    let grows = builder.grown();
+    let rewrites = builder.rewrites.clone();
+    let registry = u32at(dp.b, dp.table + 8 + 2 * dp.ids.len())?;
+    let out = materialize(dst, &builder.finish(dp.val(registry, 4)?)?)?;
+    verify(&dp, &sp, &out, &map, &owners, &grows, &rewrites)?;
+    // Attach the native switch only after the copied empty list has real IDs.
+    let p = Pack::parse(&out)?;
+    let mut builder = Builder::new(&p);
+    let children = map[&list];
+    let memory = p.val(children, 4)?;
+    builder.grow_mem(memory, words(&[switch]))?;
+    builder.modify(children, &[(2, 1), (3, 1)])?;
+    builder.modify(scene, &[(5, map[&group])])?;
+    let result = materialize(&out, &builder.finish(memory)?)?;
+    let after = Pack::parse(&result)?;
+    need(
+        after.array(group_children(&after, b"EM01")?)? == vec![switch],
+        "enemy scene registration failed",
+    )?;
+    need(
+        after.val(scene, 5)? == map[&group],
+        "enemy scene root differs",
+    )?;
+    Ok(result)
+}
+
 /// Copy the named models' record subgraphs, scripts included, from `src` into `dst`.
 pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Edit>, Report)> {
     let dp = Pack::parse(dst)?;
@@ -829,11 +913,11 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
         }
         for prefix in MODEL_SCRIPTS {
             let name = format!("{prefix}{m}.lua");
-            need(
-                find_named(&dp, "beLuaData", &name)?.is_none(),
-                "destination already carries the script",
-            )?;
             if let Some(id) = find_named(&sp, "beLuaData", &name)? {
+                need(
+                    find_named(&dp, "beLuaData", &name)?.is_none(),
+                    "destination already carries the script",
+                )?;
                 roots.push(id);
                 scripts.push((name.into_bytes(), id));
             }

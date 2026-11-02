@@ -23,6 +23,14 @@ Open the app and choose your own copy of the game to create a new, modded copy.
 
 Patching a clean disc leaves your original file unchanged.
 
+## Share settings
+
+Use **Export settings…** in the Settings panel to save your options and enemy
+seed as a JSON file. **Import settings…** restores them without selecting a disc
+or restoring file paths. You can import or export before choosing a disc.
+Invalid or unsupported settings files leave your current options unchanged.
+The same randomiser seed reproduces enemy choices within the same rules version.
+
 ## What the mod does
 
 - **Optional Crown Mod.** Boost enemy health, combat stats and EXP, with crowns for every enemy. Its EXP popups display up to 99,999.

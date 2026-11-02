@@ -3,9 +3,13 @@
 //! Imported models can fill the stage arena while the general arena still has
 //! room. Objects carry their allocator identity, so the normal destructor and
 //! list-buffer helpers continue to free through the allocator that owns them.
-//! Leave serialized data and explicitly selected pools alone. The soft limit
+//! Object routing leaves serialized data and explicitly selected pools alone. The soft limit
 //! reserves general-arena space for buffers that grow after object creation,
 //! Lua and texture conversion; it does not change the randomized resource plan.
+//! Fresh system/rendering allocations can also fail after scene arenas have borrowed
+//! the remaining backing memory. Retry them in the general arena, and resolve the
+//! owner again when either caller later resizes or frees the buffer. Failed
+//! buffer growth can migrate to another arena without losing the old payload.
 use crate::{
     disc::DiscReport,
     error::{Error, Result},
@@ -14,10 +18,13 @@ use crate::{
 };
 use md5::{Digest, Md5};
 
+const RESIZE_CODE: u32 = 0x8000_3bc0;
+const COPY_BYTES: u32 = 0x8000_31e8;
 const CODE: u32 = 0x8000_4b00;
-const OWNER_CODE: u32 = 0x8000_4c00;
+const OWNER_CODE: u32 = 0x8000_4b80;
 const ALLOCATION_CODE: u32 = 0x8000_4d00;
-const ORIGINAL_CODE: u32 = 0x8000_4e00;
+const ORIGINAL_CODE: u32 = 0x8000_4e80;
+const ALLOCATION_GUARD: u32 = 0x8000_4e88;
 const GENERAL_OBJECT_LIMIT: u32 = 4 * 1024 * 1024;
 
 fn bad() -> Error {
@@ -88,6 +95,10 @@ fn owner_stub(_operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
     emit!(0x28040000);
     jump!(0x41820000, "original");
     emit!(0x800300b4);
+    emit!(0x2c000000); // system pool can borrow from the general arena
+    jump!(0x41820000, "setup");
+    emit!(0x2c000006); // rendering pool also needs fresh backing during encounters
+    jump!(0x41820000, "setup");
     emit!(0x2c00000a);
     jump!(0x41820000, "setup");
     emit!(0x2c00000c);
@@ -99,15 +110,18 @@ fn owner_stub(_operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
     for (reg, offset) in [(3, 40), (4, 44), (5, 48), (6, 52)] {
         emit!(0x90010000 | reg << 21 | offset);
     }
-    call!(owns);
-    emit!(0x28030000);
-    jump!(0x40820000, "restore");
+    // Native ownership lookup consults the global pool table internally.
+    // System-pool calls also occur while that table is being constructed.
     emit!(0x816d0000 | u32::from(pools_sda));
     emit!(0x280b0000);
     jump!(0x41820000, "restore");
     emit!(0x800b0004);
     emit!(0x28000007);
     jump!(0x41800000, "restore");
+    call!(owns);
+    emit!(0x28030000);
+    jump!(0x40820000, "restore");
+    emit!(0x816d0000 | u32::from(pools_sda));
     emit!(0x816b0000);
     emit!(0x81810028);
     emit!(0x800c00b4);
@@ -128,7 +142,31 @@ fn owner_stub(_operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
     emit!(0x8081002c);
     call!(owns);
     emit!(0x28030000);
+    jump!(0x40820000, "found");
+    // A failed system/rendering allocation can borrow a general block. That block
+    // may subsequently grow into the stage arena, so check both owners.
+    emit!(0x81810028);
+    emit!(0x800c00b4);
+    emit!(0x2c000000);
+    jump!(0x41820000, "second_owner");
+    emit!(0x2c000006);
+    jump!(0x40820000, "restore");
+    mark!("second_owner");
+    emit!(0x816d0000 | u32::from(pools_sda));
+    emit!(0x816b0000);
+    emit!(0x806b0018);
+    emit!(0x28030000);
     jump!(0x41820000, "restore");
+    emit!(0x80030000);
+    emit!(0x816c0000);
+    emit!(0x7c005800);
+    jump!(0x40820000, "restore");
+    emit!(0x90610038);
+    emit!(0x8081002c);
+    call!(owns);
+    emit!(0x28030000);
+    jump!(0x41820000, "restore");
+    mark!("found");
     emit!(0x80010038);
     emit!(0x90010028);
     mark!("restore");
@@ -155,7 +193,8 @@ fn owner_stub(_operation: u32, owns: u32, pools_sda: u16) -> Vec<u8> {
 }
 
 /// A fragmented arena can have ample total free space yet fail a large fresh
-/// array allocation. Retry that allocation in the other existing arena. Never
+/// array allocation. Retry that allocation in the other existing arena, or in
+/// the general arena when system/rendering pools run out of backing memory. Never
 /// retry a resize/free with a foreign pointer; owner_stub handles those first.
 fn allocation_stub(operation: u32, pools_sda: u16) -> Vec<u8> {
     let mut w = Vec::new();
@@ -179,16 +218,33 @@ fn allocation_stub(operation: u32, pools_sda: u16) -> Vec<u8> {
     }
     macro_rules! call_original {
         () => {
+            // Child arenas obtain backing from the system pool. Keep native
+            // nested allocation behavior so a retry cannot call itself or
+            // reenter an arena whose allocation is already in progress.
+            emit!(0x3d608000); // lis r11,0x8000
+            emit!(0x38000001);
+            emit!(0x900b0000 | (ALLOCATION_GUARD & 0xffff));
             emit!(branch(ALLOCATION_CODE + w.len() as u32 * 4, ORIGINAL_CODE) | 1);
+            emit!(0x3d608000);
+            emit!(0x38000000);
+            emit!(0x900b0000 | (ALLOCATION_GUARD & 0xffff));
         };
     }
-    emit!(0x28040000); // old buffer
+    emit!(0x3d608000);
+    emit!(0x816b0000 | (ALLOCATION_GUARD & 0xffff));
+    emit!(0x2c0b0000);
     jump!(0x40820000, "original");
+    emit!(0x28040000); // old buffer
+    jump!(0x40820000, "resize");
     emit!(0x28050000); // zero-size operations retain native behavior
     jump!(0x41820000, "original");
     emit!(0x2c05ffff); // -1 is the native free operation
     jump!(0x41820000, "original");
     emit!(0x800300b4);
+    emit!(0x2c000000); // system pool can borrow from the general arena
+    jump!(0x41820000, "setup");
+    emit!(0x2c000006); // rendering pool also needs fresh backing during encounters
+    jump!(0x41820000, "setup");
     emit!(0x2c00000a);
     jump!(0x41820000, "setup");
     emit!(0x2c00000c);
@@ -237,9 +293,151 @@ fn allocation_stub(operation: u32, pools_sda: u16) -> Vec<u8> {
     emit!(0x7c0803a6);
     emit!(0x38210050);
     emit!(0x4e800020);
+    mark!("resize");
+    emit!(branch(ALLOCATION_CODE + w.len() as u32 * 4, RESIZE_CODE));
     mark!("original");
     emit!(0x9421ffb0);
     emit!(branch(ALLOCATION_CODE + w.len() as u32 * 4, operation + 4));
+    for (index, op, label) in fixups {
+        let offset = (labels[label] as isize - index as isize) * 4;
+        w[index] = op
+            | if op == 0x48000000 {
+                offset as u32 & 0x03fffffc
+            } else {
+                offset as u32 & 0xfffc
+            };
+    }
+    encoded(&w)
+}
+
+/// Preserve native realloc first. If it cannot grow an existing block, allocate
+/// elsewhere, copy only the old usable payload (bounded by the new size), and
+/// free the old block only after allocation/copy succeed. Native failure leaves
+/// the original block allocated; its free path is gated on successful allocation.
+fn resize_stub(owns: u32, pools_sda: u16) -> Vec<u8> {
+    let mut w = Vec::new();
+    let mut labels = std::collections::BTreeMap::new();
+    let mut fixups = Vec::new();
+    macro_rules! emit {
+        ($op:expr) => {
+            w.push($op)
+        };
+    }
+    macro_rules! mark {
+        ($name:literal) => {
+            labels.insert($name, w.len());
+        };
+    }
+    macro_rules! jump {
+        ($op:expr, $name:literal) => {{
+            fixups.push((w.len(), $op, $name));
+            emit!($op);
+        }};
+    }
+    macro_rules! call {
+        ($target:expr) => {
+            emit!(branch(RESIZE_CODE + w.len() as u32 * 4, $target) | 1);
+        };
+    }
+    macro_rules! native {
+        () => {
+            emit!(0x3d608000);
+            emit!(0x38000001);
+            emit!(0x900b0000 | (ALLOCATION_GUARD & 0xffff));
+            call!(ORIGINAL_CODE);
+            emit!(0x3d608000);
+            emit!(0x38000000);
+            emit!(0x900b0000 | (ALLOCATION_GUARD & 0xffff));
+        };
+    }
+    emit!(0x3d608000);
+    emit!(0x816b0000 | (ALLOCATION_GUARD & 0xffff));
+    emit!(0x2c0b0000);
+    jump!(0x40820000, "original");
+    emit!(0x28040000);
+    jump!(0x41820000, "original");
+    emit!(0x28050000);
+    jump!(0x41820000, "original");
+    emit!(0x2c05ffff);
+    jump!(0x41820000, "original");
+    emit!(0x800300b4);
+    for id in [0, 6, 10] {
+        emit!(0x2c000000 | id);
+        jump!(0x41820000, "setup");
+    }
+    emit!(0x2c00000c);
+    jump!(0x40820000, "original");
+    mark!("setup");
+    emit!(0x9421ffb0);
+    emit!(0x7c0802a6);
+    emit!(0x9001004c);
+    for (reg, offset) in [(3, 40), (4, 44), (5, 48), (6, 52)] {
+        emit!(0x90010000 | reg << 21 | offset);
+    }
+    native!();
+    emit!(0x28030000);
+    jump!(0x40820000, "return");
+    emit!(0x816d0000 | u32::from(pools_sda));
+    emit!(0x280b0000);
+    jump!(0x41820000, "failure");
+    emit!(0x800b0004);
+    emit!(0x28000007);
+    jump!(0x41800000, "failure");
+    emit!(0x816b0000);
+    emit!(0x81810028);
+    emit!(0x800c00b4);
+    emit!(0x2c00000a);
+    jump!(0x40820000, "general");
+    emit!(0x806b0018);
+    jump!(0x48000000, "candidate");
+    mark!("general");
+    emit!(0x806b0014);
+    mark!("candidate");
+    emit!(0x28030000);
+    jump!(0x41820000, "failure");
+    emit!(0x80030000);
+    emit!(0x816c0000);
+    emit!(0x7c005800);
+    jump!(0x40820000, "failure");
+    emit!(0x90610040); // alternate allocator
+    emit!(0x80610028);
+    emit!(0x8081002c);
+    call!(owns + 0xd4); // native GetAllocationSize, handles aligned blocks
+    emit!(0x80010030);
+    emit!(0x7c030040); // cmplw r3,r0
+    jump!(0x40810000, "copy_size");
+    emit!(0x7c030378); // mr r3,r0
+    mark!("copy_size");
+    emit!(0x90610038);
+    emit!(0x80610040);
+    emit!(0x38800000);
+    emit!(0x80a10030);
+    emit!(0x80c10034);
+    // Reuse the guarded fresh-allocation fallback; never pass the old pointer
+    // to a foreign allocator. It may try both existing scene arenas.
+    call!(ALLOCATION_CODE);
+    emit!(0x28030000);
+    jump!(0x41820000, "return");
+    emit!(0x9061003c);
+    emit!(0x8081002c);
+    emit!(0x80a10038);
+    call!(COPY_BYTES);
+    emit!(0x80610028);
+    emit!(0x8081002c);
+    emit!(0x38a0ffff);
+    emit!(0x80c10034);
+    native!();
+    emit!(0x8061003c);
+    jump!(0x48000000, "return");
+    mark!("failure");
+    emit!(0x38600000);
+    mark!("return");
+    emit!(0x8001004c);
+    emit!(0x7c0803a6);
+    emit!(0x38210050);
+    emit!(0x4e800020);
+    mark!("original");
+    emit!(branch(RESIZE_CODE + w.len() as u32 * 4, ORIGINAL_CODE));
     for (index, op, label) in fixups {
         let offset = (labels[label] as isize - index as isize) * 4;
         w[index] = op
@@ -339,13 +537,15 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
         }
     }
     let code = stub(site, word(iso, getter_at + 8 * 4)? as u16);
-    let code_at = map(iso, CODE, 256)?;
-    if iso[code_at..code_at + 256].iter().any(|byte| *byte != 0) {
+    let code_at = map(iso, CODE, 128)?;
+    if iso[code_at..code_at + 128].iter().any(|byte| *byte != 0) {
         return Err(bad());
     }
     for (address, fingerprint) in [
         (operation, "71a57239b7468038dfc4cf34e69278bd"),
         (owns, "c52539cabfc21bc5d5966949c49f4f46"),
+        (owns + 0xd4, "83bf3e64a45badd11b35863e41e0b00f"),
+        (COPY_BYTES, "edc3386040764921fd11baf9a2fcd4d9"),
     ] {
         let offset = map(iso, address, 32)?;
         if format!("{:x}", Md5::digest(&iso[offset..offset + 32])) != fingerprint {
@@ -353,19 +553,28 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
         }
     }
     let owner = owner_stub(operation, owns, word(iso, getter_at + 8 * 4)? as u16);
-    let owner_at = map(iso, OWNER_CODE, 256)?;
-    if owner.len() > 256 || iso[owner_at..owner_at + 256].iter().any(|byte| *byte != 0) {
+    let owner_at = map(iso, OWNER_CODE, 384)?;
+    if owner.len() > 384 || iso[owner_at..owner_at + 384].iter().any(|byte| *byte != 0) {
         return Err(bad());
     }
     let allocation = allocation_stub(operation, word(iso, getter_at + 8 * 4)? as u16);
-    let allocation_at = map(iso, ALLOCATION_CODE, 256)?;
+    let allocation_at = map(iso, ALLOCATION_CODE, 384)?;
     let original_at = map(iso, ORIGINAL_CODE, 8)?;
-    if allocation.len() > 256
-        || iso[allocation_at..allocation_at + 256]
+    let guard_at = map(iso, ALLOCATION_GUARD, 4)?;
+    if word(iso, guard_at)? != 0 {
+        return Err(bad());
+    }
+    if allocation.len() > 384
+        || iso[allocation_at..allocation_at + 384]
             .iter()
             .any(|b| *b != 0)
         || iso[original_at..original_at + 8].iter().any(|b| *b != 0)
     {
+        return Err(bad());
+    }
+    let resize = resize_stub(owns, word(iso, getter_at + 8 * 4)? as u16);
+    let resize_at = map(iso, RESIZE_CODE, 704)?;
+    if resize.len() > 704 || iso[resize_at..resize_at + 704].iter().any(|b| *b != 0) {
         return Err(bad());
     }
     Ok(vec![
@@ -392,6 +601,10 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
         WriteRegion {
             offset: original_at as u64,
             bytes: encoded(&[0x9421ffb0, branch(ORIGINAL_CODE + 4, operation + 4)]),
+        },
+        WriteRegion {
+            offset: resize_at as u64,
+            bytes: resize,
         },
     ])
 }
@@ -503,12 +716,22 @@ mod tests {
         use std::collections::BTreeMap;
         let general = 0x805803d0u32;
         let main = 0x805804a8u32;
+        let system = 0x80579da8u32;
         for (requested, owner, buffer, count, expected_calls, expected) in [
+            (0x805bc918, general, 0x81000000u32, 7, 2, general),
+            (0x805bc918, main, 0x81000000, 7, 3, main),
+            (system, general, 0x81000000u32, 0, 0, system),
+            (system, general, 0x81000000, u32::MAX, 0, system),
+            (system, system, 0x81000000, 7, 1, system),
+            (system, general, 0x81000000, 7, 2, general),
+            (system, main, 0x81000000, 7, 3, main),
+            (system, 0, 0x81000000, 7, 3, system),
+            (system, main, 0, 7, 0, system),
             (general, main, 0x81000000u32, 7, 2, main),
             (main, general, 0x81000000, 7, 2, general),
             (main, main, 0x81000000, 7, 1, main),
             (main, 0, 0x81000000, 7, 2, main),
-            (general, main, 0x81000000, 6, 1, general),
+            (general, main, 0x81000000, 6, 0, general),
             (main, main, 0, 7, 0, main),
         ] {
             let words: Vec<_> = owner_stub(0x80085004, 0x80084928, 0xd258)
@@ -527,13 +750,20 @@ mod tests {
             let before = regs;
             let mut lr = 0x80012344;
             let mut mem = BTreeMap::from([
-                (regs[13].wrapping_add_signed(-11688), 0x80700000),
+                (
+                    regs[13].wrapping_add_signed(-11688),
+                    if count == u32::MAX { 0 } else { 0x80700000 },
+                ),
                 (0x80700004, count),
                 (0x80700000, 0x80701000),
                 (0x80701014, general),
                 (0x80701018, main),
                 (general, 0x80473928),
                 (main, 0x80473928),
+                (0x80579da8, 0x80473928),
+                (0x80579da8 + 180, 0),
+                (0x805bc918, 0x80473928),
+                (0x805bc918 + 180, 6),
                 (general + 180, 10),
                 (main + 180, 12),
             ]);
@@ -620,13 +850,27 @@ mod tests {
     }
 
     #[test]
-    fn fresh_buffer_fallback_preserves_native_contract_and_never_moves_existing_buffers() {
+    fn fresh_buffer_fallback_preserves_native_contract_and_delegates_existing_buffers() {
         let general = 0x805803d0u32;
         let main = 0x805804a8u32;
         let custom = 0x80582000u32;
         // (requested pool, old pointer, size, first succeeds, second succeeds,
         //  pool count, table present, alternate class matches, alternate exists)
         let cases = [
+            (0x805bc918, 0, 16384, false, true, 7, true, true, true),
+            (
+                0x805bc918, 0x81000000, 16384, false, true, 7, true, true, true,
+            ),
+            (0x80579da8, 0, 4208, false, true, 7, true, true, true),
+            (0x80579da8, 0, 4208, true, false, 7, true, true, true),
+            (0x80579da8, 0, 4208, false, false, 7, true, true, true),
+            (0x80579da8, 0, 4208, false, true, 6, true, true, true),
+            (0x80579da8, 0, 4208, false, true, 7, false, true, true),
+            (0x80579da8, 0, 4208, false, true, 7, true, false, true),
+            (0x80579da8, 0, 4208, false, true, 7, true, true, false),
+            (
+                0x80579da8, 0x81000000, 4208, false, true, 7, true, true, true,
+            ),
             (general, 0, 0x41000, true, false, 7, true, true, true),
             (general, 0, 0x41000, false, true, 7, true, true, true),
             (main, 0, 0x41000, false, true, 7, true, true, true),
@@ -642,7 +886,12 @@ mod tests {
             (general, 0, u32::MAX, false, true, 7, true, true, true),
             (custom, 0, 0x41000, false, true, 7, true, true, true),
         ];
-        for (requested, old, size, first_ok, second_ok, count, present, same_class, exists) in cases
+        for (
+            (requested, old, size, first_ok, second_ok, count, present, same_class, exists),
+            busy,
+        ) in cases
+            .into_iter()
+            .flat_map(|case| [(case, false), (case, true)])
         {
             let words: Vec<_> = allocation_stub(0x80085004, 0xd258)
                 .as_chunks::<4>()
@@ -650,7 +899,7 @@ mod tests {
                 .iter()
                 .map(|w| u32::from_be_bytes(*w))
                 .collect();
-            assert!(words.len() * 4 <= 256);
+            assert!(words.len() * 4 <= 384);
             let mut regs = std::array::from_fn::<_, 32, _>(|i| 0x81000000 + i as u32 * 256);
             regs[1] = 0x817ff000;
             regs[3] = requested;
@@ -684,9 +933,14 @@ mod tests {
                 (general, 0x80473928),
                 (main, 0x80473928),
                 (custom, 0x80473928),
+                (0x80579da8, 0x80473928),
+                (0x80579da8 + 180, 0),
+                (0x805bc918, 0x80473928),
+                (0x805bc918 + 180, 6),
                 (general + 180, 10),
                 (main + 180, 12),
                 (custom + 180, 14),
+                (ALLOCATION_GUARD, u32::from(busy)),
             ]);
             if !same_class {
                 mem.insert(alternate, 0x80470000);
@@ -723,6 +977,10 @@ mod tests {
                             address
                         }
                     }
+                    15 => {
+                        assert_eq!(ra, 0);
+                        regs[rd] = (w & 65535) << 16;
+                    }
                     10 => compare = regs[ra].cmp(&(w & 65535)),
                     11 => compare = (regs[ra] as i32).cmp(&(w as i16 as i32)),
                     31 if w == 0x7c0802a6 => regs[0] = lr,
@@ -747,6 +1005,7 @@ mod tests {
                         let target = (ALLOCATION_CODE + pc as u32 * 4).wrapping_add_signed(offset);
                         if w & 1 != 0 {
                             assert_eq!(target, ORIGINAL_CODE);
+                            assert_eq!(mem[&ALLOCATION_GUARD], 1);
                             calls.push((regs[3], regs[4], regs[5], regs[6]));
                             let success = if calls.len() == 1 {
                                 first_ok
@@ -764,7 +1023,7 @@ mod tests {
                             pc = ((target - ALLOCATION_CODE) / 4) as usize;
                             continue;
                         } else {
-                            assert_eq!(target, 0x80085008);
+                            assert!(target == 0x80085008 || target == RESIZE_CODE);
                             tail = true;
                             returned = true;
                             break;
@@ -782,12 +1041,21 @@ mod tests {
             assert!(returned);
             assert_eq!(&regs[13..32], &before[13..32]);
             assert_eq!(lr, caller);
-            let eligible = old == 0 && size != 0 && size != u32::MAX && requested != custom;
+            assert_eq!(mem[&ALLOCATION_GUARD], u32::from(busy));
+            let eligible =
+                !busy && old == 0 && size != 0 && size != u32::MAX && requested != custom;
             assert_eq!(tail, !eligible);
             if tail {
                 assert!(calls.is_empty());
                 assert_eq!(&regs[3..7], &before[3..7]);
-                assert_eq!(regs[1], before[1] - 80);
+                assert_eq!(
+                    regs[1],
+                    if old != 0 && !busy {
+                        before[1]
+                    } else {
+                        before[1] - 80
+                    }
+                );
             } else {
                 assert_eq!(regs[1], before[1]);
                 assert_eq!(calls[0], (requested, 0, size, 16));
@@ -797,6 +1065,281 @@ mod tests {
                     assert_eq!(calls[1], (alternate, 0, size, 16));
                 }
                 assert_eq!(regs[3] != 0, first_ok || retry && second_ok);
+            }
+        }
+    }
+
+    #[test]
+    fn failed_resize_migrates_payload_and_only_frees_after_success() {
+        let general = 0x805803d0u32;
+        let main = 0x805804a8u32;
+        let system = 0x80579da8u32;
+        let rendering = 0x805bc918u32;
+        let custom = 0x80582000u32;
+        let old = 0x81000000u32;
+        let new = 0x81100000u32;
+        // requested, old pointer, new size, usable old size, native succeeds,
+        // fresh succeeds, count, table present, class matches, candidate present, busy
+        let mut cases = Vec::new();
+        for requested in [system, rendering, general, main] {
+            for first_ok in [false, true] {
+                for fresh_ok in [false, true] {
+                    for old_size in [0, 17, 137] {
+                        cases.push((
+                            requested, old, 64, old_size, first_ok, fresh_ok, 7, true, true, true,
+                            false,
+                        ));
+                    }
+                }
+            }
+        }
+        for (requested, ptr, size, count, present, same_class, exists, busy) in [
+            (general, old, 512, 6, true, true, true, false),
+            (general, old, 512, 7, false, true, true, false),
+            (general, old, 512, 7, true, false, true, false),
+            (general, old, 512, 7, true, true, false, false),
+            (general, old, 512, 7, true, true, true, true),
+            (general, old, 0, 7, true, true, true, false),
+            (general, old, u32::MAX, 7, true, true, true, false),
+            (general, 0, 512, 7, true, true, true, false),
+            (custom, old, 512, 7, true, true, true, false),
+        ] {
+            cases.push((
+                requested, ptr, size, 137, false, true, count, present, same_class, exists, busy,
+            ));
+        }
+        let words: Vec<_> = resize_stub(0x80084928, 0xd258)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|w| u32::from_be_bytes(*w))
+            .collect();
+        assert!(words.len() * 4 <= 704);
+        for (
+            requested,
+            ptr,
+            size,
+            old_size,
+            first_ok,
+            fresh_ok,
+            count,
+            present,
+            same_class,
+            exists,
+            busy,
+        ) in cases
+        {
+            let alternate = if requested == general { main } else { general };
+            let mut regs = std::array::from_fn::<_, 32, _>(|i| 0x81200000 + i as u32 * 256);
+            regs[1] = 0x817ff000;
+            regs[3] = requested;
+            regs[4] = ptr;
+            regs[5] = size;
+            regs[6] = 32;
+            regs[13] = 0x80564f00;
+            let before = regs;
+            let caller = 0x80012344;
+            let mut lr = caller;
+            let mut mem = BTreeMap::from([
+                (
+                    regs[13].wrapping_add_signed(-11688),
+                    if present { 0x80700000 } else { 0 },
+                ),
+                (0x80700004, count),
+                (0x80700000, 0x80701000),
+                (
+                    0x80701014,
+                    if exists || requested == general {
+                        general
+                    } else {
+                        0
+                    },
+                ),
+                (
+                    0x80701018,
+                    if exists || requested == main { main } else { 0 },
+                ),
+                (general, 0x80473928),
+                (main, 0x80473928),
+                (system, 0x80473928),
+                (rendering, 0x80473928),
+                (custom, 0x80473928),
+                (general + 180, 10),
+                (main + 180, 12),
+                (system + 180, 0),
+                (rendering + 180, 6),
+                (custom + 180, 14),
+                (ALLOCATION_GUARD, u32::from(busy)),
+            ]);
+            if !same_class {
+                mem.insert(alternate, 0x80470000);
+            }
+            let payload: Vec<u8> = (0..old_size).map(|i| (i * 17) as u8).collect();
+            let mut copied = Vec::new();
+            let mut alive = true;
+            let mut native_calls = 0;
+            let mut fresh_calls = 0;
+            let mut size_calls = 0;
+            let mut compare = Ordering::Equal;
+            let mut pc = 0usize;
+            let mut tail = false;
+            let mut returned = false;
+            for _ in 0..240 {
+                let w = words[pc];
+                let rd = ((w >> 21) & 31) as usize;
+                let ra = ((w >> 16) & 31) as usize;
+                let rb = ((w >> 11) & 31) as usize;
+                let address = regs[ra].wrapping_add_signed(w as i16 as i32);
+                match w >> 26 {
+                    32 => {
+                        regs[rd] = *mem
+                            .get(&address)
+                            .unwrap_or_else(|| panic!("unexpected read {address:08x}"))
+                    }
+                    36 => {
+                        mem.insert(address, regs[rd]);
+                    }
+                    37 => {
+                        let value = regs[rd];
+                        mem.insert(address, value);
+                        regs[ra] = address;
+                    }
+                    14 => {
+                        regs[rd] = if ra == 0 {
+                            w as i16 as i32 as u32
+                        } else {
+                            address
+                        }
+                    }
+                    15 => {
+                        assert_eq!(ra, 0);
+                        regs[rd] = (w & 65535) << 16;
+                    }
+                    10 => compare = regs[ra].cmp(&(w & 65535)),
+                    11 => compare = (regs[ra] as i32).cmp(&(w as i16 as i32)),
+                    31 if w == 0x7c0802a6 => regs[0] = lr,
+                    31 if w == 0x7c0803a6 => lr = regs[0],
+                    31 => match (w >> 1) & 1023 {
+                        0 => compare = (regs[ra] as i32).cmp(&(regs[rb] as i32)),
+                        32 => compare = regs[ra].cmp(&regs[rb]),
+                        444 => regs[ra] = regs[rd] | regs[rb],
+                        _ => panic!("unexpected instruction {w:08x}"),
+                    },
+                    16 => {
+                        let take = match w & 0xffff0000 {
+                            0x41820000 => compare.is_eq(),
+                            0x40820000 => !compare.is_eq(),
+                            0x41800000 => compare.is_lt(),
+                            0x40810000 => !compare.is_gt(),
+                            _ => panic!("unexpected branch {w:08x}"),
+                        };
+                        if take {
+                            pc = (pc as isize + w as i16 as isize / 4) as usize;
+                            continue;
+                        }
+                    }
+                    18 => {
+                        let offset = ((w & 0x03fffffc) << 6) as i32 >> 6;
+                        let target = (RESIZE_CODE + pc as u32 * 4).wrapping_add_signed(offset);
+                        if w & 1 != 0 {
+                            let result = match target {
+                                ORIGINAL_CODE => {
+                                    assert_eq!(mem[&ALLOCATION_GUARD], 1);
+                                    native_calls += 1;
+                                    assert_eq!((regs[3], regs[4], regs[6]), (requested, ptr, 32));
+                                    if native_calls == 1 {
+                                        assert_eq!(regs[5], size);
+                                        if first_ok {
+                                            new
+                                        } else {
+                                            0
+                                        }
+                                    } else {
+                                        assert_eq!(native_calls, 2);
+                                        assert_eq!(regs[5], u32::MAX);
+                                        assert_eq!(copied, payload[..old_size.min(size) as usize]);
+                                        assert!(alive);
+                                        alive = false;
+                                        0
+                                    }
+                                }
+                                0x800849fc => {
+                                    assert_eq!((regs[3], regs[4]), (requested, ptr));
+                                    assert_eq!(mem[&ALLOCATION_GUARD], 0);
+                                    assert!(alive);
+                                    size_calls += 1;
+                                    old_size
+                                }
+                                ALLOCATION_CODE => {
+                                    assert_eq!(
+                                        (regs[3], regs[4], regs[5], regs[6]),
+                                        (alternate, 0, size, 32)
+                                    );
+                                    assert_eq!(mem[&ALLOCATION_GUARD], 0);
+                                    assert!(alive);
+                                    fresh_calls += 1;
+                                    if fresh_ok {
+                                        new
+                                    } else {
+                                        0
+                                    }
+                                }
+                                COPY_BYTES => {
+                                    assert_eq!(
+                                        (regs[3], regs[4], regs[5]),
+                                        (new, ptr, old_size.min(size))
+                                    );
+                                    assert!(alive);
+                                    copied = payload[..old_size.min(size) as usize].to_vec();
+                                    new
+                                }
+                                _ => panic!("unexpected native call {target:08x}"),
+                            };
+                            lr = RESIZE_CODE + pc as u32 * 4 + 4;
+                            for reg in [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+                                regs[reg] = 0xdead0000 + reg as u32;
+                            }
+                            regs[3] = result;
+                        } else if (RESIZE_CODE..RESIZE_CODE + words.len() as u32 * 4)
+                            .contains(&target)
+                        {
+                            pc = ((target - RESIZE_CODE) / 4) as usize;
+                            continue;
+                        } else {
+                            assert_eq!(target, ORIGINAL_CODE);
+                            tail = true;
+                            returned = true;
+                            break;
+                        }
+                    }
+                    19 if w == 0x4e800020 => {
+                        returned = true;
+                        break;
+                    }
+                    _ => panic!("unexpected instruction {w:08x}"),
+                }
+                pc += 1;
+            }
+            assert!(returned);
+            assert_eq!(lr, caller);
+            assert_eq!(regs[1], before[1]);
+            assert_eq!(&regs[13..32], &before[13..32]);
+            assert_eq!(mem[&ALLOCATION_GUARD], u32::from(busy));
+            let eligible =
+                !busy && ptr != 0 && size != 0 && size != u32::MAX && requested != custom;
+            assert_eq!(tail, !eligible);
+            if tail {
+                assert_eq!(&regs[3..7], &before[3..7]);
+                assert_eq!(native_calls, 0);
+                continue;
+            }
+            let retry = !first_ok && count >= 7 && present && same_class && exists;
+            assert_eq!(size_calls, u32::from(retry));
+            assert_eq!(fresh_calls, u32::from(retry));
+            assert_eq!(native_calls, if retry && fresh_ok { 2 } else { 1 });
+            assert_eq!(regs[3] != 0, first_ok || retry && fresh_ok);
+            if !first_ok {
+                assert_eq!(alive, !(retry && fresh_ok));
             }
         }
     }
@@ -840,9 +1383,15 @@ mod tests {
             let file = std::fs::File::open(path).unwrap();
             let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
             let edits = regions(&iso, &report(release)).unwrap();
-            assert_eq!(edits.len(), 6);
+            assert_eq!(edits.len(), 7);
             assert_eq!(edits[0].bytes.len(), 4);
             assert_eq!(edits[1].bytes.len(), stub(0, 0).len());
+            let mut ranges: Vec<_> = edits
+                .iter()
+                .map(|r| r.offset..r.offset + r.bytes.len() as u64)
+                .collect();
+            ranges.sort_by_key(|r| r.start);
+            assert!(ranges.windows(2).all(|r| r[0].end <= r[1].start));
             // Only the executable is needed for these refusal checks.
             let dol = word(&iso, 0x420).unwrap() as usize;
             let end = (0..7)
@@ -858,6 +1407,9 @@ mod tests {
             assert!(regions(&changed, &report(release)).is_err());
             changed[at] ^= 1;
             changed[edits[1].offset as usize] = 1;
+            assert!(regions(&changed, &report(release)).is_err());
+            changed[edits[1].offset as usize] = 0;
+            changed[map(&iso, ALLOCATION_GUARD, 4).unwrap()] = 1;
             assert!(regions(&changed, &report(release)).is_err());
             eprintln!("verified {release:?} allocator hook");
         }

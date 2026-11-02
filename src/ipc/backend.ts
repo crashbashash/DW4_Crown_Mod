@@ -11,6 +11,8 @@ import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bi
 export interface Backend {
   checkUpdates(): Promise<UpdateCheck>;
   acceptUpdate(version: string): Promise<"browser" | "installer">;
+  importSettings(): Promise<PatchSelection | null>;
+  exportSettings(selection: PatchSelection): Promise<boolean>;
   chooseIso(): Promise<string | null>;
   chooseOutput(defaultName: string): Promise<string | null>;
   analyze(path: string, selection?: PatchSelection): Promise<DiscStatus>;

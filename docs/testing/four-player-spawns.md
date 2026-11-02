@@ -29,11 +29,20 @@ HPMAX to the enemy model. The per-party profiles hold two count fields and two
 drop-list references, rather than a universal four-player stat multiplier.
 There is no custom stat-boost child setting.
 
+Both active Kokatorimon rows (644/645) now receive the regular Normal
+Kokatorimon's computed Crown Mod stats from row 91, like the other practice
+enemies. Across all five supported releases their HP changes from 35 to 1,170
+and their crown rank becomes 5 with the default settings. Turning Crown Mod
+off preserves their authored stats; excluding practice enemies preserves all
+eight practice rows. The legacy low-level `exclude_tripwire` switch can still
+exclude the pair explicitly, but is off by default.
+
 The separate practice balance change halves stat column 4 (Speed) on rows
 638–645 after the ordinary practice buffs, using the patcher's existing
 ties-to-even integer rounding. It affects both Kokatorimon variants' Speed;
-their other stats retain their original values. The low-level
-`practice_speed_mult: 1.0` setting preserves historical output fingerprints.
+after they inherit the regular Kokatorimon stats. To reproduce historical
+output fingerprints, use both `practice_speed_mult: 1.0` and
+`exclude_tripwire: true`.
 
 | Practice row | Previous Speed | New Speed |
 | --- | ---: | ---: |
@@ -43,8 +52,9 @@ their other stats retain their original values. The low-level
 | 641 | 372 | 186 |
 | 642 | 316 | 158 |
 | 643 | 322 | 161 |
-| 644 | 65 | 32 |
-| 645 | 65 | 32 |
+
+The table records the six lesson rows. The farewell pair now uses half of the
+computed regular Kokatorimon Speed, rather than half of its token practice value.
 
 ## Resource implementation
 
@@ -80,11 +90,13 @@ The spawn-only audits and fingerprints on this page keep that option off.
 
 The native GUI produced the expected spawn-only four-player ISO. Overwrite
 cancellation and confirmation were exercised. The published v0.9 USA checksum
-still reproduces with `practice_speed_mult: 1.0` and both resource switches off.
+still reproduces with `practice_speed_mult: 1.0`, `exclude_tripwire: true` and
+both resource switches off.
 
-## Spawn-only PS2 USA output fingerprints
+## Historical spawn-only PS2 USA output fingerprints
 
-These include the new practice Speed adjustment, with custom drops off. Historical release checksums
+These predate the active Kokatorimon Crown stat correction and include the
+practice Speed adjustment, with custom drops off. Historical release checksums
 in the changelog remain unchanged.
 
 | Four-player spawns | Bytes | MD5 |

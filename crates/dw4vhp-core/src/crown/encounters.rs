@@ -24,6 +24,7 @@ pub(crate) const REGULAR: &[&str] = &[
     "e_mecha4",
     "e_mecha5",
     "e_pharaoh",
+    "e_arachne",
 ];
 /// Tortamon loads from a separate file and is never copied elsewhere.
 pub(crate) const REPLACEABLE: &[&str] = &["e_torta"];
@@ -62,7 +63,7 @@ pub(crate) const PROTECTIONS: &[EncounterProtection] = &[
     EncounterProtection { pack_entry: 595, name: "Quest 8, stage 3 (Very Hard)", stage: "dngq8b3v", generators: &["GENE-22", "GENE-23", "GENE-24"], reason: "Preserve the native quest encounter and supporting generators." },
     EncounterProtection { pack_entry: 621, name: "Abyss of Grief", stage: "stag0102", generators: &["GENE-38"], reason: "Preserve the generator addressed by the native stage scripts." },
     EncounterProtection { pack_entry: 635, name: "Doom Dome", stage: "stag0104", generators: &["GENE-011", "GENE-013", "GENE-016"], reason: "Preserve the two native scripted generators." },
-    EncounterProtection { pack_entry: 649, name: "Dry Land ruins", stage: "stag0202", generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve the native scripted encounter/add groups." },
+    EncounterProtection { pack_entry: 649, name: "Grief Wasteland", stage: "stag0202", generators: &["GENE-00", "GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve the separately loaded native Arukenimon introduction and scripted boss/add groups. Imported Arukenimon donors carry an embedded body instead." },
     EncounterProtection { pack_entry: 686, name: "Mangrove Forest", stage: "stag0302", generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"], reason: "Preserve ShogunGekomon's boss variants. The two preceding waves and Tortamon's introduction randomize with matching model-name waits and cleanup; generator callbacks retain wave progression." },
  ];
 
@@ -85,6 +86,35 @@ pub(crate) const RESTRICTED: &[(usize, &[&str])] = &[
     (457, &["e_mummy", "e_mecha2"]),
     (464, &["e_mummy", "e_mecha2"]),
 ];
+
+/// Riverbank replacements need a projectile attack: melee enemies cannot reach
+/// players on the moving boat. Entries require a registered attack spawn,
+/// independent projectile motion and a damaging hitbox in retail data. Native
+/// scripted entrances remain protected separately.
+pub(crate) const RIVER_RANGED: &[&str] = &[
+    "e_nume",
+    "e_scum",
+    "e_minotaru",
+    "e_mecha2",
+    "e_otama",
+    "e_mecha3",
+    "e_mecha4",
+    "e_maridevi",
+    "e_megadra",
+    "e_infermo",
+    "e_rare",
+    "e_mecha5",
+    "e_impdra",
+];
+
+/// Projectile-capable replacement families for Numenume River, in policy order.
+pub fn river_ranged_models() -> &'static [&'static str] {
+    RIVER_RANGED
+}
+
+pub(crate) fn replacement_allowed(entry: usize, model: &str) -> bool {
+    entry != 628 || RIVER_RANGED.contains(&model)
+}
 
 /// Models that are a stage's boss though they are ordinary enemies elsewhere.
 pub(crate) const BOSS_REGULAR: &[(usize, &str)] = &[(319, "e_mecha4"), (394, "e_mecha5")];

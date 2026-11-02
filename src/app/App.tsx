@@ -9,6 +9,7 @@ import { DoneDialog } from "../features/output/DoneDialog";
 import { OverwriteDialog } from "../features/output/OverwriteDialog";
 import { PatchingDialog } from "../features/output/PatchingDialog";
 import { OutputPanel } from "../features/output/OutputPanel";
+import { SettingsFiles } from "../features/settings/SettingsFiles";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { newSeed, parseSeed } from "../features/settings/seed";
 import { isSuggestedName, withOutputExtension, withSeed } from "../features/output/outputName";
@@ -65,6 +66,7 @@ function AppInner() {
   const replaceDiscStatus = disc.replaceStatus;
   const wide = useMediaQuery("(min-width: 900px)");
 
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [dismissedDiscStatus, setDismissedDiscStatus] = useState<DiscStatus | null>(null);
   const [updateRequestedFor, setUpdateRequestedFor] = useState<DiscStatus | null>(null);
@@ -126,7 +128,7 @@ function AppInner() {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     void backend.onFileDropped((path) => {
-      if (!busy && !updating && !disc.analyzing) void disc.setInputPath(path);
+      if (!busy && !updating && !settingsBusy && !disc.analyzing) void disc.setInputPath(path);
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
@@ -135,7 +137,7 @@ function AppInner() {
       cancelled = true;
       unlisten?.();
     };
-  }, [backend, disc, busy, updating]);
+  }, [backend, disc, busy, updating, settingsBusy]);
 
   const info = selectedStatus?.discInfo;
   const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
@@ -160,6 +162,15 @@ function AppInner() {
   const changeRandomEnemies = (selected: boolean) => {
     setRandomEnemies(selected);
     if (selected && parseSeed(enemySeed) === null) setEnemySeed(newSeed());
+  };
+
+  const importSettings = (settings: PatchSelection) => {
+    setCrownMod(settings.crownMod);
+    setCrownDrops(settings.crownDrops);
+    setFourPlayerSpawns(settings.fourPlayerSpawns);
+    setRandomCrownColours(settings.randomCrownColours);
+    setRandomEnemies(settings.randomEnemies);
+    setEnemySeed(settings.enemySeed === null ? "" : String(settings.enemySeed));
   };
 
   const runPatch = async (output: string, overwrite: boolean) => {
@@ -265,12 +276,18 @@ function AppInner() {
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
-            <SettingsPanel crownMod={crownMod} onCrownModChange={changeCrownMod} fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || disc.analyzing} />
+            <SettingsPanel crownMod={crownMod} onCrownModChange={changeCrownMod} fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || settingsBusy || disc.analyzing}
+              fileActions={<SettingsFiles
+                selection={{ ...selection, enemySeed: parseSeed(enemySeed) }}
+                valid={!randomEnemies || enemySeedValue !== null}
+                disabled={busy || updating || settingsBusy || disc.analyzing || overwritePath !== null || discError !== null}
+                onImport={importSettings} onBusyChange={setSettingsBusy}
+              />} />
           </div>
           <div className="col">
             <OutputPanel
               outputPath={disc.outputPath}
-              busy={busy || updating || disc.checking}
+              busy={busy || updating || settingsBusy || disc.checking}
               canPatch={canPatch}
               status={selectedStatus}
               refreshing={disc.refreshing}
@@ -288,7 +305,7 @@ function AppInner() {
           </div>
         </main>
         <div className="workspace-footer footer-row">
-          <UpdateCenter blocked={busy || disc.checking || overwritePath !== null || donePopup !== null || patchError !== null || discError !== null} onBusyChange={setUpdating} />
+          <UpdateCenter blocked={busy || settingsBusy || disc.checking || overwritePath !== null || donePopup !== null || patchError !== null || discError !== null} onBusyChange={setUpdating} />
         </div>
       </div>
       {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}

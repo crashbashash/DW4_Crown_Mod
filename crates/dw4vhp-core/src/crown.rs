@@ -21,6 +21,7 @@ mod practice;
 mod random;
 mod rewards;
 mod sound;
+mod split_models;
 pub use random::Options as RandomOptions;
 pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
 #[cfg(test)]

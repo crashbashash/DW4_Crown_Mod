@@ -359,6 +359,7 @@ fn read_word(path: &Path, offset: u64) -> [u8; 4] {
 /// Historical output fingerprints predate the practice-only Speed adjustment.
 fn historical_plan() -> PatchPlan {
     PatchPlan {
+        exclude_tripwire: true,
         practice_speed_mult: 1.0,
         ..PatchPlan::default()
     }

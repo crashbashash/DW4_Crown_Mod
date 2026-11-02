@@ -627,3 +627,69 @@ test("random crown colours works alone and stays selected when Crown Mod is turn
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
   expect(patch).toHaveBeenCalledWith("/mock/game [CrownMod].iso", false, patchSelection({ randomCrownColours: true }));
 });
+
+describe("portable settings", () => {
+  test("imports every option and seed while keeping selected paths", async () => {
+    const imported = patchSelection({ crownMod: true, crownDrops: true, fourPlayerSpawns: true,
+      randomCrownColours: true, randomEnemies: true, enemySeed: 4294967295 });
+    vi.spyOn(MockBackend.prototype, "importSettings").mockResolvedValue(imported);
+    const exported = vi.spyOn(MockBackend.prototype, "exportSettings").mockResolvedValue(true);
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Browse…" }));
+    await waitFor(() => expect((screen.getByLabelText("output path") as HTMLInputElement).value).not.toBe(""));
+    fireEvent.change(screen.getByLabelText("output path"), { target: { value: "/mock/my-choice.iso" } });
+    fireEvent.blur(screen.getByLabelText("output path"));
+    fireEvent.click(screen.getByRole("button", { name: "Import settings…" }));
+    await screen.findByText("Settings imported.");
+    for (const name of ["Crown Mod", "Match drops to crowns", "4-player enemy spawns", "Random crown colours", "Random enemies"]) {
+      expect((screen.getByRole("switch", { name }) as HTMLInputElement).checked).toBe(true);
+    }
+    expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe("4294967295");
+    expect((screen.getByLabelText("disc path") as HTMLInputElement).value).toBe("/mock/game.iso");
+    expect((screen.getByLabelText("output path") as HTMLInputElement).value).toBe("/mock/my-choice.iso");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Export settings…" }));
+    await screen.findByText("Settings exported.");
+    expect(exported).toHaveBeenCalledExactlyOnceWith(imported);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  test("exports before choosing a disc and preserves a seed while random enemies is disabled", async () => {
+    const exported = vi.spyOn(MockBackend.prototype, "exportSettings").mockResolvedValue(true);
+    render(<App />);
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    fireEvent.change(screen.getByLabelText("Enemy seed"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export settings…" }));
+    await screen.findByText("Settings exported.");
+    expect(exported).toHaveBeenCalledExactlyOnceWith(patchSelection({ enemySeed: 0 }));
+  });
+
+  test("cancelling or rejecting an import keeps the current settings", async () => {
+    const importer = vi.spyOn(MockBackend.prototype, "importSettings").mockResolvedValueOnce(null)
+      .mockRejectedValueOnce("Invalid settings file.");
+    renderCrownModApp();
+    fireEvent.click(screen.getByRole("button", { name: "Import settings…" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Import settings…" }).hasAttribute("disabled")).toBe(false));
+    expect(screen.queryByText("Settings imported.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Import settings…" }));
+    await screen.findByText(/Unable to import settings.*Invalid settings file/);
+    expect(importer).toHaveBeenCalledTimes(2);
+    expect((screen.getByRole("switch", { name: "Crown Mod" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  test("invalid active seeds cannot be exported and controls lock during a transfer", async () => {
+    let finish!: (value: PatchSelection | null) => void;
+    vi.spyOn(MockBackend.prototype, "importSettings").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<App />);
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    fireEvent.change(screen.getByLabelText("Enemy seed"), { target: { value: "invalid" } });
+    expect(screen.getByRole("button", { name: "Export settings…" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Import settings…" }));
+    expect(screen.getByRole("button", { name: "Import settings…" }).hasAttribute("disabled")).toBe(true);
+    expect((screen.getByRole("switch", { name: "Crown Mod" }) as HTMLInputElement).disabled).toBe(true);
+    await act(async () => finish(patchSelection()));
+    expect((screen.getByRole("switch", { name: "Random enemies" }) as HTMLInputElement).checked).toBe(false);
+  });
+});

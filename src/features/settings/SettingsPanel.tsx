@@ -1,9 +1,10 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { Button, Switch } from "react-aria-components";
 import { newSeed, parseSeed } from "./seed";
 
 /** Optional patches start disabled. */
-export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, enemySeed, onEnemySeedChange, busy }: {
+export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, enemySeed, onEnemySeedChange, busy, fileActions }: {
+  fileActions?: ReactNode;
   crownMod: boolean;
   onCrownModChange: (selected: boolean) => void;
   fourPlayerSpawns: boolean;
@@ -24,6 +25,7 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
   return (
     <section className="panel settings-panel" aria-labelledby={`${id}-settings-heading`}>
       <h2 id={`${id}-settings-heading`}>Settings</h2>
+      {fileActions}
       <Switch className="setting-row" isSelected={crownMod} onChange={onCrownModChange}
         isDisabled={busy} aria-labelledby={`${id}-crown-mod-label`} aria-describedby={`${id}-crown-mod-description`}>
         <span className="setting-copy">

@@ -477,14 +477,19 @@ mod audit {
                     continue;
                 }
                 let Ok(p) = Pack::parse(b) else { continue };
+                let audio = if e == super::super::split_models::ASSET {
+                    super::super::split_models::AUDIO
+                } else {
+                    e - 1
+                };
                 for &model in super::super::random::REGULAR {
                     if !sources.contains_key(model)
                         && graft::find_named(&p, "beModelCtrlInfo", model)
                             .unwrap()
                             .is_some()
-                        && complete(entry(e - 1), model).unwrap_or(false)
+                        && complete(entry(audio), model).unwrap_or(false)
                     {
-                        sources.insert(model, e - 1);
+                        sources.insert(model, audio);
                     }
                 }
             }
@@ -500,7 +505,12 @@ mod audit {
                 if e == 0 {
                     continue;
                 }
-                let Ok(src) = Pack::parse(entry(e - 1)) else {
+                let audio = if e == super::super::split_models::ASSET {
+                    super::super::split_models::AUDIO
+                } else {
+                    e - 1
+                };
+                let Ok(src) = Pack::parse(entry(audio)) else {
                     continue;
                 };
                 if info(&src, "beSoundInfo").is_err() {
@@ -527,7 +537,7 @@ mod audit {
                         graft::companion_models(&models, None, &[model.to_string()]).unwrap();
                     let out = graft_enemy(
                         entry(dst_entry),
-                        entry(e - 1),
+                        entry(audio),
                         entry(sources[model]),
                         model,
                         &companions,
@@ -538,7 +548,7 @@ mod audit {
                     assert_eq!(
                         graft_enemy(
                             &out,
-                            entry(e - 1),
+                            entry(audio),
                             entry(sources[model]),
                             model,
                             &companions

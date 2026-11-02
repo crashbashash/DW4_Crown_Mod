@@ -14,7 +14,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 16;
+pub const RULES_VERSION: u32 = 18;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -34,7 +34,8 @@ pub struct Options {
 
 pub(super) use super::encounters::REGULAR;
 use super::encounters::{
-    BOSS_REGULAR, FAMILY_REMAPS, FORBIDDEN_SOURCES, PROTECTIONS, REPLACEABLE, RESTRICTED, SKIPPED,
+    replacement_allowed, BOSS_REGULAR, FAMILY_REMAPS, FORBIDDEN_SOURCES, PROTECTIONS, REPLACEABLE,
+    RESTRICTED, SKIPPED,
 };
 
 pub(super) fn family(row: u32) -> Option<&'static str> {
@@ -297,6 +298,8 @@ pub(super) struct Randomiser {
     /// Models by name and whether the source hangs them as a scene of their own.
     donors: BTreeMap<(&'static str, bool), Donor>,
     audio_sources: BTreeMap<&'static str, usize>,
+    /// Split-file enemy bodies assembled with their home-stage dependencies.
+    prepared_sources: BTreeMap<usize, Vec<u8>>,
     stages: BTreeMap<usize, Stage>,
     plans: BTreeMap<usize, Retarget>,
     pub(super) rewards: BTreeMap<usize, super::rewards::StageRewards>,
@@ -385,6 +388,7 @@ impl Randomiser {
             table,
             donors: BTreeMap::new(),
             audio_sources: BTreeMap::new(),
+            prepared_sources: BTreeMap::new(),
             stages: BTreeMap::new(),
             plans: BTreeMap::new(),
             rewards: BTreeMap::new(),
@@ -452,6 +456,11 @@ impl Randomiser {
                 .filter(|f| !replaceable(f) || BOSS_REGULAR.contains(&(e, *f)))
                 .collect();
             pinned_families.extend(scripted_models(&p, e)?);
+            if e == super::split_models::STAGE {
+                // Its native one-instance body is loaded by the stage script.
+                // Donors elsewhere use the embedded, expandable graph below.
+                pinned_families.insert(super::split_models::MODEL);
+            }
             let stage = Stage {
                 gens,
                 residents,
@@ -493,6 +502,35 @@ impl Randomiser {
             me.stages.insert(e, stage);
         }
         need(!me.stages.is_empty(), "no stages found")?;
+        let stage = super::split_models::STAGE;
+        let model = super::split_models::MODEL;
+        let source = super::split_models::arukenimon_source(
+            data(stage).ok_or_else(|| bad("missing Arukenimon home stage"))?,
+            data(super::split_models::ASSET).ok_or_else(|| bad("missing Arukenimon body"))?,
+            data(super::split_models::GROUP_TEMPLATE)
+                .ok_or_else(|| bad("missing enemy group template"))?,
+        )?;
+        let p = Pack::parse(&source)?;
+        let profile = graft::profile(&p, model)?;
+        let audio = super::split_models::AUDIO;
+        need(
+            super::sound::complete(
+                data(audio).ok_or_else(|| bad("missing Arukenimon audio"))?,
+                model,
+            )?,
+            "incomplete Arukenimon audio",
+        )?;
+        me.audio_sources.insert(model, audio);
+        me.donors.insert(
+            (model, false),
+            Donor {
+                source: stage,
+                ram: profile.ram,
+                rarities: rarities(&me.table, model),
+                profile,
+            },
+        );
+        me.prepared_sources.insert(stage, source);
         Ok(me)
     }
 
@@ -575,11 +613,17 @@ impl Randomiser {
             return Ok(dst);
         }
         let data = |e: usize| {
-            entries
-                .get(e)
-                .and_then(|&(o, l)| afs.get(o..o + l))
+            self.prepared_sources
+                .get(&e)
+                .map(Vec::as_slice)
+                .or_else(|| entries.get(e).and_then(|&(o, l)| afs.get(o..o + l)))
                 .ok_or_else(|| bad("stage entry outside archive"))
         };
+        if entry == 628 {
+            // River enemies use standalone scenes. Supply the ordinary shared
+            // group so projectile donors from grouped stages can render there.
+            dst = graft::add_enemy_group(&dst, data(187)?, "e_nume")?;
+        }
         let intro = INTRO_STAGES.iter().find(|s| s.model_entry == entry);
         let sites: Vec<(&str, &str)> = intro
             .map(|s| {
@@ -644,6 +688,7 @@ impl Randomiser {
             .iter()
             .filter(|(m, _)| REGULAR.contains(&m.as_str()) || m.as_str() == "e_pharaoh")
             .filter(|(m, _)| !stage.pinned_families.contains(m.as_str()))
+            .filter(|(m, _)| replacement_allowed(entry, m))
             .filter(|(m, _)| allowed.is_none_or(|a| a.contains(&m.as_str())))
             .map(|(m, &ram)| (m.clone(), ram, rarities(&self.table, m)))
             .collect();
@@ -654,6 +699,7 @@ impl Randomiser {
             .filter(|(m, _)| {
                 !stage.residents.contains_key(*m) && !stage.pinned_families.contains(m)
             })
+            .filter(|(m, _)| replacement_allowed(entry, m))
             .filter(|_| allowed.is_none())
             .collect();
         rng.shuffle(&mut candidates);
@@ -676,7 +722,9 @@ impl Randomiser {
         let enough =
             |pool: &Vec<_>, added: usize| added >= self.opts.donors && pool.len() > sites.len();
         for (m, own_scene) in candidates {
-            if enough(&pool, added) || tried >= self.opts.donors + 8 {
+            // The river has a restricted ranged pool: exhaust its shuffled
+            // candidates before retaining Numemon, even after failed grafts.
+            if enough(&pool, added) || (entry != 628 && tried >= self.opts.donors + 8) {
                 break;
             }
             let donor = &self.donors[&(m, own_scene)];
@@ -774,13 +822,13 @@ impl Randomiser {
             let options = pool
                 .iter()
                 .filter(|(m, ram, r)| {
-                    (*ram >= g.most || m == "e_pharaoh")
+                    (*ram >= g.most || matches!(m.as_str(), "e_pharaoh" | "e_arachne"))
                         && r.contains(&rarity)
                         && !skip.contains(m)
                         && required.get(&g.name).is_none_or(|needed| {
                             needed.iter().all(|sequence| {
                                 entrances[m].contains(sequence)
-                                    || (m == "e_pharaoh"
+                                    || (matches!(m.as_str(), "e_pharaoh" | "e_arachne")
                                         && matches!(sequence.as_str(), "SQ_SWON" | "SQ_NENTR")
                                         && entrances[m].contains("SQ_ENTR"))
                             })
@@ -982,8 +1030,9 @@ impl Randomiser {
                     // branch instead of seeking donor-stage healing positions.
                     if model == "e_minotaru" {
                         plan.sequences.insert(name, "SQ_NENTR".into());
-                    } else if model == "e_pharaoh" {
-                        // NENTR omits the native CHECK label setup and disables summons.
+                    } else if matches!(model.as_str(), "e_pharaoh" | "e_arachne") {
+                        // Use each model's real activation. Pharaohmon's NENTR
+                        // omits CHECK; Arukenimon only provides SQ_ENTR.
                         plan.sequences.insert(name, "SQ_ENTR".into());
                     }
                 }

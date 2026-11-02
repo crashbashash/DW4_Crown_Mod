@@ -1,6 +1,7 @@
 #[cfg(feature = "agent-control")]
 mod agent;
 mod commands;
+mod settings;
 mod state;
 mod updates;
 
@@ -19,6 +20,8 @@ pub fn run() {
             updates::accept_update,
             commands::choose_iso,
             commands::choose_output,
+            settings::import_settings,
+            settings::export_settings,
             commands::analyze,
             commands::plan_summary,
             commands::start_patch,
@@ -33,6 +36,8 @@ pub fn run() {
         updates::accept_update,
         commands::choose_iso,
         commands::choose_output,
+        settings::import_settings,
+        settings::export_settings,
         commands::analyze,
         commands::plan_summary,
         commands::start_patch,
