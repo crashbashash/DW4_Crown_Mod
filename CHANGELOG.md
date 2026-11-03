@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.16.1
+
+- Numenume River can now use up to three ranged enemy types per run.
+- Randomized river enemies now use ranged attacks instead of melee attacks.
+- Increased MR05’s river firing range.
+- Updated river cleanup and bomb-freeze handling for multiple enemy types.
+
 ## v0.16.0
 
 - Added settings import/export, including the randomizer seed, without including file paths.
