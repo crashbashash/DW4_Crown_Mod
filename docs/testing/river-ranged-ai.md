@@ -33,9 +33,8 @@ example, Infermon retains both its `NORM` and `BIND` firing branches. Projectile
 models, action bindings, animation/event timing, hitboxes, sounds and hit/death
 scripts remain unchanged. Applying the policy twice changes nothing further.
 
-This changes attack behavior within the existing one-family river selection.
-It does not introduce a mixed-family river encounter or alter enemy strength,
-rewards, spawn counts or turret behavior.
+The attack policy also applies to [mixed river encounters](river-mixed-enemies.md).
+It does not alter enemy strength, rewards, spawn counts or turret behavior.
 
 ## Disc-data validation
 
@@ -135,8 +134,8 @@ processes close successfully.
 
 ## PCSX2 validation
 
-PS2 USA Numemon and imported Sukamon images also pass native Hard-card
-cold-boot checks without loading an old savestate. Both verify the loaded AI
+PS2 USA Numemon, Sukamon, Minotaurmon and MR02 images also pass native Hard-card
+cold-boot checks without loading an old savestate. All four verify the loaded AI
 choices and offensive entry guards, produce moving native projectiles without
 an observed melee sequence, and reach the assisted native victory exit to
 Cliff. Both PS2 allocator arenas retain valid circular, bounded and
@@ -146,8 +145,9 @@ Observations span at least 1,446 video fields per family. Player and real boat
 health protection and the objective/position assistance match the later
 Dolphin checks; projectile positions and sequence cursors remain native. These
 are assisted firing/lifecycle checks rather than unassisted balance tests.
-Each case closes its test emulator after validation.
 
 Private PS2 evidence is under `outputs/river-ranged-ai/ps2/` in the outer
 workspace. The test driver automates the native menus and stage route, and
 subsequent launches use PCSX2 fast-forward with bounded controller frame counts.
+Mixed-family PS2 gameplay coverage is recorded in
+[mixed river encounters](river-mixed-enemies.md).

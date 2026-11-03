@@ -953,7 +953,7 @@ fn probe_river_donors() {
 }
 
 /// Build a read-only-input, single-stage image for emulator verification.
-/// Requires DW4_RIVER_INPUT, DW4_RIVER_OUTPUT and DW4_RANDOM_FORCE (one model).
+/// Requires DW4_RIVER_INPUT, DW4_RIVER_OUTPUT and DW4_RANDOM_FORCE (one to three comma-separated ranged models).
 #[test]
 #[ignore]
 fn probe_build_river_image() {
@@ -961,7 +961,11 @@ fn probe_build_river_image() {
     let output =
         std::path::PathBuf::from(env::var_os("DW4_RIVER_OUTPUT").expect("DW4_RIVER_OUTPUT"));
     let model = env::var("DW4_RANDOM_FORCE").expect("DW4_RANDOM_FORCE");
-    assert!(super::super::encounters::RIVER_RANGED.contains(&model.as_str()));
+    let models = model.split(',').collect::<Vec<_>>();
+    assert!((1..=super::super::river_mix::MAX_FAMILIES).contains(&models.len()));
+    assert!(models
+        .iter()
+        .all(|m| super::super::encounters::RIVER_RANGED.contains(m)));
     let file = std::fs::File::open(&input).unwrap();
     let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let gc = crate::gcm::game_id(&iso).is_ok();
@@ -998,7 +1002,7 @@ fn probe_build_river_image() {
 
     let options = Options {
         seed: 67,
-        donors: 1,
+        donors: models.len(),
         warp: None,
         only: Some(vec![628]),
     };
@@ -1024,14 +1028,21 @@ fn probe_build_river_image() {
     let offset = u32at(afs, 8 + 8 * 628).unwrap() as usize;
     let size = u32at(afs, 12 + 8 * 628).unwrap() as usize;
     let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+    let bindings = if models.len() == 1 {
+        serde_json::json!(river_firing_bindings(&p, &model))
+    } else {
+        serde_json::json!({"families":models.iter().map(|&m| (m, river_firing_bindings(&p, m))).collect::<BTreeMap<_, _>>()})
+    };
     std::fs::write(
         output.with_extension("bindings.json"),
-        serde_json::to_vec_pretty(&river_firing_bindings(&p, &model)).unwrap(),
+        serde_json::to_vec_pretty(&bindings).unwrap(),
     )
     .unwrap();
-    let info = p.named("beAction2Info", &model).unwrap();
-    let (parent, _) = graft::parent_group(&p, p.val(info, 7).unwrap()).unwrap();
-    assert!(p.rec(parent).unwrap().named(p.b, "EM01"));
+    for model in models {
+        let info = p.named("beAction2Info", model).unwrap();
+        let (parent, _) = graft::parent_group(&p, p.val(info, 7).unwrap()).unwrap();
+        assert!(p.rec(parent).unwrap().named(p.b, "EM01"));
+    }
     eprintln!(
         "RIVER IMAGE {model}: {} bytes verified; shared enemy scene registered",
         written.len()
@@ -1061,6 +1072,44 @@ fn probe_build_river_production_image() {
     let signed = crate::signature::read_raw(&output).unwrap().unwrap();
     assert_eq!(signed["options"]["crownMod"], true);
     assert_eq!(signed["randomEnemies"]["rulesVersion"], RULES_VERSION);
+    let file = std::fs::File::open(&output).unwrap();
+    let written = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let base = if crate::gcm::game_id(&written).is_ok() {
+        crate::gcm::find_file(&written, "NDMW.AFS").unwrap().offset as usize
+    } else {
+        crate::iso9660::find_file(&written, "NDMW.AFS").unwrap().lba as usize * 2048
+    };
+    let afs = &written[base..];
+    let offset = u32at(afs, 8 + 8 * 628).unwrap() as usize;
+    let size = u32at(afs, 12 + 8 * 628).unwrap() as usize;
+    let p = Pack::parse(&afs[offset..offset + size]).unwrap();
+    let script = p.named("beLuaData", "matb03.lua").unwrap();
+    let object = p.val(script, 3).unwrap();
+    let memory = p.memory[p.val(object, 3).unwrap() as usize]
+        .as_ref()
+        .unwrap();
+    let chunk = super::super::river::lua::Chunk::read(
+        &p.b[memory.start..memory.start + p.val(object, 2).unwrap() as usize],
+    )
+    .unwrap();
+    let families: BTreeSet<_> = chunk
+        .code
+        .iter()
+        .filter(|&&ins| ins & 63 == 7)
+        .filter_map(|&ins| chunk.text((ins >> 6) as usize).ok())
+        .filter(|s| super::super::encounters::RIVER_RANGED.contains(s))
+        .collect();
+    assert_eq!(
+        families.len(),
+        3,
+        "normal app pipeline must retain a mixed river"
+    );
+    let bindings = serde_json::json!({"families":families.iter().map(|&m| (m,river_firing_bindings(&p,m))).collect::<BTreeMap<_,_>>()});
+    std::fs::write(
+        output.with_extension("bindings.json"),
+        serde_json::to_vec_pretty(&bindings).unwrap(),
+    )
+    .unwrap();
     eprintln!(
         "PRODUCTION IMAGE {} bytes, MD5 {}; randomizer {}",
         outcome.bytes, outcome.md5, signed["randomEnemies"]

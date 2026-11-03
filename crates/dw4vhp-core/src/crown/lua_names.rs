@@ -1,7 +1,6 @@
-//! Experimental: rename whole string constants inside stage Lua 4.0.1 chunks, so scripts that
-//! wait on or erase an enemy by model name follow the model a generator now spawns.
-//! Only the constant table's length-prefixed strings change; no instruction, jump or stack
-//! size is touched.
+//! Edit named stage Lua 4.0.1 chunks while preserving original pack IDs and memory.
+//! Ordinary model-name renames change only whole string constants. Reviewed river
+//! cleanup/freeze expansion supplies its own validated bytecode transformation.
 use super::*;
 
 /// Lua 4.0.1 chunk signature, format flags and the test number `3.14159265358979323846e8`.
@@ -127,6 +126,25 @@ pub(super) fn rename_in_pack(
     scripts: &[String],
     map: &BTreeMap<String, String>,
 ) -> Result<Vec<Edit>> {
+    rewrite_in_pack(b, scripts, |script, raw| {
+        let found = constants(raw)?;
+        for name in map.keys() {
+            need(
+                found.iter().any(|c| c.text == name.as_bytes()),
+                &format!("{script} has no constant {name}"),
+            )?;
+        }
+        rename(raw, map)?.ok_or_else(|| bad(&format!("no model name in {script}")))
+    })
+}
+
+/// Replace only the named scripts, retaining original IDs and memory blocks.
+/// The caller validates the selected scripts' bytecode contract.
+pub(super) fn rewrite_in_pack(
+    b: &[u8],
+    scripts: &[String],
+    mut rewrite: impl FnMut(&str, &[u8]) -> Result<Vec<u8>>,
+) -> Result<Vec<Edit>> {
     let p = Pack::parse(b)?;
     let mut builder = Builder::new(&p);
     let mut done = BTreeMap::new();
@@ -166,14 +184,7 @@ pub(super) fn rename_in_pack(
             "Lua data size differs from its memory block",
         )?;
         let raw = &b[range.start..range.start + size];
-        let found = constants(raw)?;
-        for name in map.keys() {
-            need(
-                found.iter().any(|c| c.text == name.as_bytes()),
-                &format!("{script} has no constant {name}"),
-            )?;
-        }
-        let out = rename(raw, map)?.ok_or_else(|| bad(&format!("no model name in {script}")))?;
+        let out = rewrite(script, raw)?;
         let length = out.len();
         let newmem = builder.mem(out, mem)?;
         builder.modify(object, &[(2, length as u32), (3, newmem)])?;
@@ -187,7 +198,7 @@ pub(super) fn rename_in_pack(
     need(
         p.mapping == v.mapping[..p.mapping.len()]
             && b[p.pool..] == out[v.pool..v.pool + b.len() - p.pool],
-        "Lua rename changed original IDs or memory",
+        "Lua rewrite changed original IDs or memory",
     )?;
     Ok(edits)
 }

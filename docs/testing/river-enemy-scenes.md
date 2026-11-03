@@ -27,8 +27,9 @@ textures or world scene. The regression verifies all original object fields and
 memory blocks remain byte-identical except for the native scene's root pointer,
 and that applying the adapter twice changes nothing.
 
-The exclusive Numemon-family replacement and its six erase/freeze script
-rewrites remain in place. Entrances, encounter strength, rarity, rewards and
+The later [mixed river encounter policy](river-mixed-enemies.md) distributes
+banks across up to three ranged families and extends all six erase/freeze
+scripts to those families. Entrances, encounter strength, rarity, rewards and
 party counts keep their existing compatibility checks. The ranged policy applies
 to both resident replacement candidates and donor imports.
 

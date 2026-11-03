@@ -14,7 +14,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 19;
+pub const RULES_VERSION: u32 = 20;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -896,11 +896,22 @@ impl Randomiser {
                 if options.is_empty() {
                     continue;
                 }
-                let pick = options[(rng.next() % options.len() as u64) as usize].clone();
-                reserved.insert(pick.clone());
+                let mut picks = options;
+                if entry == super::river_ai::ENTRY {
+                    rng.shuffle(&mut picks);
+                    picks.truncate(super::river_mix::MAX_FAMILIES);
+                } else {
+                    let pick = picks[(rng.next() % picks.len() as u64) as usize].clone();
+                    picks = vec![pick];
+                }
+                reserved.extend(picks.iter().cloned());
+                let mut members = members;
+                if picks.len() > 1 {
+                    rng.shuffle(&mut members);
+                }
                 let mut group = Vec::new();
-                for g in members {
-                    choice.insert(g.name.clone(), pick.clone());
+                for (index, g) in members.into_iter().enumerate() {
+                    choice.insert(g.name.clone(), picks[index % picks.len()].clone());
                     group.push(g.name.clone());
                 }
                 groups.push(group);
@@ -1260,26 +1271,43 @@ impl Randomiser {
             }
         }
         if let Some(rule) = family_remap {
-            let names = rule
-                .models
-                .iter()
-                .map(|&original| {
-                    let replacement = first
-                        .iter()
-                        .find(|g| family(g.row) == Some(original))
-                        .and_then(|g| choice.get(&g.name))
-                        .cloned()
-                        .unwrap_or_else(|| original.to_string());
-                    (original.to_string(), replacement)
-                })
-                .collect();
-            let scripts = rule
-                .scripts
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>();
-            let edits = lua_names::rename_in_pack(&dst, &scripts, &names)?;
-            dst = materialize(&dst, &edits)?;
+            if entry == super::river_ai::ENTRY {
+                // Reward fallback has finalized the assignments. Cleanup and
+                // freeze must cover every family actually used by the banks.
+                let families = first
+                    .iter()
+                    .filter(|g| family(g.row) == Some("e_nume"))
+                    .map(|g| {
+                        choice
+                            .get(&g.name)
+                            .cloned()
+                            .unwrap_or_else(|| "e_nume".into())
+                    })
+                    .collect();
+                let edits = super::river_mix::remap_scripts(&dst, rule.scripts, &families)?;
+                dst = materialize(&dst, &edits)?;
+            } else {
+                let names = rule
+                    .models
+                    .iter()
+                    .map(|&original| {
+                        let replacement = first
+                            .iter()
+                            .find(|g| family(g.row) == Some(original))
+                            .and_then(|g| choice.get(&g.name))
+                            .cloned()
+                            .unwrap_or_else(|| original.to_string());
+                        (original.to_string(), replacement)
+                    })
+                    .collect();
+                let scripts = rule
+                    .scripts
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
+                let edits = lua_names::rename_in_pack(&dst, &scripts, &names)?;
+                dst = materialize(&dst, &edits)?;
+            }
         }
         if entry == 686 {
             // Do this after reward-slot fallback has finalized the choices, so

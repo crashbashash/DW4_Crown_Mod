@@ -119,8 +119,8 @@ pub(crate) fn replacement_allowed(entry: usize, model: &str) -> bool {
 /// Models that are a stage's boss though they are ordinary enemies elsewhere.
 pub(crate) const BOSS_REGULAR: &[(usize, &str)] = &[(319, "e_mecha4"), (394, "e_mecha5")];
 
-/// Reviewed stage commands which only erase/freeze these families. All spawns
-/// of each family must share one replacement so the commands retain their scope.
+/// Reviewed stage commands which only erase/freeze these families. River calls
+/// cover every selected bank family; other groups retain one exclusive replacement.
 pub(crate) struct FamilyRemap {
     pub entry: usize,
     pub models: &'static [&'static str],

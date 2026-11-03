@@ -18,16 +18,17 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 17. The same seed is reproducible within
+The current randomizer uses rules version 20. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
 
 Rules 17 limits Numenume River replacements to the thirteen projectile-capable
 families below. The restriction applies to both resident
 replacement candidates and imports. Incompatible donors are skipped in shuffled
 order; the river exhausts its available ranged candidates without the ordinary
-failed-import attempt cap before falling back. Numemon's exclusive family assignment,
-six cleanup/freeze script rewrites, native scripted entrances and atomic
-fallback when variant slots run out remain in place.
+failed-import attempt cap before falling back. Its banks use up to three compatible
+ranged families, with cleanup and bomb-freeze commands covering every selected
+family. Native scripted entrances and whole-group fallback when local variant
+slots run out remain in place. See [mixed river encounters](river-mixed-enemies.md).
 
 The pool requires native projectile spawn evidence, rather than an effect name:
 
@@ -56,9 +57,8 @@ projectile evidence passes.
 
 `river_replacements_use_only_ranged_families` exercises multiple seeds and individual
 donor supplies, verifies family consistency across difficulties, and checks
-that a melee-only donor supply leaves native enemies in place. The existing
-reviewed-script regression checks the river's exact cleanup/freeze renames and
-atomic fallback. Data checks establish projectile capability; the live checks
+that a melee-only donor supply leaves native enemies in place. The same regression checks every selected family's cleanup/freeze commands and
+shared actor capacity on all five supported releases. Data checks establish projectile capability; the live checks
 below additionally exercise rendering, collision and stage unloading. Natural
 hit accuracy throughout the route is not exhaustively measured.
 

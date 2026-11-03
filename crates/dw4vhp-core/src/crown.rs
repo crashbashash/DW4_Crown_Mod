@@ -21,6 +21,7 @@ mod practice;
 mod random;
 mod rewards;
 mod river_ai;
+mod river_mix;
 mod sound;
 mod split_models;
 pub use random::Options as RandomOptions;

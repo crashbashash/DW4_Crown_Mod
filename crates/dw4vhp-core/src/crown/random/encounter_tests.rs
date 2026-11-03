@@ -370,7 +370,11 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     .collect();
                 edits.push((vec![intro.script], names));
             }
-            if let Some(rule) = FAMILY_REMAPS.iter().find(|rule| rule.entry == entry) {
+            // Mixed river callbacks have separate multi-family command/capacity coverage.
+            if let Some(rule) = FAMILY_REMAPS
+                .iter()
+                .find(|rule| rule.entry == entry && entry != super::super::river_ai::ENTRY)
+            {
                 let mut names = BTreeMap::new();
                 for &model in rule.models {
                     let mut selected = BTreeSet::new();
@@ -679,7 +683,13 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
 /// supply. Read-only retail inputs enable these cases; no image is written.
 #[test]
 fn river_replacements_use_only_ranged_families() {
-    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+    for variable in [
+        "DW4_RETAIL_USA_ISO",
+        "DW4_RETAIL_EUROPE_ISO",
+        "DW4_RETAIL_JAPAN_ISO",
+        "DW4_RETAIL_GC_USA_ISO",
+        "DW4_RETAIL_GC_JAPAN_ISO",
+    ] {
         let Some(path) = env::var_os(variable) else {
             continue;
         };
@@ -710,19 +720,20 @@ fn river_replacements_use_only_ranged_families() {
             .layout_in(&iso)
             .unwrap();
         let table = EnemyTable::read(&iso, &layout).unwrap();
-        for (seed, donor) in [
-            (0, None),
-            (67, None),
-            (1520, None),
-            (67, Some("e_scum")),
-            (67, Some("e_mecha3")),
-            (67, Some("e_minotaru")),
-            (67, Some("e_mecha4")),
-            (67, Some("e_rare")),
-            (67, Some("e_mecha5")),
-            (67, Some("e_impdra")),
-            (67, Some("e_infermo")),
-            (67, Some("e_goburi")),
+        for (seed, donor, donors) in [
+            (0, None, DONORS),
+            (67, None, 2),
+            (67, None, DONORS),
+            (1520, None, DONORS),
+            (67, Some("e_scum"), DONORS),
+            (67, Some("e_mecha3"), DONORS),
+            (67, Some("e_minotaru"), DONORS),
+            (67, Some("e_mecha4"), DONORS),
+            (67, Some("e_rare"), DONORS),
+            (67, Some("e_mecha5"), DONORS),
+            (67, Some("e_impdra"), DONORS),
+            (67, Some("e_infermo"), DONORS),
+            (67, Some("e_goburi"), DONORS),
         ] {
             let mut r = Randomiser::scan(
                 afs,
@@ -730,7 +741,7 @@ fn river_replacements_use_only_ranged_families() {
                 table.clone(),
                 Options {
                     seed,
-                    donors: DONORS,
+                    donors,
                     warp: None,
                     only: Some(vec![628]),
                 },
@@ -773,7 +784,8 @@ fn river_replacements_use_only_ranged_families() {
                         .values()
                         .any(|d| d.profile.misfit(&destination).is_none())
             });
-            r.stage(628, data(628).to_vec(), afs, &entries).unwrap();
+            let packed = r.stage(628, data(628).to_vec(), afs, &entries).unwrap();
+            let model_pack = Pack::parse(&packed).unwrap();
             let mut changed = 0;
             let mut numemon = BTreeSet::new();
             for &pack in &r.stages[&628].gens {
@@ -799,7 +811,77 @@ fn river_replacements_use_only_ranged_families() {
                     }
                 }
             }
-            assert_eq!(numemon.len(), 1, "cleanup/freeze family must stay atomic");
+            assert!((1..=super::super::river_mix::MAX_FAMILIES).contains(&numemon.len()));
+            if donor.is_none() {
+                assert_eq!(
+                    numemon.len(),
+                    donors.min(super::super::river_mix::MAX_FAMILIES),
+                    "normal river should use the available family limit"
+                );
+            }
+            for script in FAMILY_REMAPS
+                .iter()
+                .find(|r| r.entry == 628)
+                .unwrap()
+                .scripts
+            {
+                let id = model_pack.named("beLuaData", script).unwrap();
+                let obj = model_pack.val(id, 3).unwrap();
+                let mem = model_pack.val(obj, 3).unwrap();
+                let range = model_pack.memory[mem as usize].as_ref().unwrap();
+                let c = super::super::river::lua::Chunk::read(
+                    &packed[range.start..range.start + model_pack.val(obj, 2).unwrap() as usize],
+                )
+                .unwrap();
+                let actual: BTreeSet<_> = c
+                    .code
+                    .iter()
+                    .filter(|&&ins| ins & 63 == 7)
+                    .filter_map(|&ins| c.text((ins >> 6) as usize).ok())
+                    .filter(|s| s.starts_with("e_"))
+                    .collect();
+                assert_eq!(
+                    actual, numemon,
+                    "{variable}: {script} must cover all selected bank families"
+                );
+            }
+            let mut maximum = BTreeMap::<&str, usize>::new();
+            for &pack in &r.stages[&628].gens {
+                let mut demand = BTreeMap::<&str, usize>::new();
+                for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                    let selected = r
+                        .plans
+                        .get(&pack)
+                        .and_then(|p| p.rows.get(&g.name))
+                        .copied()
+                        .unwrap_or(g.row);
+                    if let Some(model) = family(selected) {
+                        *demand.entry(model).or_default() += g.most as usize;
+                    }
+                }
+                for (model, n) in demand {
+                    maximum
+                        .entry(model)
+                        .and_modify(|v| *v = (*v).max(n))
+                        .or_insert(n);
+                }
+            }
+            for (model, needed) in maximum {
+                if model == "e_nume" {
+                    // Authored sequential banks share a small native pool.
+                    // A retained fallback must not expand that native pool.
+                    assert_eq!(
+                        super::super::capacity::slots(&model_pack, model).unwrap(),
+                        super::super::capacity::slots(&native, model).unwrap(),
+                    );
+                    continue;
+                }
+                assert!(
+                    super::super::capacity::slots(&model_pack, model).unwrap() >= needed,
+                    "{variable}: {model} needs {needed} shared actor slots"
+                );
+            }
+            assert_eq!(r.stats.approximate + r.stats.unattached, 0);
             if !compatible {
                 assert_eq!(changed, 0, "incompatible supply must keep native enemies");
                 assert!(!r
