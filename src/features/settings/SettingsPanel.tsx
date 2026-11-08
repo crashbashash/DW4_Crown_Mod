@@ -94,7 +94,7 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
             <span className="badge-experimental">Experimental</span>
           </span>
           <span className="setting-description" id={`${id}-random-enemies-description`}>
-            Swap regular enemies for other enemies with matching stats. Bosses and scripted encounters stay put.
+            Different regular enemies on each difficulty, with matching stats. Bosses and protected encounters stay intact.
           </span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>

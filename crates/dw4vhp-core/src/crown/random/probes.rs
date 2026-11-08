@@ -980,7 +980,7 @@ fn probe_build_river_image() {
         let offset = u32at(&iso, base + 8 + 628 * 8).unwrap() as usize;
         let size = u32at(&iso, base + 12 + 628 * 8).unwrap() as usize;
         let bytes =
-            super::super::river_ai::apply(&iso[base + offset..base + offset + size], 628).unwrap();
+            super::super::ranged_ai::apply(&iso[base + offset..base + offset + size], 628).unwrap();
         assert_eq!(bytes.len(), size);
         use std::io::{Seek, SeekFrom, Write};
         let mut out = std::fs::File::create_new(&output).unwrap();
@@ -1552,7 +1552,7 @@ fn probe_river_attack_choices() {
 
 /// Verified firing bindings for focused native observation images.
 fn river_firing_bindings(p: &Pack<'_>, model: &str) -> Vec<serde_json::Value> {
-    let policy = super::super::river_ai::POLICIES
+    let policy = super::super::ranged_ai::POLICIES
         .iter()
         .find(|v| v.model == model)
         .unwrap();

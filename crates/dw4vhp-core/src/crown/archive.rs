@@ -21,7 +21,37 @@ pub(crate) struct Rebuilt {
     length: usize,
     random: Option<serde_json::Value>,
     rewards: rewards::Plan,
+    regions: Vec<WriteRegion>,
+    difficulty: bool,
 }
+
+fn filename_table(afs: &[u8], count: usize, first: usize) -> Result<Option<Range<usize>>> {
+    let mut table = None;
+    // AFS writers use either the end of the entry table or the end of the
+    // sector-aligned prefix. Retail DW4 uses the former.
+    for pos in [8 + 8 * count, first - 8] {
+        let offset = u32at(afs, pos)? as usize;
+        let length = u32at(afs, pos + 4)? as usize;
+        if offset == 0 && length == 0 {
+            continue;
+        }
+        need(
+            offset > 0
+                && length == count * 48
+                && offset <= afs.len()
+                && length <= afs.len() - offset,
+            "unexpected archive filename table",
+        )?;
+        let range = offset..offset + length;
+        need(
+            table.as_ref().is_none_or(|prior| *prior == range),
+            "conflicting archive filename tables",
+        )?;
+        table = Some(range);
+    }
+    Ok(table)
+}
+
 /// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
 /// expanded and the river turret scripts updated. The shared rebuild also
 /// resolves area-local enemy reward tables through the disc's resource manifest.
@@ -63,12 +93,14 @@ pub(crate) fn rebuild_afs(
     let mut random = match random {
         Some(options) => {
             let layout = crate::release::detect(iso)?.layout_in(iso)?;
-            Some(random::Randomiser::scan(
+            let random = random::Randomiser::scan(
                 afs,
                 &entries,
                 crate::table::EnemyTable::read(iso, &layout)?,
                 options,
-            )?)
+            )?;
+            random.validate_tiers(iso)?;
+            Some(random)
         }
         None => None,
     };
@@ -280,8 +312,44 @@ pub(crate) fn rebuild_afs(
             }];
         }
     }
+    let extra = random
+        .as_mut()
+        .map(|r| std::mem::take(&mut r.extra))
+        .unwrap_or_default();
+    let expanded_count = count + 2 * extra.len();
+    let difficulty = !extra.is_empty();
+    need(
+        expanded_count < 65536,
+        "difficulty archive has too many entries",
+    )?;
+    let targets: BTreeMap<_, _> = extra
+        .keys()
+        .enumerate()
+        .map(|(index, &entry)| (entry, [count + 2 * index, count + 2 * index + 1]))
+        .collect();
+    if difficulty {
+        let expanded_prefix = a2048(first.max(16 + 8 * expanded_count));
+        prefix = vec![0; expanded_prefix];
+        prefix[..8].copy_from_slice(&afs[..8]);
+        put(&mut prefix, 4, expanded_count as u32);
+        cursor = expanded_prefix;
+        for (index, &(off, len)) in entries.iter().enumerate() {
+            let current = materialize(&afs[off..off + len], &entry_edits[index])?;
+            if let Some(bytes) = difficulty::retarget_manifest(&current, &targets)? {
+                entry_edits[index] = vec![Edit {
+                    range: 0..len,
+                    bytes,
+                }];
+            }
+        }
+    }
     for (i, ((off, len), edits)) in entries.iter().copied().zip(entry_edits).enumerate() {
-        let next = entries.get(i + 1).map_or(size, |e| e.0);
+        // CRI caches sector counts and sums them to locate each file. The old
+        // filename table must move after the appended variants, rather than
+        // surviving as an unindexed gap between the last old and first new file.
+        let next = entries
+            .get(i + 1)
+            .map_or(if difficulty { a2048(off + len) } else { size }, |e| e.0);
         newentries.push((cursor, len));
         if !edits.is_empty() {
             let mut q = 0;
@@ -316,6 +384,18 @@ pub(crate) fn rebuild_afs(
             cursor += next - off;
         }
     }
+    for variants in extra.into_values() {
+        for bytes in variants {
+            newentries.push((cursor, bytes.len()));
+            cursor += bytes.len();
+            pieces.push(Piece::Bytes(bytes));
+            let aligned = a2048(cursor);
+            if aligned > cursor {
+                pieces.push(Piece::Bytes(vec![0; aligned - cursor]));
+            }
+            cursor = aligned;
+        }
+    }
     need(crown_packs == 85, "expected 85 crown model packs")?;
     need(
         river_packs == usize::from(crown_mod || random_crown_colours),
@@ -345,30 +425,65 @@ pub(crate) fn rebuild_afs(
         put(&mut prefix, 8 + 8 * i, off as u32);
         put(&mut prefix, 12 + 8 * i, len as u32);
     }
-    for pos in [8 + 8 * count, first - 8] {
-        let footer = u32at(afs, pos)? as usize;
-        let len = u32at(afs, pos + 4)? as usize;
-        if footer == 0 && len == 0 {
-            continue;
+    if difficulty {
+        let mut sector_offset = prefix.len();
+        for &(offset, length) in &newentries {
+            need(
+                offset == sector_offset,
+                "archive gap differs from native cached sector offsets",
+            )?;
+            sector_offset = a2048(offset + length);
         }
-        need(
-            footer > 0 && len > 0 && footer <= size && len <= size - footer,
-            "invalid archive footer",
-        )?;
-        let owner = entries
-            .iter()
-            .rposition(|e| e.0 <= footer)
-            .ok_or_else(|| bad("footer has no owner"))?;
-        let (oldoff, oldlen) = entries[owner];
-        let (newoff, newlen) = newentries[owner];
-        let relocated = if patched.contains(&owner) {
-            let end = a2048(oldoff + oldlen);
-            need(footer >= end, "footer overlaps modified pack")?;
-            a2048(newoff + newlen) + footer - end
-        } else {
-            newoff + footer - oldoff
-        };
-        put(&mut prefix, pos, relocated as u32);
+    }
+    if !difficulty {
+        for pos in [8 + 8 * count, first - 8] {
+            let footer = u32at(afs, pos)? as usize;
+            let len = u32at(afs, pos + 4)? as usize;
+            if footer == 0 && len == 0 {
+                continue;
+            }
+            need(
+                footer > 0 && len > 0 && footer <= size && len <= size - footer,
+                "invalid archive footer",
+            )?;
+            let owner = entries
+                .iter()
+                .rposition(|e| e.0 <= footer)
+                .ok_or_else(|| bad("footer has no owner"))?;
+            let (oldoff, oldlen) = entries[owner];
+            let (newoff, newlen) = newentries[owner];
+            let relocated = if patched.contains(&owner) {
+                let end = a2048(oldoff + oldlen);
+                need(footer >= end, "footer overlaps modified pack")?;
+                a2048(newoff + newlen) + footer - end
+            } else {
+                newoff + footer - oldoff
+            };
+            put(&mut prefix, pos, relocated as u32);
+        }
+    } else {
+        if let Some(table) = filename_table(afs, count, first)? {
+            let mut names = afs[table].to_vec();
+            names.resize(expanded_count * 48, 0);
+            for (entry, &(_, length)) in newentries.iter().enumerate() {
+                if entry >= count {
+                    let name = format!("crown{entry}.igb");
+                    names[entry * 48..entry * 48 + name.len()].copy_from_slice(name.as_bytes());
+                }
+                put(&mut names, entry * 48 + 44, length as u32);
+            }
+            for pos in [8 + 8 * expanded_count, prefix.len() - 8] {
+                put(&mut prefix, pos, cursor as u32);
+                put(&mut prefix, pos + 4, names.len() as u32);
+            }
+            cursor += names.len();
+            pieces.push(Piece::Bytes(names));
+            let aligned = a2048(cursor);
+            if aligned > cursor {
+                pieces.push(Piece::Bytes(vec![0; aligned - cursor]));
+            }
+            cursor = aligned;
+        }
     }
     pieces.insert(0, Piece::Bytes(prefix));
     if let Some(r) = &random {
@@ -388,6 +503,12 @@ pub(crate) fn rebuild_afs(
         length: cursor,
         random: random.as_ref().map(random::Randomiser::summary),
         rewards,
+        regions: if difficulty {
+            vec![difficulty::file_count(iso, count, expanded_count)?]
+        } else {
+            Vec::new()
+        },
+        difficulty,
     })
 }
 
@@ -442,6 +563,8 @@ impl CrownPlan {
             length: cursor,
             random,
             rewards,
+            regions: resource_regions,
+            difficulty,
         } = rebuild_afs(
             iso,
             base,
@@ -478,6 +601,13 @@ impl CrownPlan {
                 bytes: length,
             },
         ];
+        regions.extend(resource_regions);
+        if random.is_some() {
+            let release = crate::release::detect(iso)?;
+            regions.extend(crate::ps2_memory::regions_for_release(
+                iso, release, difficulty,
+            )?);
+        }
         for sector in 16..(iso.len() / 2048).min(64) {
             let p = sector * 2048;
             need(&iso[p + 1..p + 6] == b"CD001", "invalid volume descriptor")?;
@@ -544,6 +674,8 @@ impl CrownPlan {
             length: cursor,
             random,
             rewards,
+            regions: resource_regions,
+            difficulty,
         } = rebuild_afs(
             disc,
             base,
@@ -575,6 +707,14 @@ impl CrownPlan {
                 bytes: (cursor as u32).to_be_bytes().to_vec(),
             },
         ];
+        regions.extend(resource_regions);
+        if random.is_some() {
+            let release = crate::release::detect(disc)?;
+            regions.extend(crate::gc_memory::regions_for_release(disc, release)?);
+            if difficulty {
+                regions.extend(crate::difficulty_io::gamecube_regions(disc, release)?);
+            }
+        }
         regions.extend(rewards.models.clone());
         Ok(Self {
             pieces,
@@ -739,5 +879,38 @@ impl CrownPlan {
             )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod filename_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_both_afs_filename_pointer_locations_and_rejects_conflicts() {
+        let count = 2;
+        let first = 2048;
+        let table = 4096;
+        let length = count * 48;
+        let mut afs = vec![0; table + length];
+        assert_eq!(filename_table(&afs, count, first).unwrap(), None);
+        for pos in [8 + 8 * count, first - 8] {
+            let mut bytes = afs.clone();
+            put(&mut bytes, pos, table as u32);
+            put(&mut bytes, pos + 4, length as u32);
+            assert_eq!(
+                filename_table(&bytes, count, first).unwrap(),
+                Some(table..table + length)
+            );
+        }
+        for pos in [8 + 8 * count, first - 8] {
+            put(&mut afs, pos, table as u32);
+            put(&mut afs, pos + 4, length as u32);
+        }
+        assert!(filename_table(&afs, count, first).is_ok());
+        put(&mut afs, first - 8, table as u32 - 4);
+        assert!(filename_table(&afs, count, first).is_err());
+        put(&mut afs, first - 8, table as u32 + 4);
+        assert!(filename_table(&afs, count, first).is_err());
     }
 }

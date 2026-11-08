@@ -14,9 +14,11 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 20;
+pub const RULES_VERSION: u32 = 23;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
+
+mod distribution;
 
 /// Mangrove's sequential enemy waves have model-named waits/cleanup in stage Lua.
 /// Their completion callbacks belong to the generators, so they survive retargeting.
@@ -113,6 +115,7 @@ struct Gen {
     pos: [f32; 3],
     /// Most instances the generator keeps alive at once, over the player counts.
     most: u32,
+    population: u64,
 }
 
 /// Normal entrances can move only to models implementing the same named sequence.
@@ -247,8 +250,10 @@ fn generators(p: &Pack) -> Result<Vec<Gen>> {
             .to_string();
         let seq = !entrance.is_empty();
         let mut most = 0;
+        let mut population = 0;
         for pd in p.array(p.val(id as u32, GENERATOR_PLAYERS)?)? {
             most = most.max(p.val(pd, PLAYER_MAX)?);
+            population = population.max(u64::from(p.val(pd, 2)?));
         }
         let at = r.field(3)?;
         let mut pos = [0f32; 3];
@@ -267,6 +272,7 @@ fn generators(p: &Pack) -> Result<Vec<Gen>> {
             seq,
             entrance,
             most,
+            population: population.max(u64::from(most)).max(1),
         });
     }
     Ok(out)
@@ -304,6 +310,8 @@ pub(super) struct Randomiser {
     plans: BTreeMap<usize, Retarget>,
     pub(super) rewards: BTreeMap<usize, super::rewards::StageRewards>,
     pub(super) sounds: BTreeMap<usize, Vec<u8>>,
+    /// Hard and Very Hard resources appended after the original archive entries.
+    pub(super) extra: BTreeMap<usize, [Vec<u8>; 2]>,
     pub log: Vec<String>,
     stats: Stats,
 }
@@ -365,6 +373,7 @@ impl Randomiser {
             "rulesVersion": RULES_VERSION,
             "seed": self.opts.seed,
             "donorsPerStage": self.opts.donors,
+            "difficultySpecificEnemies": true,
             "stages": self.stats.stages,
             "generators": self.stats.generators,
             "keptOriginal": self.stats.kept,
@@ -393,6 +402,7 @@ impl Randomiser {
             plans: BTreeMap::new(),
             rewards: BTreeMap::new(),
             sounds: BTreeMap::new(),
+            extra: BTreeMap::new(),
             log: Vec::new(),
             stats: Stats::default(),
         };
@@ -568,18 +578,88 @@ impl Randomiser {
         afs: &[u8],
         entries: &[(usize, usize)],
     ) -> Result<Vec<u8>> {
-        let mut dst = self.plan_stage(entry, dst, afs, entries)?;
-        if entry == super::river_ai::ENTRY
+        let gens = self.stages.get(&entry).map(|stage| stage.gens.clone());
+        if let Some(mut gens) = gens.filter(|gens| gens.len() == 3).filter(|_| {
+            self.opts
+                .only
+                .as_ref()
+                .is_none_or(|only| only.contains(&entry))
+        }) {
+            // Native archive order is Hard, Normal, Very Hard. Plan in playthrough
+            // order so each later difficulty prefers families not used before.
+            gens.swap(0, 1);
+            let stages_before = self.stats.stages;
+            let mut previous = BTreeSet::new();
+            let mut variants = Vec::new();
+            for &pack in &gens {
+                self.sounds.remove(&(entry - 1));
+                self.stats.trace.push(format!("difficulty {entry} {pack}"));
+                let bytes =
+                    self.plan_stage(entry, dst.clone(), afs, entries, Some(pack), &previous)?;
+                let model = self.finish_stage(entry, bytes)?;
+                let sounds = self.sounds.remove(&(entry - 1)).unwrap_or_else(|| {
+                    let (start, len) = entries[entry - 1];
+                    afs[start..start + len].to_vec()
+                });
+                if let Some(plan) = self.plans.get(&pack) {
+                    previous.extend(
+                        plan.rows
+                            .values()
+                            .filter_map(|row| family(*row))
+                            .map(str::to_string),
+                    );
+                }
+                variants.push((pack, model, sounds));
+            }
+            let split = gens.iter().any(|pack| self.plans.contains_key(pack));
+            self.stats.stages = stages_before + usize::from(split);
+            let (_, normal_model, normal_sound) = variants.remove(0);
+            self.sounds.insert(entry - 1, normal_sound);
+            if split {
+                for &pack in &gens {
+                    self.plans.entry(pack).or_default();
+                }
+                let (_, hard_model, hard_sound) = variants.remove(0);
+                let (_, very_hard_model, very_hard_sound) = variants.remove(0);
+                self.extra.insert(entry, [hard_model, very_hard_model]);
+                self.extra.insert(entry - 1, [hard_sound, very_hard_sound]);
+            }
+            return Ok(normal_model);
+        }
+        let dst = self.plan_stage(entry, dst, afs, entries, None, &BTreeSet::new())?;
+        self.finish_stage(entry, dst)
+    }
+
+    pub(super) fn validate_tiers(&self, iso: &[u8]) -> Result<()> {
+        super::difficulty::validate_tiers(
+            iso,
+            self.stages.values().map(|stage| stage.gens.as_slice()),
+        )
+    }
+
+    #[cfg(test)]
+    fn model_for_generator<'a>(&'a self, entry: usize, pack: usize, normal: &'a [u8]) -> &'a [u8] {
+        let stage = &self.stages[&entry];
+        match (
+            stage.gens.len(),
+            stage.gens.iter().position(|p| *p == pack),
+            self.extra.get(&entry),
+        ) {
+            (3, Some(0), Some(extra)) => &extra[0],
+            (3, Some(2), Some(extra)) => &extra[1],
+            _ => normal,
+        }
+    }
+
+    fn finish_stage(&self, entry: usize, mut dst: Vec<u8>) -> Result<Vec<u8>> {
+        if super::encounters::ranged_stage(entry)
             && self
                 .opts
                 .only
                 .as_ref()
                 .is_none_or(|only| only.contains(&entry))
         {
-            dst = super::river_ai::apply(&dst, entry)?;
-            self.stats
-                .trace
-                .push("river ranged-only attack policy".into());
+            dst = super::ranged_ai::apply(&dst, entry)?;
         }
         if let (614, Some(target)) = (entry, self.opts.warp.clone()) {
             let names = BTreeMap::from([("stag0102".to_string(), target)]);
@@ -612,10 +692,20 @@ impl Randomiser {
         mut dst: Vec<u8>,
         afs: &[u8],
         entries: &[(usize, usize)],
+        tier: Option<usize>,
+        previous: &BTreeSet<String>,
     ) -> Result<Vec<u8>> {
-        let Some(stage) = self.stages.get(&entry).cloned() else {
+        let Some(mut stage) = self.stages.get(&entry).cloned() else {
             return Ok(dst);
         };
+        let all_gens = stage.gens.clone();
+        if let Some(pack) = tier {
+            need(
+                stage.gens.contains(&pack),
+                "difficulty generator does not belong to stage",
+            )?;
+            stage.gens = vec![pack];
+        }
         if self
             .opts
             .only
@@ -648,8 +738,16 @@ impl Randomiser {
                     .collect()
             })
             .unwrap_or_default();
-        let mut rng = Rng::new(self.opts.seed, entry as u64);
+        let mut rng = Rng::new(self.opts.seed, tier.unwrap_or(entry) as u64);
         let first = generators(&Pack::parse(data(stage.gens[0])?)?)?;
+        let mut required: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for &pack in &stage.gens {
+            for g in generators(&Pack::parse(data(pack)?)?)? {
+                if portable_entrance(&g) {
+                    required.entry(g.name).or_default().insert(g.entrance);
+                }
+            }
+        }
         let allowed = RESTRICTED
             .iter()
             .find(|(e, _)| *e == entry)
@@ -715,6 +813,9 @@ impl Randomiser {
             .filter(|_| allowed.is_none())
             .collect();
         rng.shuffle(&mut candidates);
+        // Prefer families not seen on earlier difficulties, retaining the
+        // ordinary compatibility fallback when fewer novel donors fit.
+        candidates.sort_by_key(|(model, _)| previous.contains(*model));
         // debugging: DW4_RANDOM_FORCE=e_otama,e_mecha4 tries those models first
         if let Ok(force) = env::var("DW4_RANDOM_FORCE") {
             let first: Vec<_> = force.split(',').collect();
@@ -731,18 +832,39 @@ impl Randomiser {
         );
         let mut imports = Vec::new();
         let (mut added, mut tried) = (0, 0);
-        let enough =
-            |pool: &Vec<_>, added: usize| added >= self.opts.donors && pool.len() > sites.len();
         for (m, own_scene) in candidates {
-            // The river has a restricted ranged pool: exhaust its shuffled
-            // candidates before retaining Numemon, even after failed grafts.
-            if enough(&pool, added) || (entry != 628 && tried >= self.opts.donors + 8) {
+            // Off-platform stages have a restricted ranged pool: exhaust the
+            // shuffled candidates before retaining natives after failed grafts.
+            if added >= self.opts.donors
+                || (!super::encounters::ranged_stage(entry) && tried >= self.opts.donors + 8)
+            {
                 break;
             }
             let donor = &self.donors[&(m, own_scene)];
+            if pool.iter().any(|(model, _, _)| model == m) {
+                continue;
+            }
             if let Some(why) = donor.profile.misfit(&Pack::parse(&dst)?) {
                 self.log
                     .push(format!("stage {entry}: {m} does not fit: {why}"));
+                continue;
+            }
+            let sequences = model_sequences(&Pack::parse(data(donor.source)?)?, m)?;
+            if !first.iter().any(|g| {
+                !stage.pinned.contains(&g.name)
+                    && !sites.iter().any(|(name, _)| *name == g.name)
+                    && family(g.row)
+                        .is_some_and(|f| usable(f) && !stage.pinned_families.contains(f))
+                    && (donor.ram >= g.most || matches!(m, "e_pharaoh" | "e_arachne"))
+                    && donor.rarities.contains(&self.table.rarity[g.row as usize])
+                    && required.get(&g.name).is_none_or(|needed| {
+                        needed.iter().all(|s| {
+                            sequences.contains(s)
+                                || (matches!(m, "e_pharaoh" | "e_arachne")
+                                    && sequences.contains("SQ_ENTR"))
+                        })
+                    })
+            }) {
                 continue;
             }
             tried += 1;
@@ -808,16 +930,8 @@ impl Randomiser {
             .iter()
             .map(|(model, _, _)| Ok((model.clone(), model_sequences(&model_pack, model)?)))
             .collect::<Result<BTreeMap<_, _>>>()?;
-        let mut required: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for &pack in &stage.gens {
-            for g in generators(&Pack::parse(data(pack)?)?)? {
-                if portable_entrance(&g) {
-                    required.entry(g.name).or_default().insert(g.entrance);
-                }
-            }
-        }
 
-        // The first tier decides which generators change and what they become.
+        // This difficulty decides its own generators and scripted targets.
         let mut choice: BTreeMap<String, String> = BTreeMap::new();
         let family_remap = FAMILY_REMAPS.iter().find(|rule| rule.entry == entry);
         // A retained native family must also remain exclusive to its scripted
@@ -831,7 +945,7 @@ impl Randomiser {
         let eligible = |g: &Gen, pool: &[(String, u32, BTreeSet<u8>)], skip: &BTreeSet<String>| {
             let rarity = self.table.rarity[g.row as usize];
             let own = family(g.row);
-            let options = pool
+            let mut options = pool
                 .iter()
                 .filter(|(m, ram, r)| {
                     (*ram >= g.most || matches!(m.as_str(), "e_pharaoh" | "e_arachne"))
@@ -848,6 +962,16 @@ impl Randomiser {
                 })
                 .map(|(m, _, _)| m.clone())
                 .collect::<Vec<_>>();
+            // Ordinary native families are compatibility fallbacks, not extra
+            // random choices competing with the four imported families.
+            let imported: Vec<_> = options
+                .iter()
+                .filter(|m| !stage.residents.contains_key(m.as_str()))
+                .cloned()
+                .collect();
+            if !imported.is_empty() {
+                options = imported;
+            }
             // A generator always changes model when anything else will do.
             let other = options
                 .iter()
@@ -864,7 +988,22 @@ impl Randomiser {
             let Some(g) = first.iter().find(|g| g.name == gen) else {
                 continue;
             };
-            let options = eligible(g, &pool, &reserved);
+            // Exclusive introduction/cleanup actors cannot share a patrol
+            // family. Use a compatible resident for that necessary scripted
+            // role, leaving all four imports available to ordinary encounters.
+            let residents = pool
+                .iter()
+                .filter(|(model, _, _)| stage.residents.contains_key(model))
+                .filter(|(model, _, _)| {
+                    model == orig
+                        || !first.iter().any(|other| {
+                            stage.pinned.contains(&other.name)
+                                && family(other.row) == Some(model.as_str())
+                        })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let options = eligible(g, &residents, &reserved);
             if options.is_empty() {
                 continue;
             }
@@ -897,7 +1036,7 @@ impl Randomiser {
                     continue;
                 }
                 let mut picks = options;
-                if entry == super::river_ai::ENTRY {
+                if entry == super::ranged_ai::ENTRY {
                     rng.shuffle(&mut picks);
                     picks.truncate(super::river_mix::MAX_FAMILIES);
                 } else {
@@ -918,6 +1057,7 @@ impl Randomiser {
             }
         }
         let mut why: BTreeMap<String, usize> = BTreeMap::new();
+        let mut slots = Vec::new();
         for g in &first {
             if choice.contains_key(&g.name) || stage.pinned.contains(&g.name) {
                 *why.entry("pinned or site".into()).or_default() += 1;
@@ -944,9 +1084,17 @@ impl Randomiser {
                 .or_default() += 1;
                 continue;
             }
-            let pick = options[(rng.next() % options.len() as u64) as usize].clone();
-            choice.insert(g.name.clone(), pick);
+            slots.push(distribution::Slot {
+                name: g.name.clone(),
+                options,
+                weight: g.population,
+            });
         }
+        let weights = first
+            .iter()
+            .map(|g| (g.name.clone(), g.population))
+            .collect();
+        choice.extend(distribution::assign(slots, &choice, &weights, &mut rng));
         if env::var("DW4_RANDOM_WHY").is_ok() {
             self.log.push(format!(
                 "stage {entry}: skipped {why:?}; pool {:?}",
@@ -997,14 +1145,22 @@ impl Randomiser {
             .collect::<Result<Vec<_>>>()?;
         // Never reuse a row referenced by any original difficulty pack. Only
         // globally unfilled table slots are eligible for local variants.
-        let used: BTreeSet<_> = tiers
+        let used: BTreeSet<_> = all_gens
             .iter()
-            .flat_map(|(_, gs)| gs.iter().map(|g| g.row as usize))
+            .map(|pack| generators(&Pack::parse(data(*pack)?)?))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .map(|g| g.row as usize)
             .collect();
         let free: Vec<_> = (0..self.table.len())
             .filter(|r| self.table.hp[*r] == 0 && !used.contains(r))
             .collect();
-        let mut rewards = super::rewards::StageRewards::new(stage.gens.clone(), free);
+        let mut rewards = self
+            .rewards
+            .get(&entry)
+            .cloned()
+            .unwrap_or_else(|| super::rewards::StageRewards::new(all_gens, free));
         for (pack, _) in &tiers {
             self.plans.insert(*pack, Retarget::default());
         }
@@ -1092,6 +1248,7 @@ impl Randomiser {
             }
             capacity_tiers.push(tier);
         }
+        let native_demand = shared_capacity(capacity_tiers.clone(), &BTreeMap::new());
         let demand = shared_capacity(capacity_tiers, &stage.residents);
         // Candidate imports make selection independent of how many generators
         // eventually use each family. Rebuild without unused candidates: even
@@ -1193,6 +1350,9 @@ impl Randomiser {
                             })
                         })
                         .collect();
+                    if rows.len() == 1 && tier.is_some() {
+                        rows.resize(3, rows[0]);
+                    }
                     if rows.len() != 3 {
                         continue;
                     }
@@ -1271,7 +1431,7 @@ impl Randomiser {
             }
         }
         if let Some(rule) = family_remap {
-            if entry == super::river_ai::ENTRY {
+            if entry == super::ranged_ai::ENTRY {
                 // Reward fallback has finalized the assignments. Cleanup and
                 // freeze must cover every family actually used by the banks.
                 let families = first
@@ -1336,6 +1496,59 @@ impl Randomiser {
                 dst = materialize(&dst, &edits)?;
             }
         }
+        if allowed.is_none() {
+            for model in stage.residents.keys().filter(|m| replaceable(m)) {
+                if stage.pinned_families.contains(model.as_str()) {
+                    continue;
+                }
+                let count = native_demand.get(model).copied().unwrap_or(0);
+                let mut external_script = false;
+                for &pack in &stage.gens {
+                    external_script |=
+                        super::reclaim::script_dependency(data(pack)?, model, count == 0)?;
+                }
+                if external_script {
+                    continue;
+                }
+                let before = dst.len();
+                let reviewed_intro = intro
+                    .filter(|_| {
+                        sites.iter().any(|(gen, original)| {
+                            choice.get(*gen).map(String::as_str).unwrap_or(original) == model
+                        })
+                    })
+                    .map(|site| site.script);
+                let reclaimed = if count == 0 {
+                    super::reclaim::unused(&dst, model)
+                } else if !super::reclaim::pool_script_dependency(
+                    &dst,
+                    model,
+                    false,
+                    reviewed_intro,
+                )? {
+                    super::reclaim::shrink(&dst, model, count).map(Some)
+                } else {
+                    Ok(None)
+                };
+                match reclaimed {
+                    Ok(Some(bytes)) if bytes.len() < before => {
+                        let saved = before - bytes.len();
+                        dst = bytes;
+                        if count == 0 {
+                            pool.retain(|(m, _, _)| m != model);
+                        }
+                        self.log.push(format!("stage {entry}: reclaim native {model}, {count} required slots, {saved} serialized bytes saved"));
+                        self.stats
+                            .trace
+                            .push(format!("reclaim {entry} {model} {count} {saved}"));
+                    }
+                    Err(error) => self.log.push(format!(
+                        "stage {entry}: retain native {model} resources: {error}"
+                    )),
+                    _ => {}
+                }
+            }
+        }
         if env::var("DW4_RANDOM_DUMP").is_ok_and(|v| v.split(',').any(|e| e == entry.to_string())) {
             for g in &first {
                 if let Some(m) = choice.get(&g.name) {
@@ -1387,6 +1600,10 @@ mod probe;
 #[cfg(test)]
 #[path = "random/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "random/train_tests.rs"]
+mod train_tests;
 
 #[cfg(test)]
 mod pharaoh_tests;

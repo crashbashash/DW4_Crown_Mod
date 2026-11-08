@@ -1,10 +1,10 @@
-//! Restrict voluntary riverbank attacks in the destination pack. Other stages,
+//! Restrict riverbank and train-side attacks in the destination pack. Other stages,
 //! projectile definitions, activation, damage responses and death stay native.
 use super::*;
 use std::collections::BTreeSet;
 
 pub(super) const ENTRY: usize = 628;
-// MR05's native 30-unit firing band is narrower than the boat/shore gap.
+// MR05's native 30-unit firing band is narrower than the off-platform gaps.
 // Keep firing/active mode out to 80, with a 120-unit outer band, while leaving
 // the native 190-unit perception limit and turn settings intact.
 const MR05_NEAR_SQUARED: f32 = 80.0 * 80.0;
@@ -97,9 +97,9 @@ impl Policy {
 
 fn name<'a>(p: &'a Pack<'_>, id: u32) -> Result<&'a str> {
     std::str::from_utf8(
-        graft::name_of(p, p.rec(id)?).ok_or_else(|| bad("unnamed river AI record"))?,
+        graft::name_of(p, p.rec(id)?).ok_or_else(|| bad("unnamed ranged AI record"))?,
     )
-    .map_err(|_| bad("invalid river AI name"))
+    .map_err(|_| bad("invalid ranged AI name"))
 }
 
 fn add(
@@ -110,7 +110,7 @@ fn add(
 ) -> Result<()> {
     need(
         range.len() == bytes.len(),
-        "river AI edit changes record size",
+        "ranged AI edit changes record size",
     )?;
     if p.b[range.clone()] == bytes {
         return Ok(());
@@ -118,7 +118,7 @@ fn add(
     if let Some(old) = edits.get(&range.start) {
         need(
             old.range == range && old.bytes == bytes,
-            "conflicting shared river AI policy",
+            "conflicting shared ranged AI policy",
         )?;
     } else {
         edits.insert(range.start, Edit { range, bytes });
@@ -126,10 +126,10 @@ fn add(
     Ok(())
 }
 
-/// No donor source is edited. This runs only on the final randomized river pack,
-/// including a retained Numemon fallback, after imports and pruning finish.
+/// No donor source is edited. Apply after imports and pruning, including retained
+/// Numemon fallbacks. MR01's native train boarding AI has no ranged policy.
 pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
-    if entry != ENTRY {
+    if !encounters::ranged_stage(entry) {
         return Ok(bytes.to_vec());
     }
     let p = Pack::parse(bytes)?;
@@ -160,7 +160,7 @@ pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
                                     && limit.is_finite()
                                     && near <= far
                                     && far <= limit,
-                                "invalid river MR05 range bands",
+                                "invalid off-platform MR05 range bands",
                             )?;
                             add(
                                 &p,
@@ -187,7 +187,7 @@ pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
         }
         let fire = *sequences
             .get(policy.fire)
-            .ok_or_else(|| bad("river enemy lacks verified firing sequence"))?;
+            .ok_or_else(|| bad("ranged enemy lacks verified firing sequence"))?;
         let commands = p.val(fire, 3)?;
         let labels = |list| -> Result<BTreeSet<String>> {
             p.array(list)?
@@ -203,7 +203,7 @@ pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
                 continue;
             }
             // Infermon's bind/part checks are not firing decisions. Idle instead
-            // of invoking their summon/transform callback on the riverbank.
+            // of invoking their summon/transform callback across the gap.
             let replacement = if matches!(old, "SQ_PART" | "SQ_BINDCK") {
                 "SQ_WAIT"
             } else {
@@ -212,7 +212,7 @@ pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
             let f = p.rec(id)?.field(2)?;
             need(
                 replacement.len() < f.len() - 4,
-                "river firing name exceeds native field",
+                "ranged firing name exceeds native field",
             )?;
             let mut raw = vec![0; f.len() - 4];
             raw[..replacement.len()].copy_from_slice(replacement.as_bytes());
@@ -227,7 +227,7 @@ pub(super) fn apply(bytes: &[u8], entry: usize) -> Result<Vec<u8>> {
             }
             need(
                 labels(p.val(id, 3)?)?.is_subset(&fire_labels),
-                "river firing redirect loses a native entry label",
+                "ranged firing redirect loses a native entry label",
             )?;
             add(
                 &p,
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_matches_river_pool_and_leaves_other_stages_untouched() {
+    fn policy_matches_ranged_pool_and_leaves_other_stages_untouched() {
         assert_eq!(
             POLICIES.iter().map(|p| p.model).collect::<Vec<_>>(),
             encounters::RIVER_RANGED
@@ -307,10 +307,12 @@ mod tests {
             b"not a model pack"
         );
         assert!(apply(b"not a model pack", ENTRY).is_err());
+        assert!(apply(b"not a model pack", 658).is_err());
+        assert!(!POLICIES.iter().any(|policy| policy.model == "e_mecha1"));
     }
 
     #[test]
-    fn retail_river_ai_limits_choices_preserves_other_data_and_is_idempotent() {
+    fn retail_ranged_ai_limits_choices_preserves_other_data_and_is_idempotent() {
         for variable in [
             "DW4_RETAIL_USA_ISO",
             "DW4_RETAIL_EUROPE_ISO",
@@ -339,6 +341,7 @@ mod tests {
                 let n = u32at(afs, 12 + entry * 8).unwrap() as usize;
                 let original = &afs[o..o + n];
                 let out = apply(original, ENTRY).unwrap();
+                assert_eq!(apply(original, 658).unwrap(), out);
                 assert_eq!(out.len(), original.len());
                 assert_eq!(apply(original, 614).unwrap(), original);
                 assert_eq!(apply(&out, ENTRY).unwrap(), out);
@@ -445,7 +448,7 @@ mod tests {
                         assert_eq!(p.b[range.clone()], q.b[range]);
                     }
                 }
-                eprintln!("RIVER AI {variable} {}: {decision_count} decisions checked; lifecycle, projectiles, scripts and source preserved",policy.model);
+                eprintln!("RANGED AI {variable} {}: {decision_count} decisions checked; river/train policies match; lifecycle, projectiles, scripts and source preserved",policy.model);
             }
         }
     }

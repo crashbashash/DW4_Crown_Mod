@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+## v0.17.0
+
+- Improved enemy variety and spawn balance, using four enemy types where supported.
+- Added different random enemy lineups for Normal, Hard and Very Hard.
+- Reduced stage memory use by removing unused enemy resources.
+- Train Line side enemies now use ranged attacks. MR01 boarding encounters remain unchanged.
+
 ## v0.16.1
 
 - Numenume River can now use up to three ranged enemy types per run.

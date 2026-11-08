@@ -87,8 +87,8 @@ pub(crate) const RESTRICTED: &[(usize, &[&str])] = &[
     (464, &["e_mummy", "e_mecha2"]),
 ];
 
-/// Riverbank replacements need a projectile attack: melee enemies cannot reach
-/// players on the moving boat. Entries require a registered attack spawn,
+/// Riverbank and train-side replacements need a projectile attack: melee enemies
+/// cannot reach players across the gap. Entries require a registered attack spawn,
 /// independent projectile motion and a damaging hitbox in retail data. Native
 /// scripted entrances remain protected separately.
 pub(crate) const RIVER_RANGED: &[&str] = &[
@@ -107,13 +107,17 @@ pub(crate) const RIVER_RANGED: &[&str] = &[
     "e_impdra",
 ];
 
-/// Projectile-capable replacement families for Numenume River, in policy order.
+/// Projectile-capable replacement families for the river and train, in policy order.
 pub fn river_ranged_models() -> &'static [&'static str] {
     RIVER_RANGED
 }
 
+pub(crate) fn ranged_stage(entry: usize) -> bool {
+    matches!(entry, 628 | 658)
+}
+
 pub(crate) fn replacement_allowed(entry: usize, model: &str) -> bool {
-    entry != 628 || RIVER_RANGED.contains(&model)
+    !ranged_stage(entry) || RIVER_RANGED.contains(&model)
 }
 
 /// Models that are a stage's boss though they are ordinary enemies elsewhere.
@@ -151,6 +155,25 @@ pub(crate) const FAMILY_REMAPS: &[FamilyRemap] = &[
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn off_platform_encounters_allow_projectiles_and_preserve_other_stage_choices() {
+        for entry in [628, 658] {
+            for model in REGULAR.iter().chain(REPLACEABLE) {
+                assert_eq!(
+                    replacement_allowed(entry, model),
+                    RIVER_RANGED.contains(model)
+                );
+            }
+            assert!(!replacement_allowed(entry, "e_mecha1"));
+            assert!(!replacement_allowed(entry, "e_pharaoh"));
+        }
+        for entry in [614, 686] {
+            assert!(REGULAR
+                .iter()
+                .all(|model| replacement_allowed(entry, model)));
+        }
+    }
 
     #[test]
     fn protections_are_named_unique_and_explain_their_scope() {

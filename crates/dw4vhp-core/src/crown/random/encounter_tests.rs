@@ -255,8 +255,8 @@ fn every_scripted_spawn_and_quest_dependency_survives() {
                     "counter quest must use native hit scripts"
                 );
             }
-            // All native model-owned scripts remain byte-identical, including
-            // kill-counter scripts and summons; capacity edits only add slots.
+            // Surviving callbacks remain byte-identical. Only callbacks owned
+            // exclusively by an unused, retired native model may disappear.
             let p = Pack::parse(data(e)).unwrap();
             let q = Pack::parse(&out).unwrap();
             for id in 0..p.ids.len() as u32 {
@@ -264,6 +264,9 @@ fn every_scripted_spawn_and_quest_dependency_survives() {
                     && graft::name_of(&p, p.rec(id).unwrap())
                         .is_some_and(|n| n.starts_with(b"hit_") || n.starts_with(b"cal_"))
                 {
+                    if super::super::reclaim::retired_callback(&p, &q, id) {
+                        continue;
+                    }
                     let obj = p.val(id, 3).unwrap();
                     let mem = p.val(obj, 3).unwrap();
                     assert_eq!(
@@ -340,10 +343,11 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
             let stage = r.stages[&entry].clone();
             let out = r.stage(entry, data(entry).to_vec(), afs, &entries).unwrap();
             let original = Pack::parse(data(entry)).unwrap();
-            let result = Pack::parse(&out).unwrap();
-            if entry == 410 {
-                assert_ne!(
-                    r.plans[&stage.gens[0]]
+            for &current_pack in &stage.gens {
+                let result = Pack::parse(r.model_for_generator(entry, current_pack, &out)).unwrap();
+                if entry == 410 {
+                    assert_ne!(
+                    r.plans[&current_pack]
                         .rows
                         .get("GENE-08")
                         .copied()
@@ -351,129 +355,132 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                     Some("e_mecha2"),
                     "MR02 lacks SQ_NENTR: using its default entrance hung the live activation test"
                 );
-            }
-            let mut edits = Vec::new();
-            if let Some(intro) = INTRO_STAGES.iter().find(|s| s.model_entry == entry) {
-                let names: BTreeMap<_, _> = intro
-                    .sites
+                }
+                let mut edits = Vec::new();
+                if let Some(intro) = INTRO_STAGES.iter().find(|s| s.model_entry == entry) {
+                    let names: BTreeMap<_, _> = intro
+                        .sites
+                        .iter()
+                        .filter(|(generator, model)| {
+                            !stage.pinned.contains(*generator)
+                                && !stage.pinned_families.contains(*model)
+                        })
+                        .map(|&(generator, model)| {
+                            let target = r.plans[&current_pack].rows[generator];
+                            let selected = family(target).unwrap();
+                            assert_ne!(selected, model);
+                            (model.to_string(), selected.to_string())
+                        })
+                        .collect();
+                    edits.push((vec![intro.script], names));
+                }
+                // Mixed river callbacks have separate multi-family command/capacity coverage.
+                if let Some(rule) = FAMILY_REMAPS
                     .iter()
-                    .filter(|(generator, model)| {
-                        !stage.pinned.contains(*generator)
-                            && !stage.pinned_families.contains(*model)
-                    })
-                    .map(|&(generator, model)| {
-                        let target = r.plans[&stage.gens[0]].rows[generator];
-                        let selected = family(target).unwrap();
-                        assert_ne!(selected, model);
-                        (model.to_string(), selected.to_string())
-                    })
-                    .collect();
-                edits.push((vec![intro.script], names));
-            }
-            // Mixed river callbacks have separate multi-family command/capacity coverage.
-            if let Some(rule) = FAMILY_REMAPS
-                .iter()
-                .find(|rule| rule.entry == entry && entry != super::super::river_ai::ENTRY)
-            {
-                let mut names = BTreeMap::new();
-                for &model in rule.models {
-                    let mut selected = BTreeSet::new();
-                    let mut count = 0;
-                    for &pack in &stage.gens {
-                        for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
-                            if family(g.row) == Some(model) {
-                                let target =
-                                    r.plans[&pack].rows.get(&g.name).copied().unwrap_or(g.row);
-                                selected.insert(family(target).unwrap());
-                                count += 1;
+                    .find(|rule| rule.entry == entry && entry != super::super::ranged_ai::ENTRY)
+                {
+                    let mut names = BTreeMap::new();
+                    for &model in rule.models {
+                        let mut selected = BTreeSet::new();
+                        let mut count = 0;
+                        for pack in [current_pack] {
+                            for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                                if family(g.row) == Some(model) {
+                                    let target =
+                                        r.plans[&pack].rows.get(&g.name).copied().unwrap_or(g.row);
+                                    selected.insert(family(target).unwrap());
+                                    count += 1;
+                                }
                             }
                         }
-                    }
-                    assert_eq!(
-                        selected.len(),
-                        1,
-                        "one replacement must cover the whole family"
-                    );
-                    let target = *selected.first().unwrap();
-                    // Earlier stages may consume the available variant rows.
-                    // An unchanged whole family is the documented atomic fallback.
-                    if target != model {
-                        names.insert(model.to_string(), target.to_string());
-                    }
-                    eprintln!(
+                        assert_eq!(
+                            selected.len(),
+                            1,
+                            "one replacement must cover the whole family"
+                        );
+                        let target = *selected.first().unwrap();
+                        // Earlier stages may consume the available variant rows.
+                        // An unchanged whole family is the documented atomic fallback.
+                        if target != model {
+                            names.insert(model.to_string(), target.to_string());
+                        }
+                        eprintln!(
                         "FAMILY {variable} {entry}: {model} -> {target}, {count} difficulty rows"
                     );
+                    }
+                    assert_eq!(names.values().collect::<BTreeSet<_>>().len(), names.len());
+                    edits.push((rule.scripts.to_vec(), names));
                 }
-                assert_eq!(names.values().collect::<BTreeSet<_>>().len(), names.len());
-                edits.push((rule.scripts.to_vec(), names));
-            }
-            for (scripts, names) in edits {
-                for script in scripts {
-                    let raw = |p: &Pack| {
-                        let id = p.named("beLuaData", script).unwrap();
-                        let object = p.val(id, 3).unwrap();
-                        let length = p.val(object, 2).unwrap() as usize;
-                        let memory = p.memory[p.val(object, 3).unwrap() as usize]
-                            .as_ref()
-                            .unwrap();
-                        p.b[memory.start..memory.start + length].to_vec()
-                    };
-                    assert_eq!(
-                        raw(&result),
-                        lua_names::rename(&raw(&original), &names)
-                            .unwrap()
-                            .unwrap_or_else(|| raw(&original)),
-                        "{variable} {entry} {script}: only reviewed constants may change"
-                    );
+                for (scripts, names) in edits {
+                    for script in scripts {
+                        let raw = |p: &Pack| {
+                            let id = p.named("beLuaData", script).unwrap();
+                            let object = p.val(id, 3).unwrap();
+                            let length = p.val(object, 2).unwrap() as usize;
+                            let memory = p.memory[p.val(object, 3).unwrap() as usize]
+                                .as_ref()
+                                .unwrap();
+                            p.b[memory.start..memory.start + length].to_vec()
+                        };
+                        assert_eq!(
+                            raw(&result),
+                            lua_names::rename(&raw(&original), &names)
+                                .unwrap()
+                                .unwrap_or_else(|| raw(&original)),
+                            "{variable} {entry} {script}: only reviewed constants may change"
+                        );
+                    }
                 }
-            }
-            for &pack in &stage.gens {
-                let before = Pack::parse(data(pack)).unwrap();
-                let updated = r.retarget(pack, data(pack)).unwrap().unwrap();
-                let after = Pack::parse(&updated).unwrap();
-                for g in generators(&before).unwrap() {
-                    let id = before.named("beGeneraterData", &g.name).unwrap();
-                    let target = r.plans[&pack].rows.get(&g.name).copied();
-                    let changed_family = target.is_some_and(|row| family(row) != family(g.row));
-                    if portable_entrance(&g) && changed_family {
-                        let expected =
-                            if matches!(target.and_then(family), Some("e_pharaoh" | "e_arachne")) {
+                for pack in [current_pack] {
+                    let before = Pack::parse(data(pack)).unwrap();
+                    let updated = r.retarget(pack, data(pack)).unwrap().unwrap();
+                    let after = Pack::parse(&updated).unwrap();
+                    for g in generators(&before).unwrap() {
+                        let id = before.named("beGeneraterData", &g.name).unwrap();
+                        let target = r.plans[&pack].rows.get(&g.name).copied();
+                        let changed_family = target.is_some_and(|row| family(row) != family(g.row));
+                        if portable_entrance(&g) && changed_family {
+                            let expected = if matches!(
+                                target.and_then(family),
+                                Some("e_pharaoh" | "e_arachne")
+                            ) {
                                 "SQ_ENTR"
                             } else {
                                 &g.entrance
                             };
-                        assert!(model_sequences(&result, target.and_then(family).unwrap())
-                            .unwrap()
-                            .contains(expected));
-                        let seq = after.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
-                        let text = &after.b[seq.start + 4..seq.end];
-                        if target.and_then(family) == Some("e_minotaru") {
-                            assert!(text.starts_with(b"SQ_NENTR\0"));
-                        } else {
+                            assert!(model_sequences(&result, target.and_then(family).unwrap())
+                                .unwrap()
+                                .contains(expected));
+                            let seq = after.rec(id).unwrap().field(graft::GENERATOR_SEQ).unwrap();
+                            let text = &after.b[seq.start + 4..seq.end];
+                            if target.and_then(family) == Some("e_minotaru") {
+                                assert!(text.starts_with(b"SQ_NENTR\0"));
+                            } else {
+                                assert_eq!(
+                                    text.split(|b| *b == 0).next().unwrap(),
+                                    expected.as_bytes()
+                                );
+                            }
+                            entrances += 1;
+                        }
+                        if protected_entrance(&g)
+                            || stage.pinned.contains(&g.name)
+                            || family(g.row).is_some_and(|m| stage.pinned_families.contains(m))
+                        {
                             assert_eq!(
-                                text.split(|b| *b == 0).next().unwrap(),
-                                expected.as_bytes()
+                                before.b[before.rec(id).unwrap().range.clone()],
+                                after.b[after.rec(id).unwrap().range.clone()],
+                                "protected {} in {pack}",
+                                g.name
                             );
                         }
-                        entrances += 1;
-                    }
-                    if protected_entrance(&g)
-                        || stage.pinned.contains(&g.name)
-                        || family(g.row).is_some_and(|m| stage.pinned_families.contains(m))
-                    {
-                        assert_eq!(
-                            before.b[before.rec(id).unwrap().range.clone()],
-                            after.b[after.rec(id).unwrap().range.clone()],
-                            "protected {} in {pack}",
-                            g.name
-                        );
-                    }
-                    for (&field, range) in &before.rec(id).unwrap().fields {
-                        if field != graft::GENERATOR_ROW && field != graft::GENERATOR_SEQ {
-                            assert_eq!(
-                                before.b[range.clone()],
-                                after.b[after.rec(id).unwrap().field(field).unwrap()]
-                            );
+                        for (&field, range) in &before.rec(id).unwrap().fields {
+                            if field != graft::GENERATOR_ROW && field != graft::GENERATOR_SEQ {
+                                assert_eq!(
+                                    before.b[range.clone()],
+                                    after.b[after.rec(id).unwrap().field(field).unwrap()]
+                                );
+                            }
                         }
                     }
                 }
@@ -578,6 +585,9 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
                 if p.class(id, "beLuaData").is_err() {
                     continue;
                 }
+                if super::super::reclaim::retired_callback(&p, &q, id) {
+                    continue;
+                }
                 let name =
                     std::str::from_utf8(graft::name_of(&p, p.rec(id).unwrap()).unwrap()).unwrap();
                 let new = q.named("beLuaData", name).unwrap();
@@ -611,13 +621,17 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
                     let a = after.rec(id).unwrap();
                     // Every byte except the row and compatible entrance stays
                     // intact: count, position, start/finish callbacks and drops.
-                    let mut expected = before.b[b.range.clone()].to_vec();
-                    for field in [graft::GENERATOR_ROW, graft::GENERATOR_SEQ] {
-                        let old = b.field(field).unwrap();
-                        expected[old.start - b.range.start..old.end - b.range.start]
-                            .copy_from_slice(&after.b[a.field(field).unwrap().clone()]);
+                    assert_eq!(b.class, a.class);
+                    for (&field, range) in &b.fields {
+                        if field != graft::GENERATOR_ROW && field != graft::GENERATOR_SEQ {
+                            assert_eq!(
+                                before.b[range.clone()],
+                                after.b[a.field(field).unwrap()],
+                                "{variable} {} field {field}",
+                                g.name
+                            );
+                        }
                     }
-                    assert_eq!(expected, after.b[a.range.clone()], "{variable} {}", g.name);
                     let target = after.val(id, graft::GENERATOR_ROW).unwrap();
                     if g.name.starts_with("GBOX-") {
                         assert_eq!(target, g.row);
@@ -785,121 +799,125 @@ fn river_replacements_use_only_ranged_families() {
                         .any(|d| d.profile.misfit(&destination).is_none())
             });
             let packed = r.stage(628, data(628).to_vec(), afs, &entries).unwrap();
-            let model_pack = Pack::parse(&packed).unwrap();
-            let mut changed = 0;
-            let mut numemon = BTreeSet::new();
-            for &pack in &r.stages[&628].gens {
-                for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
-                    let native = family(g.row).unwrap();
-                    let selected = r
-                        .plans
-                        .get(&pack)
-                        .and_then(|p| p.rows.get(&g.name))
-                        .copied()
-                        .and_then(family)
-                        .unwrap_or(native);
-                    if native == "e_nume" {
-                        assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
-                        numemon.insert(selected);
-                    }
-                    if protected_entrance(&g) {
-                        assert_eq!(selected, native, "{} entrance", g.name);
-                    }
-                    if selected != native {
-                        assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
-                        changed += 1;
-                    }
-                }
-            }
-            assert!((1..=super::super::river_mix::MAX_FAMILIES).contains(&numemon.len()));
-            if donor.is_none() {
-                assert_eq!(
-                    numemon.len(),
-                    donors.min(super::super::river_mix::MAX_FAMILIES),
-                    "normal river should use the available family limit"
-                );
-            }
-            for script in FAMILY_REMAPS
-                .iter()
-                .find(|r| r.entry == 628)
-                .unwrap()
-                .scripts
-            {
-                let id = model_pack.named("beLuaData", script).unwrap();
-                let obj = model_pack.val(id, 3).unwrap();
-                let mem = model_pack.val(obj, 3).unwrap();
-                let range = model_pack.memory[mem as usize].as_ref().unwrap();
-                let c = super::super::river::lua::Chunk::read(
-                    &packed[range.start..range.start + model_pack.val(obj, 2).unwrap() as usize],
-                )
-                .unwrap();
-                let actual: BTreeSet<_> = c
-                    .code
-                    .iter()
-                    .filter(|&&ins| ins & 63 == 7)
-                    .filter_map(|&ins| c.text((ins >> 6) as usize).ok())
-                    .filter(|s| s.starts_with("e_"))
-                    .collect();
-                assert_eq!(
-                    actual, numemon,
-                    "{variable}: {script} must cover all selected bank families"
-                );
-            }
-            let mut maximum = BTreeMap::<&str, usize>::new();
-            for &pack in &r.stages[&628].gens {
-                let mut demand = BTreeMap::<&str, usize>::new();
-                for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
-                    let selected = r
-                        .plans
-                        .get(&pack)
-                        .and_then(|p| p.rows.get(&g.name))
-                        .copied()
-                        .unwrap_or(g.row);
-                    if let Some(model) = family(selected) {
-                        *demand.entry(model).or_default() += g.most as usize;
+            for &current_pack in &r.stages[&628].gens {
+                let current_resources = r.model_for_generator(628, current_pack, &packed);
+                let model_pack = Pack::parse(current_resources).unwrap();
+                let mut changed = 0;
+                let mut numemon = BTreeSet::new();
+                for pack in [current_pack] {
+                    for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                        let native = family(g.row).unwrap();
+                        let selected = r
+                            .plans
+                            .get(&pack)
+                            .and_then(|p| p.rows.get(&g.name))
+                            .copied()
+                            .and_then(family)
+                            .unwrap_or(native);
+                        if native == "e_nume" {
+                            assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
+                            numemon.insert(selected);
+                        }
+                        if protected_entrance(&g) {
+                            assert_eq!(selected, native, "{} entrance", g.name);
+                        }
+                        if selected != native {
+                            assert!(super::super::encounters::RIVER_RANGED.contains(&selected));
+                            changed += 1;
+                        }
                     }
                 }
-                for (model, n) in demand {
-                    maximum
-                        .entry(model)
-                        .and_modify(|v| *v = (*v).max(n))
-                        .or_insert(n);
-                }
-            }
-            for (model, needed) in maximum {
-                if model == "e_nume" {
-                    // Authored sequential banks share a small native pool.
-                    // A retained fallback must not expand that native pool.
+                assert!((1..=super::super::river_mix::MAX_FAMILIES).contains(&numemon.len()));
+                if donor.is_none() {
                     assert_eq!(
-                        super::super::capacity::slots(&model_pack, model).unwrap(),
-                        super::super::capacity::slots(&native, model).unwrap(),
+                        numemon.len(),
+                        donors.min(super::super::river_mix::MAX_FAMILIES),
+                        "normal river should use the available family limit"
                     );
-                    continue;
                 }
-                assert!(
-                    super::super::capacity::slots(&model_pack, model).unwrap() >= needed,
-                    "{variable}: {model} needs {needed} shared actor slots"
-                );
-            }
-            assert_eq!(r.stats.approximate + r.stats.unattached, 0);
-            if !compatible {
-                assert_eq!(changed, 0, "incompatible supply must keep native enemies");
-                assert!(!r
-                    .stats
-                    .trace
+                for script in FAMILY_REMAPS
                     .iter()
-                    .any(|line| line.starts_with("copy 628 ")));
-            } else {
-                assert!(
-                    changed > 0,
-                    "{variable}: seed {seed}, donor {donor:?}, log {:?}",
-                    r.log
-                );
-                if let Some(donor) = donor {
-                    assert_eq!(numemon, BTreeSet::from([donor]));
+                    .find(|r| r.entry == 628)
+                    .unwrap()
+                    .scripts
+                {
+                    let id = model_pack.named("beLuaData", script).unwrap();
+                    let obj = model_pack.val(id, 3).unwrap();
+                    let mem = model_pack.val(obj, 3).unwrap();
+                    let range = model_pack.memory[mem as usize].as_ref().unwrap();
+                    let c = super::super::river::lua::Chunk::read(
+                        &current_resources
+                            [range.start..range.start + model_pack.val(obj, 2).unwrap() as usize],
+                    )
+                    .unwrap();
+                    let actual: BTreeSet<_> = c
+                        .code
+                        .iter()
+                        .filter(|&&ins| ins & 63 == 7)
+                        .filter_map(|&ins| c.text((ins >> 6) as usize).ok())
+                        .filter(|s| s.starts_with("e_"))
+                        .collect();
+                    assert_eq!(
+                        actual, numemon,
+                        "{variable}: {script} must cover all selected bank families"
+                    );
                 }
+                let mut maximum = BTreeMap::<&str, usize>::new();
+                for pack in [current_pack] {
+                    let mut demand = BTreeMap::<&str, usize>::new();
+                    for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                        let selected = r
+                            .plans
+                            .get(&pack)
+                            .and_then(|p| p.rows.get(&g.name))
+                            .copied()
+                            .unwrap_or(g.row);
+                        if let Some(model) = family(selected) {
+                            *demand.entry(model).or_default() += g.most as usize;
+                        }
+                    }
+                    for (model, n) in demand {
+                        maximum
+                            .entry(model)
+                            .and_modify(|v| *v = (*v).max(n))
+                            .or_insert(n);
+                    }
+                }
+                for (model, needed) in maximum {
+                    if model == "e_nume" {
+                        // Authored sequential banks share a small native pool.
+                        // A retained fallback must not expand that native pool.
+                        assert_eq!(
+                            super::super::capacity::slots(&model_pack, model).unwrap(),
+                            super::super::capacity::slots(&native, model).unwrap(),
+                        );
+                        continue;
+                    }
+                    assert!(
+                        super::super::capacity::slots(&model_pack, model).unwrap() >= needed,
+                        "{variable}: {model} needs {needed} shared actor slots"
+                    );
+                }
+                assert_eq!(r.stats.approximate + r.stats.unattached, 0);
+                if !compatible {
+                    assert_eq!(changed, 0, "incompatible supply must keep native enemies");
+                    assert!(!r
+                        .stats
+                        .trace
+                        .iter()
+                        .any(|line| line.starts_with("copy 628 ")));
+                } else {
+                    assert!(
+                        changed > 0,
+                        "{variable}: seed {seed}, donor {donor:?}, log {:?}",
+                        r.log
+                    );
+                    if let Some(donor) = donor {
+                        assert_eq!(numemon, BTreeSet::from([donor]));
+                    }
+                }
+                eprintln!("RIVER {variable}: seed {seed}, donor {donor:?}, {changed} replacements, family {numemon:?}");
             }
-            eprintln!("RIVER {variable}: seed {seed}, donor {donor:?}, {changed} replacements, family {numemon:?}");
         }
     }
 }

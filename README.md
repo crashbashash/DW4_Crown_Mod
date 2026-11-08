@@ -35,7 +35,7 @@ The same randomiser seed reproduces enemy choices within the same rules version.
 
 - **Optional Crown Mod.** Boost enemy health, combat stats and EXP, with crowns for every enemy. Its EXP popups display up to 99,999.
 
-- **Optional random enemies.** Randomize ordinary encounters while preserving each original spawn’s combat stats and EXP, with elemental resistance differences limited to ±100 points. Works with the original balance or Crown Mod.
+- **Optional random enemies.** Normal, Hard and Very Hard get separate seeded rosters. Aim for four distinct replacement families per stage and difficulty, spreading ordinary groups across compatible replacements and keeping native encounters where required. Load only the current difficulty's resources. River banks and train-side encounters use ranged families; enemies boarding the train stay native. Preserve each original spawn’s combat stats and EXP, with elemental resistance differences limited to ±100 points. Works with the original balance or Crown Mod.
 
 - **Optional random crown colours.** Every enemy and boss gets a cosmetic crown
   in a random colour. Works with or without Crown Mod. This changes the icon only; combat stats and drops

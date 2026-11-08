@@ -25,7 +25,10 @@ const PRIVATE: &[&str] = &[
     "igNodeList",
 ];
 
-fn private_graph(p: &Pack, roots: &[u32]) -> Result<(BTreeSet<u32>, BTreeMap<u32, usize>)> {
+pub(super) fn private_graph(
+    p: &Pack,
+    roots: &[u32],
+) -> Result<(BTreeSet<u32>, BTreeMap<u32, usize>)> {
     let mut ids = BTreeSet::new();
     let mut tables = BTreeMap::new();
     let mut queue = roots.to_vec();
@@ -89,6 +92,51 @@ fn node(p: &Pack, ram: u32) -> Result<u32> {
 pub(super) fn slots(p: &Pack, model: &str) -> Result<usize> {
     p.array(p.val(p.named("beModelCtrlInfo", model)?, 6)?)
         .map(|x| x.len())
+}
+
+/// All index-aligned private instance lists, including the scene branches.
+pub(super) fn instance_lists(p: &Pack, model: &str) -> Result<Vec<(u32, Vec<u32>)>> {
+    let info = p.named("beModelCtrlInfo", model)?;
+    let action = p.named("beAction2Info", model)?;
+    let switch = p.val(action, 7)?;
+    p.class(switch, "igSwitch")?;
+    let parent = p.val(switch, 7)?;
+    p.class(parent, "igNodeList")?;
+    let mut lists = vec![p.val(info, 6)?, p.val(action, 6)?, parent];
+    if let Some(database) = graft::find_named(p, "igAnimationDatabase", model)? {
+        lists.push(p.val(database, 9)?);
+    }
+    for class in ["beHitLandDelivInfo", "beShadow01Info"] {
+        if let Some(info) = graft::find_named(p, class, model)? {
+            let list = p.val(info, 6)?;
+            if !p.array(list)?.is_empty() {
+                lists.push(list);
+            }
+        }
+    }
+    let entries = lists
+        .into_iter()
+        .map(|id| Ok((id, p.array(id)?)))
+        .collect::<Result<Vec<_>>>()?;
+    let count = entries[0].1.len();
+    need(
+        count > 0 && entries.iter().all(|(_, v)| v.len() == count),
+        "native instance counts differ",
+    )?;
+    for i in 0..count {
+        need(
+            node(p, entries[0].1[i])? == entries[2].1[i]
+                && p.val(entries[1].1[i], 11)? == entries[2].1[i],
+            "native model/animation scene mismatch",
+        )?;
+    }
+    let mask = p.val(switch, 8)?;
+    p.class(mask, "igBitMask")?;
+    need(
+        p.val(mask, 5)? as usize == count,
+        "native visibility count differs",
+    )?;
+    Ok(entries)
 }
 
 /// Expand the existing pool without changing its original slots or IDs. Returns

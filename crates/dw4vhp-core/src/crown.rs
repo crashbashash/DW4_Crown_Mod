@@ -1,7 +1,9 @@
 //! Expands the authored crown resources together: model and animation RAM,
 //! private mutable scene roots, and a private two-word visibility mask.
-//! No executable offsets or external game metadata are used. Original geometry
-//! and model IDs remain intact. Randomized rewards use otherwise unfilled rows
+//! Resource graphs use reflected type metadata. Difficulty-specific files use
+//! guarded native filename dispatch while preserving the original load order. Surviving geometry
+//! and model IDs remain intact; the randomiser can retire unused native bodies.
+//! Randomized rewards use otherwise unfilled rows
 //! in each area's enemy database. Archive order is preserved.
 //! The river model pack also receives missile damage and turret crown scripts.
 use crate::{error::Result, gcm, iso9660, region::WriteRegion};
@@ -9,6 +11,7 @@ use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod archive;
 mod capacity;
+mod difficulty;
 mod drops;
 pub mod encounters;
 mod exp;
@@ -19,8 +22,9 @@ mod model;
 mod pharaoh;
 mod practice;
 mod random;
+mod ranged_ai;
+mod reclaim;
 mod rewards;
-mod river_ai;
 mod river_mix;
 mod sound;
 mod split_models;

@@ -140,11 +140,18 @@ fn expanded_crowns_and_imported_scripts_keep_backing_blocks() {
                     .copied()
                     .filter(|id| (*id as usize) < source.ids.len())
                     .collect::<Vec<_>>(),
-                source.array(lua).unwrap(),
+                source
+                    .array(lua)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|id| result.class(*id, "beLuaData").is_ok())
+                    .collect::<Vec<_>>(),
                 "authored script lookup order changed"
             );
             for id in source.array(lua).unwrap() {
-                assert!(scripts.contains(&id), "original script missing");
+                if !reclaim::retired_callback(&source, &result, id) {
+                    assert!(scripts.contains(&id), "required original script missing");
+                }
             }
             no_orphan_references(&result);
             let sound = &random.sounds[&(entry - 1)];

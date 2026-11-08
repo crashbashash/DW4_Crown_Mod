@@ -33,11 +33,14 @@ interface and empty defaults. `npm run check` rejects generated-file drift.
 - User flows: `src/features/`, with orchestration in `src/app/App.tsx`.
 - Native IPC and application updates: Tauri's `commands.rs` and `updates.rs`.
 - Stat transforms: `plan.rs`, `ratio.rs` and `table.rs`.
-- Enemy choices and capacity: `crown/random.rs` and `capacity.rs`.
+- Enemy choices and capacity: `crown/random.rs`, `random/distribution.rs` and `capacity.rs`. Native-body reclamation and pool shrinking live in `reclaim.rs`.
 - Fixed protection policy and explanations: `crown/encounters.rs` and the
   [generated encounter catalogue](randomizer-rules.md).
 - IGB parsing and lossless editing: `formats/igb.rs`.
 - Archive orchestration and crown model capacity: `crown/archive.rs` and `model.rs`.
+- Difficulty-specific model/sound files and manifest selectors: `crown/difficulty.rs`.
+  Guarded PS2/GameCube filename dispatch lives in `difficulty_io.rs`; allocator
+  and dispatch hooks are included in the archive plan's verified/recoverable writes.
 - Imported model/effect graphs: `crown/graft.rs`, `sound.rs` and `height.rs`.
 - EXP preservation: `crown/rewards.rs`; floating numbers: `crown/exp.rs`.
 - Disc/container formats: `iso9660.rs`, `gcm.rs`, `elf.rs` and `container.rs`.

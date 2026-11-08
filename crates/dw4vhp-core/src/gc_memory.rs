@@ -10,8 +10,9 @@
 //! the remaining backing memory. Retry them in the general arena, and resolve the
 //! owner again when either caller later resizes or frees the buffer. Failed
 //! buffer growth can migrate to another arena without losing the old payload.
+#[cfg(test)]
+use crate::disc::DiscReport;
 use crate::{
-    disc::DiscReport,
     error::{Error, Result},
     region::WriteRegion,
     release::Release,
@@ -485,10 +486,18 @@ fn stub(site: u32, pools_sda: u16) -> Vec<u8> {
     encoded(&words)
 }
 
+#[cfg(test)]
 pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion>> {
-    let (site, getter, operation, owns) = match report.release {
-        Some(Release::GcUsa) => (0x8006_8ed8, 0x8005_929c, 0x8008_5004, 0x8008_4928),
-        Some(Release::GcJapan) => (0x8006_8e78, 0x8005_923c, 0x8008_4fa4, 0x8008_48c8),
+    match report.release {
+        Some(release) => regions_for_release(iso, release),
+        None => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn regions_for_release(iso: &[u8], release: Release) -> Result<Vec<WriteRegion>> {
+    let (site, getter, operation, owns) = match release {
+        Release::GcUsa => (0x8006_8ed8, 0x8005_929c, 0x8008_5004, 0x8008_4928),
+        Release::GcJapan => (0x8006_8e78, 0x8005_923c, 0x8008_4fa4, 0x8008_48c8),
         _ => return Ok(Vec::new()),
     };
     let context = encoded(&[

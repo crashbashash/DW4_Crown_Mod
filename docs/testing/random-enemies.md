@@ -10,16 +10,246 @@ from the model's actual action bindings rather than guessed from its model name.
 
 Generators with a model-specific spawn sequence keep their original enemy and
 sequence on every difficulty. Normal `SQ_NENTR` and `SQ_SWON` overrides may
-randomize only when the replacement implements that same named sequence on
-every difficulty. The override is preserved; Minotaurmon uses its reviewed
+randomize only when the replacement implements that same named sequence for
+the selected difficulty. The override is preserved; Minotaurmon uses its reviewed
 `SQ_NENTR` bypass. These include the cannon Numemon in Goblin Pass (`SQ_WAIT`)
 and MR01 falling onto the train (`SQ_FALL`). Their entrance motion belongs to the
 original model's animation/controller; clearing the sequence or assigning another
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 20. The same seed is reproducible within
+The current randomizer uses rules version 23. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+
+## Train-side ranged encounters
+
+Rules 23 applies the river's projectile-only family pool and firing policy to
+Train Line's ordinary side generators. The train keeps its four-family budget
+per difficulty; Numenume River retains its three-family budget. Ranged choices
+use verified projectile actions instead of melee attacks across the gap. MR05
+uses the same reviewed off-platform firing bands as the river. Native MR01
+boarding encounters, including `SQ_FALL`, their AI and their positions, stay
+unchanged.
+
+The opt-in `retail_train_sides_are_ranged_on_every_difficulty_and_boarders_stay_native`
+audit passed for seeds 7, 67 and 1520 on PS2 USA, Europe and Japan, and GameCube
+USA and Japan. Each difficulty retained 38 native MR01 falling generators and
+26 ranged side generators, with four selected side families and distinct
+rosters across difficulties. The audit also compares native MR01 action records
+and generator positions/counts, and checks firing-policy idempotence. The
+shared firing-policy preservation audit passed on all five releases. The
+moving-projectile dependency audit passed on PS2 USA and GameCube USA. These
+are disc-data checks; gameplay results are recorded separately below.
+
+Rebuilt rules-23 USA images cold-booted in PCSX2 and Dolphin with Vulkan. On
+Hard, seed 1520 loaded MarineDevimon, MR05, Megadramon and Imperialdramon beside
+the native MR01 pool. Live samples on each console observed all four families'
+projectile actions and moving projectile instances: MarineDevimon `SQ_MAGIC`,
+MR05 `SQ_FIRE`, Megadramon `SQ_MAGIC` (released projectile `SQ_BULT`), and
+Imperialdramon `SQ_FIRE`. Captures were inspected with the player on the train
+and the ranged enemies on the side platforms. Native MR01 instances were
+tracked from `SQ_FALL` above the roof to roof height and ordinary combat.
+
+These were assisted encounter samples with one joined player and four-player
+spawn counts. The opening projectile sample used the moving train. Later
+samples restored a checkpoint created from that same rebuilt image, parked and
+relocated the train (including its culling bounds), and used player HP and
+invulnerability assistance. Enemy AI and generator rows were not edited during
+the live checks. This does not establish a full route playthrough, projectile
+accuracy for every family/seed, physical-console behavior, or four joined
+players. Temporary disc images, profiles, states, memory dumps and captures
+were removed after verification. Both consoles returned through a native stage
+transition to reloaded hub resources with objective/exit-destination assistance.
+Captured allocator checks passed, with no logged guest memory faults.
+
+## Different families on each difficulty
+
+Rules 22 plans Normal, Hard and Very Hard separately. Each difficulty prefers
+families that the earlier difficulties have not used, then reuses compatible
+families when the available pool or encounter restrictions require it. The
+four-import budget applies independently to each difficulty; the river keeps
+its three-family ranged limit. Bosses and protected encounters retain their
+existing restrictions. A small or constrained stage may still use fewer families.
+
+Each difficulty has its own model and sound packs, with native bodies and pool
+capacity reclaimed against that difficulty's generators. The original archive
+entries hold Normal, and appended entries hold Hard and Very Hard. Stage
+manifests select the current pack before native file loading and caching. The
+selected filename uses the game's managed string pool so asynchronous loading
+can retain it safely. Sound selectors preserve their native `/s` suffix and
+loading order. The image grows, but a stage loads one difficulty's resources.
+
+The expanded archive updates the root file count and retains a packed sector
+layout. Native CRI caches file sector counts and sums them to locate data, so
+the filename table moves after all appended resources. The planner rejects an
+archive whose explicit offsets differ from those cached offsets. Executable
+hooks, the file count and archive changes participate in output verification
+and recovery.
+
+Instruction tests execute the MIPS and PowerPC filename wrappers for all three
+difficulties, passthrough names, sound suffixes, invalid selectors and managed
+string ownership. The opt-in regional audit checks native instruction
+fingerprints and executable space on all five supported releases. The opt-in
+roster test checks distinct family sets, corresponding resource packs,
+four-family coverage where supported, and protected generators on configured
+discs.
+
+The rules-22 seed-1520 roster and routing audits passed on PS2 USA, Europe and
+Japan, and GameCube USA and Japan. Targeted USA emulation recorded nine resource
+loads on each console: Goblin Pass on all three difficulties, Train Line on
+Hard, Humid Cave B2 on Very Hard, Mangrove on Hard, and the river on all three
+difficulties. Resource inspection found the expected replacement pools and
+excluded the other difficulties' replacement sets in Goblin Pass and the river.
+Train Line and Humid Cave samples found all four selected families marked active
+in RAM on both consoles. Other samples covered fewer families; they do not
+establish every encounter's progression. River samples checked loading and
+boat activity rather than a complete run or projectile accuracy.
+
+These checks used one joined player with four-player spawn counts, a copied
+native card, the live named difficulty setting, portal redirects, positioning
+and HP assistance. Train exit progression used its objective flag. River
+branches restored a hub checkpoint from the same image. The six non-river
+visits per console reloaded hub resources through native transitions. All captured allocator
+checks passed circularity, ownership and overlap checks, with no guest memory
+faults logged. This is targeted emulator coverage, not physical-console,
+four-joined-player or complete-playthrough validation.
+
+The final PS2 image cold-booted again, rendered Goblin Pass on Hard with its
+replacement enemies, and returned to the hub. GameCube USA also passed rendered
+Goblin Pass checks on Normal, Hard and Very Hard from a cold-booted rules-22
+image. The first encounter visibly used Otamamon, MR02 and Pharaohmon,
+respectively, with the expected four-family resource pools for each difficulty.
+These samples used a copied native card, live difficulty and world-unlock
+settings, player positioning and invulnerability assistance. Difficulty branches
+restored a hub checkpoint created from that same rebuilt image.
+
+Goblin Pass's blue arrival platform was initially misidentified as the hub;
+there was no rendering mismatch. The unmodified game showed the same field-entry
+platform. Scene checks now read the player's `_isMainLobby` flag, wait for
+enabled, unfrozen control, and move off the arrival pad before inspecting the
+terrain and enemies. The flag was set in the hub and clear in every verified
+field sample. A loader message or a shared portal asset alone is insufficient
+visual evidence. The three difficulty screenshots were inspected, and all
+captured allocator checks passed with no logged guest memory faults.
+
+Independent final-image checks confirmed every packed AFS sector offset, filename
+table placement and recorded file length, plus byte-exact recovery of both
+original inputs. All 1,261 GameCube and 1,260 PS2 resource payloads, and the native
+executable changes, match the earlier nine-load builds after the filename-table
+repair. Temporary images, extracted files, captures and test profiles are removed
+after validation; only code, metadata and reports are retained.
+
+## Four-family patrols and native allocation reclamation
+
+Rules 21 prefers up to four compatible imports for ordinary patrols and waves.
+An augmenting-path coverage pass assigns distinct compatible families before
+the remaining groups are balanced by their largest authored party population.
+The tie order is seeded. Native families are compatibility fallbacks; the usual
+rarity, entrance, actor-capacity, variant-row and quest restrictions still apply.
+
+Exclusive introductions use compatible resident families, excluding other
+protected encounters' families unless retaining the original intro. Their
+named waits and controls still follow the selected actor. This keeps the four
+imports available for patrols rather than spending them on one-time cutscenes.
+The river retains its reviewed three-family ranged policy. Small stages and
+scripted family groups can support fewer than four replacements.
+
+After each difficulty's assignments and script rewrites are final, the randomizer can
+retire unused native enemy bodies and shrink retained native pools to remaining
+generator demand. Unknown script dependencies preserve native headroom. The
+reviewed introduction commands wait, freeze and clean up existing actors, so
+those commands alone do not reserve an entire former patrol pool.
+
+Retirement detaches the body's model, animation, physics/shadow registrations,
+owned callbacks and scene branch. The reference audit follows every loader
+reference, including spare words beyond list counts, and preserves shared
+resources. Retained action-command string lookups protect their named models;
+hit-region filters and reviewed scene-object labels do not require an absent
+enemy body. Companion projectiles, effects and native audio banks remain
+independently registered. Their presence does not require the original actor.
+
+Surviving IDs and backing blocks stay fixed. Retired IDs become inert four-byte
+raw buffers: leaving old objects or reference-bearing blocks orphaned would
+still allocate them or retain their children. Serialized-byte savings reported
+by the audit are not measurements of runtime RAM savings.
+
+Synthetic tests cover four-family coverage across 100 seeds, constrained
+compatibility, reproducibility, mixed group populations, shared resources,
+stable IDs and stale references in spare list capacity. The opt-in
+`retail_four_family_distribution_reclaims_unused_natives` regression checks
+final resources, every difficulty, preserved spawn profiles and protected
+generators on configured discs. It specifically requires four patrol families
+in Goblin Pass independently of the introductions. `DW4_VARIETY_SEED` and
+`DW4_VARIETY_ONLY` can restrict a development audit; `DW4_VARIETY_EXPORT` writes
+private generator metadata outside the checkout for gameplay checks.
+
+The rules-21 seed-1520 audit passed across every scanned stage and difficulty
+on PS2 USA, GameCube USA and GameCube Japan:
+
+| Release | Stages using four imports | Unused native bodies retired | Native pools below authored size | Serialized bytes reclaimed |
+| --- | ---: | ---: | ---: | ---: |
+| PS2 USA | 60 | 133 | 27 | 22,419,448 |
+| GameCube USA | 57 | 131 | 27 | 21,667,928 |
+| GameCube Japan | 57 | 131 | 27 | 21,667,928 |
+
+Body and pool counts are stage/family pairs, not distinct species. Totals span
+the archive, rather than representing memory freed in one loaded stage.
+Goblin Pass's 66 ordinary groups use MR03, Infermon, Kokatorimon and Minotaurmon
+in a 17/17/16/16 split. Its Goburimon and Ogremon introductions each retain one
+native actor; the four required Numemon cannon actors remain. The signed PS2
+USA and GameCube USA builds also passed full output verification with Crown
+Mod, four-player spawns and cosmetic crowns enabled.
+
+The final GameCube USA image cold-booted a copied native card on Hard with one
+joined player and four-player counts. Goblin Pass, Humid Cave B2 and Mangrove
+loaded, ran combat samples and returned to the hub; Goblin Pass was visited
+again. All four Humid Cave replacement families were observed active. Portal
+destination redirects, player positioning and HP assistance shortened the route.
+Every captured allocator check passed ownership, circularity and overlap checks;
+the guest log recorded no invalid reads or writes.
+
+A separate check restored a hub state captured from that same final image,
+reset Sukamon's introduction flag and loaded Humid Cave B2. The replacement
+Numemon used one actor slot, appeared in the native introduction, opened and
+closed the info card, and restored player movement through ordinary controller
+input. No state from an older mod image was loaded. These are targeted gameplay
+checks, not complete playthroughs or physical-console/four-joined-player coverage.
+
+The final PS2 USA image also cold-booted a copied native card on Hard in PCSX2
+with Vulkan, one joined player and four-player counts. Loading, combat samples,
+native exit callbacks and allocator checks covered Goblin Pass, Humid Cave B2,
+Mangrove Forest, Train Line and Numenume River. All four Humid Cave replacements
+were observed active. Train Line ran Arukenimon, Mummymon, MR03 and MR05 while
+its protected MR01 fall generators retained their native assignments. Its exit
+used the native finish state with progress assistance.
+
+The PS2 river ran Infermon, MR02 and Otamamon together, and each produced an
+independently moving native projectile through its reviewed firing sequence.
+All five bank cleanup triggers passed. With completion-flag assistance, the
+native victory exit loaded `stag0104`. A checkpoint captured in this exact
+image/run then exercised the native bomb/freeze trigger, set flag 489 and loaded
+`stag0102`. No state from an older mod was used. Portal destinations, player
+position/HP and objective progress were assisted; the enemy models, AI and
+projectile positions were not edited at runtime. All captured allocator checks
+passed and no guest TLB, address, invalid-read/write or allocation faults were
+logged. This is targeted stage coverage rather than an unassisted playthrough.
+
+A further GameCube USA cold boot in headless Vulkan covered the same five areas
+on Hard, with one joined player and four-player counts. All four Humid Cave and
+Train Line replacements were observed active; the train also ran native MR01.
+The first four areas completed combat samples and returned through native exit
+callbacks with destination/progress assistance where needed.
+
+The GameCube river ran Infermon, MR02 and Otamamon together, with each firing an
+independently moving native projectile through its reviewed sequence. All five
+bank cleanup triggers passed. Completion-flag assistance exercised the native
+victory exit to `stag0104`; a checkpoint from this exact image/run then exercised
+the bomb/freeze trigger, flag 489 and native exit to `stag0102`. All 77 captured
+allocator checks passed, with no invalid reads/writes or allocation faults.
+Player position/HP, boat health and objective progress were assisted; enemy AI,
+models and projectile positions were unchanged at runtime. The emulator was
+stopped after verification. Temporary validation images, captures, RAM dumps,+savestates and copied profiles were removed; results, logs and build metadata
+were retained. These remain targeted emulator checks, not full playthroughs.
 
 Rules 17 limits Numenume River replacements to the thirteen projectile-capable
 families below. The restriction applies to both resident
@@ -56,7 +286,7 @@ it is excluded. Compatibility checks may reject an import even when its
 projectile evidence passes.
 
 `river_replacements_use_only_ranged_families` exercises multiple seeds and individual
-donor supplies, verifies family consistency across difficulties, and checks
+donor supplies, checks each difficulty’s selected families and resources, and checks
 that a melee-only donor supply leaves native enemies in place. The same regression checks every selected family's cleanup/freeze commands and
 shared actor capacity on all five supported releases. Data checks establish projectile capability; the live checks
 below additionally exercise rendering, collision and stage unloading. Natural
@@ -275,7 +505,7 @@ Rules 12 randomizes Mangrove's two pre-boss waves (`GENE-139`, then
 `GENE-131`). The opening `mate00.lua` wait and the timeout cleanup in
 `tim_g_orbz03.lua` follow the final selected models, including native fallback
 if reward slots are unavailable. Generator completion callbacks, spawn points,
-counts, refill modes and drops stay authored. The same families are used on all
+counts, refill modes and drops stay authored. In this earlier rules-17 implementation, the same families were used on all
 three difficulties, with the existing combat/crown matching and original EXP.
 Wave replacements may also serve patrols, preserving the stage's choice pool;
 only the Tortamon intro keeps its existing exclusive replacement. The five

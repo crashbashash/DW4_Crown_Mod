@@ -135,6 +135,9 @@ fn retail_pharaoh_summons_follow_selected_families() {
         }
         // Repeat a crowded stage with exactly the rows its generators used.
         // Summons must reuse those encounters when no free variant rows remain.
+        // A Mummymon-only patrol can summon its original rows without needing
+        // variants at all. Exclude that donor to actually exercise exhaustion.
+        r.donors.retain(|(model, _), _| *model != "e_mummy");
         let entry = 709;
         r.stage(entry, data(entry).to_vec(), afs, &entries).unwrap();
         let used: BTreeSet<_> = r.rewards[&entry]

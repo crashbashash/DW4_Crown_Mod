@@ -4,8 +4,9 @@
 //! allocated in another pool. The operation hook resolves an existing buffer's
 //! native owner before changing its bookkeeping. New allocations retain their
 //! requested pool. Enemy/resource selection is unchanged.
+#[cfg(test)]
+use crate::disc::DiscReport;
 use crate::{
-    disc::DiscReport,
     elf::ElfInfo,
     error::{Error, Result},
     region::WriteRegion,
@@ -228,12 +229,24 @@ fn owner_code(owner: u32, operation: u32, original: [u32; 2]) -> Vec<u32> {
     c.finish(&[unchanged, lookup, restore, replace])
 }
 
+#[cfg(test)]
 pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion>> {
-    let Some(n) = report.release.and_then(native) else {
+    match report.release {
+        Some(release) => regions_for_release(iso, release, false),
+        None => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn regions_for_release(
+    iso: &[u8],
+    release: Release,
+    difficulty: bool,
+) -> Result<Vec<WriteRegion>> {
+    let Some(n) = native(release) else {
         return Ok(vec![]);
     };
-    let boot = report.boot_elf.as_ref().ok_or_else(bad)?;
-    let elf = ElfInfo::read(iso, boot)?;
+    let boot = crate::iso9660::find_file(iso, release.serial())?;
+    let elf = ElfInfo::read(iso, &boot)?;
     let at = |address| {
         elf.vaddr_to_iso_offset(address)
             .map(|v| v as usize)
@@ -296,7 +309,13 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
     }
     let owner_offset = code.len() as u32 * 4;
     code.extend(owner_code(n.owner, n.operation, original));
-    let code = encoded(&code);
+    let mut code = encoded(&code);
+    let (extra, routing) = if difficulty {
+        crate::difficulty_io::mips_regions(iso, release, &elf, end + code.len() as u32)?
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    code.extend(extra);
     need(code.len() <= RESERVE as usize)?;
     let code_file = boot.size.checked_add(15).ok_or_else(bad)? & !15;
     let new_size = code_file.checked_add(code.len() as u32).ok_or_else(bad)?;
@@ -361,6 +380,7 @@ pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion
         at(n.operation)?,
         encoded(&[jump(end + owner_offset, false), 0]),
     );
+    edits.extend(routing);
     Ok(edits)
 }
 

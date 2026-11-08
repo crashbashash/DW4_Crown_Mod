@@ -1,6 +1,7 @@
 pub mod container;
 pub mod crown;
 pub mod crown_colours;
+mod difficulty_io;
 pub mod disc;
 pub mod elf;
 pub mod error;
