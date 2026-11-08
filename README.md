@@ -1,4 +1,7 @@
-# DW4 Crown Mod
+# Digimon World 4 Crown Mod & Enemy Randomiser
+
+DW4 Crown Mod is a mod patcher and seeded enemy randomiser for **Digimon World 4**
+on **PlayStation 2 (PS2)** and **GameCube**, available for **Windows and Linux**.
 
 [![CI Linux](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-linux.yml?label=CI%20Linux&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-linux.yml)
 [![CI Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-windows.yml?label=CI%20Windows&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-windows.yml)
@@ -7,9 +10,6 @@
 | Original game | Crown Mod — four-player spawns and random crown colours |
 | --- | --- |
 | ![Two Goburimon at the first Goblin Pass bridge in the original game](docs/images/goblin-pass-original.png) | ![Five Goburimon at the same bridge with four-player spawns, showing green, blue, pink, white and yellow crowns](docs/images/goblin-pass-crown-mod.png) |
-
-Patch **Digimon World 4** on PS2 and GameCube with optional Crown Mod difficulty,
-random enemies and cosmetic crowns.
 
 Open the app and choose your own copy of the game to create a new, modded copy.
 
