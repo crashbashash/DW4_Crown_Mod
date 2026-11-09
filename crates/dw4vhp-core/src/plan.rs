@@ -76,6 +76,9 @@ pub struct PatchPlan {
     pub crown_colour_seed: Option<u32>,
     /// Replace the regular enemies of every stage with other enemy models.
     pub random_enemies: bool,
+    /// Shuffle dungeon bosses while preserving world bosses and arena progression.
+    /// Requires `random_enemies`.
+    pub random_bosses: bool,
     /// Optional reproducible enemy seed; normally chosen per patch and recorded in the image.
     pub enemy_seed: Option<u32>,
     pub serial: Option<String>,
@@ -104,6 +107,7 @@ impl Default for PatchPlan {
             random_crown_colours: false,
             crown_colour_seed: None,
             random_enemies: false,
+            random_bosses: false,
             enemy_seed: None,
             serial: None,
         }

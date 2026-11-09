@@ -8,6 +8,7 @@ fn options(seed: u64) -> RandomOptions {
         donors: 3,
         warp: None,
         only: None,
+        random_bosses: false,
     }
 }
 

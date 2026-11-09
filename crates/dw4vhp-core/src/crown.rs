@@ -45,6 +45,7 @@ pub use archive::CrownPlan;
 use model::expand;
 
 pub const CAPACITY: u32 = 64;
+
 #[cfg(test)]
 mod tests {
     use super::*;

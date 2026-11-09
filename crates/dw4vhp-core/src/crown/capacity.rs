@@ -142,6 +142,7 @@ pub(super) fn instance_lists(p: &Pack, model: &str) -> Result<Vec<(u32, Vec<u32>
 /// Expand the existing pool without changing its original slots or IDs. Returns
 /// unchanged bytes when the authored capacity already covers the demand.
 pub(super) fn expand(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
+    let _timing = crate::profiling::measure("capacity.expand");
     let p = Pack::parse(b)?;
     let info = p.named("beModelCtrlInfo", model)?;
     let ramlist = p.val(info, 6)?;

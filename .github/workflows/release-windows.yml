@@ -58,6 +58,22 @@ jobs:
             -Destination "dw4-crown-mod-$version-windows-x86_64.msi"
           Get-Item *.msi | Select-Object -ExpandProperty FullName
 
+      - name: Smoke-test Windows installer and portable update routes
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart("v")
+          ./tools/test-windows-msi.ps1 -SourceRoot "$env:GITHUB_WORKSPACE" -MsiPath "dw4-crown-mod-$version-windows-x86_64.msi" -ExpectedVersion $version
+      - name: Upload Windows installer smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-msi-smoke
+          path: |
+            ${{ runner.temp }}/crown-msi-smoke/*.log
+            ${{ runner.temp }}/crown-msi-smoke/result.json
+          if-no-files-found: ignore
       - name: Upload Windows assets
         # v4
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

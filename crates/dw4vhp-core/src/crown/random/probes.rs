@@ -807,6 +807,7 @@ fn probe_census() {
             donors: 3,
             warp: None,
             only: None,
+            random_bosses: false,
         },
     )
     .unwrap();
@@ -927,6 +928,7 @@ fn probe_river_donors() {
                 donors: DONORS,
                 warp: None,
                 only: Some(vec![628]),
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -1005,12 +1007,23 @@ fn probe_build_river_image() {
         donors: models.len(),
         warp: None,
         only: Some(vec![628]),
+        random_bosses: false,
     };
     let crowns = env::var_os("DW4_RIVER_CROWNS").is_some();
     let plan = if gc {
-        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), crowns)
+        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), crowns, None)
     } else {
-        CrownPlan::build_with_balance(&iso, false, false, false, 0, None, Some(options), crowns)
+        CrownPlan::build_with_balance(
+            &iso,
+            false,
+            false,
+            false,
+            0,
+            None,
+            Some(options),
+            crowns,
+            None,
+        )
     }
     .unwrap();
     let mut out = std::fs::File::create_new(&output).unwrap();
@@ -1311,6 +1324,7 @@ fn probe_build_arukenimon_native_image() {
             donors,
             warp: None,
             only: Some(stages.clone()),
+            random_bosses: false,
         },
     )
     .unwrap();
@@ -1367,11 +1381,22 @@ fn probe_build_arukenimon_native_image() {
         donors,
         warp: None,
         only: Some(stages),
+        random_bosses: false,
     };
     let plan = if release.is_gamecube() {
-        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), false)
+        CrownPlan::build_gcm_with_balance(&iso, false, false, false, 0, Some(options), false, None)
     } else {
-        CrownPlan::build_with_balance(&iso, false, false, false, 0, None, Some(options), false)
+        CrownPlan::build_with_balance(
+            &iso,
+            false,
+            false,
+            false,
+            0,
+            None,
+            Some(options),
+            false,
+            None,
+        )
     }
     .unwrap();
     let mut out = std::fs::File::create_new(&output).unwrap();

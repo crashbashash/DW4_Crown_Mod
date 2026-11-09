@@ -29,7 +29,8 @@ pub fn metadata(release: Release, plan: &PatchPlan) -> Value {
             "crownMod": plan.crown_mod,
             "fourPlayerSpawns": plan.four_player_spawns, "betterLoot": plan.crown_drops,
             "randomCrownColours": plan.random_crown_colours, "crownColourSeed": plan.crown_colour_seed,
-            "randomEnemies": plan.random_enemies, "enemySeed": plan.enemy_seed,
+            "randomEnemies": plan.random_enemies, "randomBosses": plan.random_bosses,
+            "enemySeed": plan.enemy_seed,
             "crownRank": plan.crown_rank, "hpMultiplier": plan.hp_mult, "statMultipliers": plan.stat_mult,
             "criticalMultiplier": plan.crit_mult, "paralysisMultiplier": plan.para_mult,
             "excludeDestructibles": plan.exclude_destructibles, "excludeTripwire": plan.exclude_tripwire,
@@ -149,12 +150,14 @@ mod tests {
             random_crown_colours: true,
             crown_colour_seed: Some(u32::MAX),
             random_enemies: true,
+            random_bosses: true,
             enemy_seed: Some(u32::MAX),
             serial: Some("SLUS_208.36".into()),
             ..PatchPlan::default()
         };
         let mut value = metadata(Release::Usa, &plan);
         assert_eq!(value["options"]["randomEnemies"], true);
+        assert_eq!(value["options"]["randomBosses"], true);
         assert_eq!(value["options"]["enemySeed"], u32::MAX);
         value["randomEnemies"] = json!({
             "rulesVersion": 99, "seed": u32::MAX, "donorsPerStage": 99, "stages": 9999,
@@ -165,6 +168,11 @@ mod tests {
             "formatVersion": 1, "offset": 2_179_188_736u64, "length": 99_999_999u64,
             "sha1": "0123456789abcdef0123456789abcdef01234567", "originalSize": 2_179_188_736u64,
             "regionCount": 99999, "archiveEnd": 2_179_188_736u64,
+        });
+        value["randomEnemies"]["bosses"] = json!({
+            "encounters": 9, "changed": 27, "worldBossesFixed": true,
+            "preserveEncounterCounts": true, "excludeSelectedPatrolFamilies": true,
+            "bossIntroText": true,
         });
         let block = encode(&value).expect("worst case fits one sector");
         assert_eq!(decode(&block).unwrap(), Some(value));

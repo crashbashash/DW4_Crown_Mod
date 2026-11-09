@@ -31,7 +31,9 @@ Integers are little-endian; the block is exactly 2048 bytes:
 Required JSON identity fields are `formatVersion: 1`, `id: "dw4-crown-mod"`,
 `version`, `platform` (`ps2` or `gc`), `release` (boot serial/game ID) and `options`.
 The option keys include `betterLoot`, `fourPlayerSpawns`, `randomCrownColours`,
-`crownColourSeed`, `randomEnemies`, `enemySeed`, multipliers and the other low-level PatchPlan settings.
+`crownColourSeed`, `randomEnemies`, `randomBosses`, `enemySeed`, multipliers and
+the other low-level PatchPlan settings. Missing `randomBosses` on older images
+means disabled. Boss randomisation requires `randomEnemies` and uses its seed.
 
 ### Enemy randomiser record
 
@@ -52,10 +54,14 @@ given); the object holds what the build did:
 | `rewardVariants` | Area-local replacement variants preserving each original spawn’s combat stats and EXP, with bounded elemental resistance differences. |
 | `planDigest` | First 8 bytes of a SHA-1 over every decision, hex. Equal seed, rules version and mod version give equal digests. |
 
-All five releases support the randomiser. The three PS2 discs share game data and therefore a plan
-for a given seed; the two GameCube discs share another. The GameCube data is slightly larger, so a
-few donors overflow the 16-bit object index there and another model is chosen: the same seed gives
-close to, but not exactly, the same game on the two platforms, and their `planDigest` values differ.
+When bosses are enabled, the object also contains `bosses`: the number of supported
+encounters per difficulty, the total changed encounters across all difficulties,
+and the fixed-world-boss, encounter-frequency, patrol-exclusion and intro-text
+policies. Ordinary generator/model counters retain their existing meaning.
+
+All five releases support ordinary enemy randomisation and the optional boss
+shuffle: PS2 USA, Europe and Japan, and GameCube USA and Japan. Platform-specific resources and
+compatibility can produce different rosters and plan digests for the same seed.
 
 Readers can check the final sector first. To allow zero padding introduced by
 GameCube container conversion, inspect sector boundaries within the final

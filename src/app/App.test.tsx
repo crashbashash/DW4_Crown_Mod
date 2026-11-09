@@ -631,7 +631,7 @@ test("random crown colours works alone and stays selected when Crown Mod is turn
 describe("portable settings", () => {
   test("imports every option and seed while keeping selected paths", async () => {
     const imported = patchSelection({ crownMod: true, crownDrops: true, fourPlayerSpawns: true,
-      randomCrownColours: true, randomEnemies: true, enemySeed: 4294967295 });
+      randomCrownColours: true, randomEnemies: true, randomBosses: true, enemySeed: 4294967295 });
     vi.spyOn(MockBackend.prototype, "importSettings").mockResolvedValue(imported);
     const exported = vi.spyOn(MockBackend.prototype, "exportSettings").mockResolvedValue(true);
     const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
@@ -642,7 +642,7 @@ describe("portable settings", () => {
     fireEvent.blur(screen.getByLabelText("output path"));
     fireEvent.click(screen.getByRole("button", { name: "Import settings…" }));
     await screen.findByText("Settings imported.");
-    for (const name of ["Crown Mod", "Match drops to crowns", "4-player enemy spawns", "Random crown colours", "Random enemies"]) {
+    for (const name of ["Crown Mod", "Match drops to crowns", "4-player enemy spawns", "Random crown colours", "Random enemies", "Random bosses"]) {
       expect((screen.getByRole("switch", { name }) as HTMLInputElement).checked).toBe(true);
     }
     expect((screen.getByLabelText("Enemy seed") as HTMLInputElement).value).toBe("4294967295");
@@ -691,5 +691,92 @@ describe("portable settings", () => {
     expect((screen.getByRole("switch", { name: "Crown Mod" }) as HTMLInputElement).disabled).toBe(true);
     await act(async () => finish(patchSelection()));
     expect((screen.getByRole("switch", { name: "Random enemies" }) as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("optional boss randomisation", () => {
+  test("starts off, shares the enemy seed, and resets when Random enemies is disabled", async () => {
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    expect(screen.queryByRole("switch", { name: "Random bosses" })).toBeNull();
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+    expect(screen.getByRole("switch", { name: "Random bosses", checked: false })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Enemy seed"), { target: { value: "1520" } });
+    await user.click(screen.getByRole("switch", { name: "Random bosses" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    expect(patch).toHaveBeenCalledExactlyOnceWith("/mock/game [CrownMod] [Seed 1520].iso", false,
+      patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 }));
+  });
+
+  test("turning off the parent clears the optional boss setting", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Random bosses" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    expect(screen.queryByRole("switch", { name: "Random bosses" })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: "Random enemies" }));
+    expect(screen.getByRole("switch", { name: "Random bosses", checked: false })).toBeTruthy();
+  });
+
+  test.each([
+    ["PS2", "USA"], ["PS2", "Europe"], ["PS2", "Japan"],
+    ["GameCube", "USA"], ["GameCube", "Japan"],
+  ] as const)("allows boss randomisation on %s %s", async (console, region) => {
+    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({ kind: "ok", text: "clean", size: 1,
+      outputSize: 1, copies: null, discInfo: { console, region, modded: false, modVersion: null } });
+    const patch = vi.spyOn(MockBackend.prototype, "startPatch").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    await user.click(screen.getByRole("switch", { name: "Random enemies" }));
+    await waitFor(() => expect((screen.getByRole("switch", { name: "Random bosses" }) as HTMLInputElement).disabled).toBe(false));
+    await user.click(screen.getByRole("switch", { name: "Random bosses" }));
+    fireEvent.change(screen.getByLabelText("Enemy seed"), { target: { value: "1520" } });
+    await user.click(screen.getByRole("button", { name: "Patch ISO" }));
+    expect(patch).toHaveBeenCalledWith(expect.any(String), false,
+      patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 }));
+  });
+
+  test("restores bosses when updating a signed image", async () => {
+    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({ kind: "refused", reason: "already-modded", text: "modded", size: 1, outputSize: 1, copies: null,
+      discInfo: { console: "GameCube", region: "USA", modded: true, modVersion: "fixture" },
+      modMetadata: { version: "fixture", options: { crownMod: false, fourPlayerSpawns: false, betterLoot: false,
+        randomCrownColours: false, randomEnemies: true, randomBosses: true, enemySeed: 1520 }, recovery: { formatVersion: 1 } } });
+    const update = vi.spyOn(MockBackend.prototype, "updateMod").mockResolvedValue();
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
+    await user.tab();
+    const updateButton = await screen.findByRole("button", { name: "Update ISO" });
+    expect(screen.getByRole("switch", { name: "Random bosses", checked: true })).toBeTruthy();
+    await user.click(updateButton);
+    await user.click(await screen.findByRole("button", { name: "Update image" }));
+    expect(update).toHaveBeenCalledWith(patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 }), null);
+  });
+
+  test("an imported boss setting remains usable and exportable on Japanese GameCube", async () => {
+    const selection = patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 });
+    vi.spyOn(MockBackend.prototype, "importSettings").mockResolvedValue(selection);
+    const exported = vi.spyOn(MockBackend.prototype, "exportSettings").mockResolvedValue(true);
+    vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValue({ kind: "ok", text: "clean", size: 1, outputSize: 1, copies: null,
+      discInfo: { console: "GameCube", region: "Japan", modded: false, modVersion: null } });
+    render(<App />);
+    const user = (await import("@testing-library/user-event")).default;
+    await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Import settings…" }));
+    await screen.findByText("Settings imported.");
+    expect(screen.getByRole("switch", { name: "Random bosses", checked: true })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Export settings…" }));
+    await screen.findByText("Settings exported.");
+    expect(exported).toHaveBeenCalledWith(selection);
+    await user.click(screen.getByRole("switch", { name: "Random bosses" }));
+    expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false);
   });
 });

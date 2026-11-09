@@ -23,9 +23,14 @@ pub(crate) struct Rebuilt {
     rewards: rewards::Plan,
     regions: Vec<WriteRegion>,
     difficulty: bool,
+    area: Option<Vec<u8>>,
 }
 
-fn filename_table(afs: &[u8], count: usize, first: usize) -> Result<Option<Range<usize>>> {
+pub(in crate::crown) fn filename_table(
+    afs: &[u8],
+    count: usize,
+    first: usize,
+) -> Result<Option<Range<usize>>> {
     let mut table = None;
     // AFS writers use either the end of the entry table or the end of the
     // sector-aligned prefix. Retail DW4 uses the former.
@@ -67,7 +72,9 @@ pub(crate) fn rebuild_afs(
     graft: Option<&graft::Spec>,
     random: Option<RandomOptions>,
     crown_mod: bool,
+    final_table: Option<&crate::table::EnemyTable>,
 ) -> Result<Rebuilt> {
+    let _timing = crate::profiling::measure("archive.rebuild");
     let afs = iso
         .get(base..base + size)
         .ok_or_else(|| bad("NDMW.AFS outside image"))?;
@@ -304,6 +311,17 @@ pub(crate) fn rebuild_afs(
         };
         entry_edits.push(edits);
     }
+    if let Some(r) = random.as_mut().filter(|r| r.opts.random_bosses) {
+        r.randomise_bosses(iso, afs, &entries, &mut entry_edits, crown_mod)?;
+        #[cfg(feature = "devtools")]
+        if let Some(roster) = std::env::var_os("DW4_BOSS_TEST_ROSTER") {
+            std::fs::write(
+                roster,
+                serde_json::to_vec_pretty(&r.boss_report)
+                    .map_err(|_| bad("cannot encode boss roster"))?,
+            )?;
+        }
+    }
     if let Some(r) = random.as_mut() {
         for (i, bytes) in std::mem::take(&mut r.sounds) {
             entry_edits[i] = vec![Edit {
@@ -312,10 +330,26 @@ pub(crate) fn rebuild_afs(
             }];
         }
     }
+    let rewards = random
+        .as_ref()
+        .map(|r| r.reward_plan(iso))
+        .transpose()?
+        .unwrap_or_default();
     let extra = random
         .as_mut()
         .map(|r| std::mem::take(&mut r.extra))
         .unwrap_or_default();
+    let area = if let Some(r) = random.as_ref().filter(|r| r.opts.random_bosses) {
+        Some(random::boss::intro::build(
+            iso,
+            afs,
+            &entries,
+            &rewards,
+            final_table.unwrap_or(&r.table),
+        )?)
+    } else {
+        None
+    };
     let expanded_count = count + 2 * extra.len();
     let difficulty = !extra.is_empty();
     need(
@@ -493,11 +527,6 @@ pub(crate) fn rebuild_afs(
             }
         }
     }
-    let rewards = random
-        .as_ref()
-        .map(|r| r.reward_plan(iso))
-        .transpose()?
-        .unwrap_or_default();
     Ok(Rebuilt {
         pieces,
         length: cursor,
@@ -509,7 +538,62 @@ pub(crate) fn rebuild_afs(
             Vec::new()
         },
         difficulty,
+        area,
     })
+}
+
+/// Keep the original AREA bytes for recovery and original-table verification.
+/// Its rebuilt localized packs load through the unchanged virtual filesystem.
+fn append_area(
+    iso: &[u8],
+    start: usize,
+    ndmw_size: usize,
+    area: Option<Vec<u8>>,
+    pieces: &mut Vec<Piece>,
+) -> Result<(usize, Vec<WriteRegion>)> {
+    let Some(area) = area else {
+        return Ok((start + ndmw_size, Vec::new()));
+    };
+    let offset = a2048(start + ndmw_size);
+    pieces.push(Piece::Bytes(vec![0; offset - start - ndmw_size]));
+    let end = offset + area.len();
+    let regions = if crate::release::detect(iso)?.is_gamecube() {
+        let file = gcm::find_file(iso, "AREA.AFS")?;
+        vec![
+            WriteRegion {
+                offset: file.offset_field,
+                bytes: u32::try_from(offset)
+                    .map_err(|_| bad("localized archive exceeds format limit"))?
+                    .to_be_bytes()
+                    .to_vec(),
+            },
+            WriteRegion {
+                offset: file.size_field,
+                bytes: u32::try_from(area.len())
+                    .map_err(|_| bad("localized archive exceeds format limit"))?
+                    .to_be_bytes()
+                    .to_vec(),
+            },
+        ]
+    } else {
+        let file = iso9660::find_file(iso, "AREA.AFS")?;
+        let sector = u32::try_from(offset / 2048)
+            .map_err(|_| bad("localized archive exceeds format limit"))?;
+        let size =
+            u32::try_from(area.len()).map_err(|_| bad("localized archive exceeds format limit"))?;
+        vec![
+            WriteRegion {
+                offset: file.record_offset + 2,
+                bytes: [sector.to_le_bytes(), sector.to_be_bytes()].concat(),
+            },
+            WriteRegion {
+                offset: file.record_offset + 10,
+                bytes: [size.to_le_bytes(), size.to_be_bytes()].concat(),
+            },
+        ]
+    };
+    pieces.push(Piece::Bytes(area));
+    Ok((end, regions))
 }
 
 impl CrownPlan {
@@ -542,6 +626,7 @@ impl CrownPlan {
             graft,
             random,
             true,
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -554,17 +639,19 @@ impl CrownPlan {
         graft: Option<&graft::Spec>,
         random: Option<RandomOptions>,
         crown_mod: bool,
+        final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
         let Rebuilt {
-            pieces,
+            mut pieces,
             length: cursor,
             random,
             rewards,
             regions: resource_regions,
             difficulty,
+            area,
         } = rebuild_afs(
             iso,
             base,
@@ -576,11 +663,14 @@ impl CrownPlan {
             graft,
             random,
             crown_mod,
+            final_table,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
         need(append_offset == iso.len(), "unexpected trailing ISO data")?;
-        let output_size = a2048(append_offset + cursor);
+        let (extended_size, area_regions) =
+            append_area(iso, append_offset, cursor, area, &mut pieces)?;
+        let output_size = a2048(extended_size);
         need(
             output_size / 2048 <= u32::MAX as usize && cursor <= u32::MAX as usize,
             "expanded image exceeds format limit",
@@ -602,6 +692,7 @@ impl CrownPlan {
             },
         ];
         regions.extend(resource_regions);
+        regions.extend(area_regions);
         if random.is_some() {
             let release = crate::release::detect(iso)?;
             regions.extend(crate::ps2_memory::regions_for_release(
@@ -655,6 +746,7 @@ impl CrownPlan {
             colour_seed,
             random,
             true,
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -666,16 +758,18 @@ impl CrownPlan {
         colour_seed: u32,
         random: Option<RandomOptions>,
         crown_mod: bool,
+        final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
         let file = gcm::find_file(disc, "ndmw.afs")?;
         let (base, size) = (file.offset as usize, file.size as usize);
         let Rebuilt {
-            pieces,
+            mut pieces,
             length: cursor,
             random,
             rewards,
             regions: resource_regions,
             difficulty,
+            area,
         } = rebuild_afs(
             disc,
             base,
@@ -687,14 +781,17 @@ impl CrownPlan {
             None,
             random,
             crown_mod,
+            final_table,
         )?;
         let append_offset = disc.len();
         need(
             append_offset.is_multiple_of(4),
             "unaligned GameCube image length",
         )?;
+        let (extended_size, area_regions) =
+            append_area(disc, append_offset, cursor, area, &mut pieces)?;
         need(
-            (append_offset + cursor) as u64 <= u32::MAX as u64,
+            extended_size as u64 <= u32::MAX as u64,
             "expanded image exceeds format limit",
         )?;
         let mut regions = vec![
@@ -708,6 +805,7 @@ impl CrownPlan {
             },
         ];
         regions.extend(resource_regions);
+        regions.extend(area_regions);
         if random.is_some() {
             let release = crate::release::detect(disc)?;
             regions.extend(crate::gc_memory::regions_for_release(disc, release)?);
@@ -720,7 +818,7 @@ impl CrownPlan {
             pieces,
             rewards,
             regions,
-            output_size: (append_offset + cursor) as u64,
+            output_size: extended_size as u64,
             append_offset,
             random,
         })

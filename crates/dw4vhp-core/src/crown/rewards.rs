@@ -140,6 +140,50 @@ fn model_list(p: &Pack, stat: usize, rows: usize) -> Result<Range<usize>> {
 }
 
 impl Plan {
+    /// Apply final balance and local MODEL writes to an AREA archive copy before
+    /// Unicode serialization moves any of its memory blocks. Original AREA bytes
+    /// still receive the ordinary writes and remain available for recovery.
+    pub(super) fn balanced_copy(
+        &self,
+        iso: &[u8],
+        offset: usize,
+        size: usize,
+        table: &EnemyTable,
+    ) -> Result<Vec<u8>> {
+        let source = iso
+            .get(offset..offset + size)
+            .ok_or_else(|| bad("boss language pack outside image"))?;
+        let release = crate::release::detect(iso)?;
+        let authored = EnemyTable::read(iso, &release.layout_in(iso)?)?;
+        let mut copy = source.to_vec();
+        for (index, (old, new)) in authored.blocks().iter().zip(table.blocks()).enumerate() {
+            let positions = memchr::memmem::find_iter(source, old).collect::<Vec<_>>();
+            need(!positions.is_empty(), "missing localized enemy table")?;
+            for at in positions {
+                let mut bytes = new.clone();
+                if let Some(block) = self.blocks.get(&((offset + at) as u64)) {
+                    need(block.index == index, "boss language table kind differs")?;
+                    let base = bytes.clone();
+                    for (&row, &variant) in &block.rows {
+                        variant.write(index, &base, row, &mut bytes);
+                    }
+                }
+                copy[at..at + bytes.len()].copy_from_slice(&bytes);
+            }
+        }
+        for region in &self.models {
+            let at = region.offset as usize;
+            if at >= offset && at < offset + size {
+                need(
+                    at + region.bytes.len() <= offset + size,
+                    "boss language MODEL write outside pack",
+                )?;
+                copy[at - offset..at - offset + region.bytes.len()].copy_from_slice(&region.bytes);
+            }
+        }
+        Ok(copy)
+    }
+
     pub(super) fn build(
         iso: &[u8],
         table: &EnemyTable,

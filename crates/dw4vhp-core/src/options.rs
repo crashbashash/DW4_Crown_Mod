@@ -14,6 +14,7 @@ pub struct PatchSelection {
     pub crown_drops: bool,
     pub random_crown_colours: bool,
     pub random_enemies: bool,
+    pub random_bosses: bool,
     pub enemy_seed: Option<u32>,
 }
 
@@ -31,6 +32,9 @@ impl PatchSelection {
         if self.crown_drops && !self.crown_mod {
             return Err("Crown Drops requires Crown Mod.");
         }
+        if self.random_bosses && !self.random_enemies {
+            return Err("Random bosses requires Random enemies.");
+        }
         if !self.has_features() {
             return Err("Select at least one patch option.");
         }
@@ -40,6 +44,7 @@ impl PatchSelection {
             crown_drops: self.crown_drops,
             random_crown_colours: self.random_crown_colours,
             random_enemies: self.random_enemies,
+            random_bosses: self.random_bosses,
             enemy_seed: self.enemy_seed.filter(|_| self.random_enemies),
             ..PatchPlan::default()
         })
@@ -72,7 +77,8 @@ mod tests {
             serde_json::to_value(selection).unwrap(),
             json!({
                 "crownMod": false, "fourPlayerSpawns": false, "crownDrops": false,
-                "randomCrownColours": false, "randomEnemies": false, "enemySeed": null
+                "randomCrownColours": false, "randomEnemies": false,
+                "randomBosses": false, "enemySeed": null
             })
         );
     }
@@ -117,6 +123,7 @@ mod tests {
     fn analysis_keeps_optional_random_planning_out_of_inspection() {
         let plan = PatchSelection {
             random_enemies: true,
+            random_bosses: true,
             random_crown_colours: true,
             four_player_spawns: true,
             ..Default::default()
@@ -124,6 +131,36 @@ mod tests {
         .analysis_plan();
         assert!(!plan.crown_mod && plan.four_player_spawns);
         assert!(!plan.random_enemies && !plan.random_crown_colours);
+        assert!(!plan.random_bosses);
+    }
+
+    #[test]
+    fn bosses_require_enemy_randomisation_and_share_its_seed() {
+        assert_eq!(
+            PatchSelection {
+                random_bosses: true,
+                ..Default::default()
+            }
+            .into_plan()
+            .unwrap_err(),
+            "Random bosses requires Random enemies."
+        );
+        let plan = PatchSelection {
+            random_enemies: true,
+            random_bosses: true,
+            enemy_seed: Some(1520),
+            ..Default::default()
+        }
+        .into_plan()
+        .unwrap();
+        assert!(plan.random_enemies && plan.random_bosses);
+        assert!(!plan.crown_mod);
+        assert_eq!(plan.enemy_seed, Some(1520));
+        let legacy: PatchSelection = serde_json::from_value(json!({
+            "randomEnemies": true, "enemySeed": 1520
+        }))
+        .unwrap();
+        assert!(!legacy.random_bosses);
     }
 
     #[test]

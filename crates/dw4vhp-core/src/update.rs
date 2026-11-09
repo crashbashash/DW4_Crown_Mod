@@ -114,7 +114,7 @@ pub fn identify(path: &Path) -> Result<(crate::release::Release, Option<Value>)>
         Ok((release, metadata))
     })
 }
-fn restore(
+pub(crate) fn restore(
     iso: &[u8],
     metadata: &Value,
     dest: &Path,

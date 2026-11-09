@@ -1,7 +1,8 @@
 //! Experimental enemy randomiser. For every stage it copies a few extra enemy models into the
 //! stage's model pack, then points each regular generator at one of the models the stage now
 //! carries. Local rows inherit the original encounter's combat stats and rewards, with
-//! bounded elemental differences from the selected family. Bosses, generators that stage
+//! bounded elemental differences from the selected family. An optional second pass shuffles
+//! supported dungeon bosses after patrol planning. Other bosses, generators that stage
 //! scripts wait on by name, and kill-count stages are left as shipped; cutscenes that wait on
 //! an intro enemy by name get their name constants renamed to the model now spawned.
 //! Model-specific entrances stay native; normal activations and reviewed script groups
@@ -14,7 +15,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 23;
+pub const RULES_VERSION: u32 = 26;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -26,6 +27,8 @@ const MANGROVE_WAVES: &[(&str, &str)] = &[("GENE-139", "e_otama"), ("GENE-131", 
 
 pub struct Options {
     pub seed: u64,
+    /// Also shuffle compatible dungeon bosses after patrol planning.
+    pub random_bosses: bool,
     /// How many new models to try to copy into each stage.
     pub donors: usize,
     /// For testing: make the Goblin Pass exit lead to this stage instead of the Abyss of Grief.
@@ -299,8 +302,8 @@ struct Stage {
 }
 
 pub(super) struct Randomiser {
-    opts: Options,
-    table: EnemyTable,
+    pub(super) opts: Options,
+    pub(super) table: EnemyTable,
     /// Models by name and whether the source hangs them as a scene of their own.
     donors: BTreeMap<(&'static str, bool), Donor>,
     audio_sources: BTreeMap<&'static str, usize>,
@@ -314,6 +317,8 @@ pub(super) struct Randomiser {
     pub(super) extra: BTreeMap<usize, [Vec<u8>; 2]>,
     pub log: Vec<String>,
     stats: Stats,
+    boss_summary: Option<serde_json::Value>,
+    pub(super) boss_report: Option<serde_json::Value>,
 }
 
 /// What the randomiser did, for the image signature.
@@ -369,7 +374,7 @@ impl Randomiser {
             .take(8)
             .map(|b| format!("{b:02x}"))
             .collect::<String>();
-        serde_json::json!({
+        let summary = serde_json::json!({
             "rulesVersion": RULES_VERSION,
             "seed": self.opts.seed,
             "donorsPerStage": self.opts.donors,
@@ -382,7 +387,12 @@ impl Randomiser {
             "undrawnEffects": self.stats.unattached,
             "planDigest": digest,
             "rewardVariants": self.rewards.values().map(|r| r.rows.len()).sum::<usize>(),
-        })
+        });
+        let mut summary = summary;
+        if let Some(bosses) = &self.boss_summary {
+            summary["bosses"] = bosses.clone();
+        }
+        summary
     }
 
     /// Find every stage and, for each regular model, the stage pack to copy it from.
@@ -392,6 +402,7 @@ impl Randomiser {
         table: EnemyTable,
         opts: Options,
     ) -> Result<Self> {
+        let _timing = crate::profiling::measure("random.scan");
         let mut me = Self {
             opts,
             table,
@@ -405,6 +416,8 @@ impl Randomiser {
             extra: BTreeMap::new(),
             log: Vec::new(),
             stats: Stats::default(),
+            boss_summary: None,
+            boss_report: None,
         };
         let data = |e: usize| entries.get(e).and_then(|&(o, l)| afs.get(o..o + l));
         for (e, &(_, len)) in entries.iter().enumerate() {
@@ -698,6 +711,11 @@ impl Randomiser {
         let Some(mut stage) = self.stages.get(&entry).cloned() else {
             return Ok(dst);
         };
+        let _timing = crate::profiling::measure("random.plan_stage");
+        let _stage_timing = crate::profiling::measure_owned(format!(
+            "stage.{entry}.tier.{}",
+            tier.unwrap_or(entry)
+        ));
         let all_gens = stage.gens.clone();
         if let Some(pack) = tier {
             need(
@@ -1591,6 +1609,16 @@ impl Randomiser {
     }
 }
 
+#[path = "random/boss.rs"]
+pub(super) mod boss;
+#[cfg(all(test, feature = "devtools"))]
+#[path = "random/boss_audit.rs"]
+mod boss_audit;
+#[cfg(all(test, feature = "devtools"))]
+#[path = "random/boss_image.rs"]
+mod boss_image;
+#[path = "random/boss_plan.rs"]
+mod boss_plan;
 #[cfg(test)]
 #[path = "random/encounter_tests.rs"]
 mod dependency_audit;

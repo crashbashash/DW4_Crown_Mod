@@ -18,8 +18,110 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 23. The same seed is reproducible within
+The current randomizer uses rules version 25. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
+Imports fill unused registry capacity before extending it, preserving the backing
+block while keeping empty resource entries outside the active list. This also
+applies to scene children and script registries after native models are retired.
+Retirement also preserves a named scene when its draw tree contains another
+registered model. A retained action/controller alone does not keep its scene
+ancestors registered, so imported actors must remain reachable from a draw scene.
+
+## Optional dungeon bosses
+
+The app’s **Random bosses** setting appears under Random enemies and starts
+disabled. It requires Random enemies, shares its seed, and is included in settings
+files and image metadata. Supported releases are PS2 USA, Europe and Japan, and
+GameCube USA and Japan. Turning off Random
+enemies clears the dependent setting. The production builder shuffles dungeon
+bosses after the final patrol selection. It preserves each difficulty's encounter
+inventory and excludes the selected patrol families across every floor of the
+dungeon. World bosses remain fixed. Boss imports retain the
+arena's dormant original resources and callback names, and donor hit scripts use
+the arena's health display. Reviewed entrance fallbacks prefer `SQ_ENTR`:
+Blossomon's `SQ_NENTR` selects normal-enemy death labels and can prevent the
+arena's victory callback from running.
+
+The earlier USA prototype used literal English cards. Rules 26 retains native
+Unicode rendering and supplies localized message banks in a rebuilt AREA archive;
+difficulty-specific intro scripts select the donor’s four message indexes. All
+original messages and the final local databases are preserved. The regional
+validation below is static and does not add regional emulator coverage.
+
+Rules 26 seed 1520 built through `PatchSelection` on all five supported releases:
+PS2 USA, Europe and Japan, and GameCube USA and Japan. Each full-image audit
+verified 27 boss choices against every dungeon floor’s written MODEL database,
+189 localized cards across all seven native language packs, 580 native stat rows,
+567 local boss-stat cases and 18 fixed world-boss generator packs. Drops and
+complete destination victory callbacks match their originals. Recovery restored
+each source disc byte-for-byte, including both archive extents. Japanese PS2 used
+Crown Mod balance; the other four images used vanilla balance. These regional
+checks used file-level audits without additional emulator runs. Rebuilding AREA
+preserves its original messages and adds its archive size to the output; the app’s
+size estimate includes this.
+
+PS2 USA seed 1520 passed accelerated Normal, single-player live checks on the
+final image with a level-99 test save. Teleports shortened travel; native
+controller attacks defeated the bosses without enemy-HP or defeat-flag writes.
+Blossomon in Cliff Dungeon B3 rendered with its matching info card, set the
+original flag 150 and cleared 508, while its donor flag 119 stayed clear. Vine
+Tunnel B3 spawned three Scorpiomon at the original encounter's 1675 HP each;
+flag 157 remained clear while any boss survived and set after all three died.
+Scorpiomon's donor flag 189 stayed clear.
+
+GameCube USA seed 1520 passed live spawn, intro and victory checks for all nine
+Normal boss encounters in Dolphin with one joined player and a copied native
+level-316 save. Every arena's original defeat flag set after native attacks,
+while the replacement's donor-arena flag stayed unchanged. The rebuilt image
+cold-booted before creating its checkpoints. Hub transition arguments and player
+positions shortened travel; enemy HP, defeat flags and boss scripts were not
+edited. Cliff Blossomon set flag 150 while 119 stayed clear. Vine Tunnel spawned
+three Scorpiomon at 1675 HP each; flag 157 stayed clear after the first and second
+kills and set after the third, while 189 stayed clear. Both encounter segments
+logged zero invalid memory reads or writes, as did the other seven encounters.
+Mecha Nest's native Raremon entry introduction must finish before a test
+shortcut enters the boss trigger. Overlapping those cutscenes misframes the
+boss card; completing the entry intro restores the native camera and correctly
+frames ShogunGekomon with its matching card.
+
+All 27 boss/difficulty slots passed resource, draw-scene, activation and victory
+bytecode checks on PS2 USA and GameCube USA. Boss generators and their
+drop/callback dependencies remain unchanged except for the enemy row. The audit
+also checked 580 native stat rows, 567 localized stat cases and 18 fixed
+world-boss generator packs on each platform.
+Hard/Very Hard gameplay, multiplayer and complete campaign routes still need
+live coverage. Key-item pickup was not separately exercised live. Private
+evidence is retained in the outer workspace's
+`outputs/boss-randomizer/live-check/live-result.json` and
+`outputs/boss-randomizer/gc-live-check/live-result.json` with adjacent captures.
+
+The rules-25 production app path passed full-image checks on USA GameCube with vanilla
+stats and USA PS2 with Crown Mod, four-player spawns, random crown colours and
+custom drops. The boss-off control retained all native bosses. All 27 boss
+selections were independently checked against the written MODEL databases on
+every dungeon floor, alongside the intro, callback, count and stat checks.
+Whole-dungeon exclusions change two Normal seed-1520 placements: MR04 replaces
+SkullGreymon in Sand Labyrinth, and MR05 replaces Diaboromon in Vein. Both final
+GameCube fights passed native attack/defeat-flag checks; their donor flags stayed
+clear. The other seven Normal boss model, sound and generator packs match the
+previously tested resources. Evidence is in `outputs/app-boss-integration/`.
+
+DigiAtlas v0.5.0 completed imports but omitted spawn lists when appended
+difficulty resources were referenced: only eight of 98 stages retained generator
+data and all nine shuffled boss stages were missing. Its generator scan started
+after the highest referenced model entry, beyond the native generator files.
+The failure evidence remains in
+`outputs/app-boss-integration/atlas-compatibility.json`.
+
+The companion Atlas importer 1.28.0 resolves named generator files through
+NDMW.IGB instead. It passed the complete spawn/model/stat/position and schema
+regression on all five rules-26 images and both rules-25 USA test images. Each
+new regional image exports all 27 dungeon bosses and 10,287 live spawn records;
+all 81 stages with generators are restored. Tests also passed on unmodified discs
+from every supported region, the Crown Drops image and the map UI’s overlapping
+spawn groups. Importer versioning invalidates affected old caches. These changes
+require a new Atlas build; v0.5.0 itself is unchanged. Evidence is in
+`outputs/boss-regions/`.
 
 ## Train-side ranged encounters
 

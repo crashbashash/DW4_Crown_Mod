@@ -21,6 +21,9 @@ fn validate(settings: PatchSelection) -> Result<PatchSelection, String> {
     if settings.crown_drops && !settings.crown_mod {
         return Err("Match drops to crowns requires Crown Mod.".into());
     }
+    if settings.random_bosses && !settings.random_enemies {
+        return Err("Random bosses requires Random enemies.".into());
+    }
     if settings.random_enemies && settings.enemy_seed.is_none() {
         return Err("Random enemies requires a valid seed.".into());
     }
@@ -127,6 +130,7 @@ mod tests {
             four_player_spawns: true,
             random_crown_colours: true,
             random_enemies: true,
+            random_bosses: true,
             enemy_seed: Some(u32::MAX),
         };
         let encoded = encode(selection).unwrap();
@@ -152,6 +156,7 @@ mod tests {
             json!({"format": FORMAT, "version": 1, "settings": {"crownMod": "true"}}),
             json!({"format": FORMAT, "version": 1, "settings": {"enemySeed": 4294967296u64}}),
             json!({"format": FORMAT, "version": 1, "settings": {"randomEnemies": true}}),
+            json!({"format": FORMAT, "version": 1, "settings": {"randomBosses": true}}),
             json!({"format": FORMAT, "version": 1, "settings": {"crownDrops": true}}),
             json!({"format": FORMAT, "version": 1, "settings": {"inputPath": "game.iso"}}),
             json!({"format": FORMAT, "version": 1, "settings": {}, "outputPath": "out.iso"}),
@@ -163,5 +168,21 @@ mod tests {
         assert!(read(&path).is_err());
         std::fs::write(&path, vec![b' '; MAX_BYTES as usize + 1]).unwrap();
         assert!(read(&path).unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn older_settings_leave_bosses_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            json!({"format": FORMAT, "version": 1,
+            "settings": {"randomEnemies": true, "enemySeed": 1520}})
+            .to_string(),
+        )
+        .unwrap();
+        let settings = read(&path).unwrap();
+        assert!(settings.random_enemies);
+        assert!(!settings.random_bosses);
     }
 }

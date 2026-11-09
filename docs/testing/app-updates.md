@@ -57,10 +57,15 @@ Existing patched game images are unaffected by an application update.
 - Node tests cover release-note extraction, version mismatch and empty notes.
   Workflow YAML parses successfully. Native tests are included in both Windows
   and Linux shell CI jobs.
-- Actual Windows Installer execution/upgrade is not tested on the Linux host.
-  Before publishing, smoke-test an MSI-installed copy on Windows, plus a portable
-  executable outside its install directory. Verify the former uses the MSI and
-  the latter opens GitHub. Decline before accepting to confirm no action occurs.
+- The release Windows job installs the newly built MSI on its isolated runner,
+  checks the pinned upgrade identity and version, launches both installed and
+  portable copies, and runs the production installation detector from both
+  locations. It verifies MSI routing for the installed copy and browser routing
+  for the portable copy before assets can be published. Logs and results are
+  retained in the `windows-msi-smoke` workflow artifact. Frontend tests cover
+  declining the offer before acceptance; live acceptance and OS installer UI
+  interactions remain separate from this packaging smoke check.
+
 
 Commands:
 

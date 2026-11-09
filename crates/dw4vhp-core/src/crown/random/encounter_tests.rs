@@ -46,6 +46,7 @@ fn randomised_minotaurmon_bypass_healing_for_native_and_imported_models() {
                 donors: DONORS,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -174,6 +175,7 @@ fn every_scripted_spawn_and_quest_dependency_survives() {
                 donors: 0,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -335,6 +337,7 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                 donors: DONORS,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -497,6 +500,7 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
                 donors: DONORS,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -564,6 +568,7 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
                     donors: DONORS,
                     warp: None,
                     only: Some(vec![607]),
+                    random_bosses: false,
                 },
             )
             .unwrap();
@@ -758,6 +763,7 @@ fn river_replacements_use_only_ranged_families() {
                     donors,
                     warp: None,
                     only: Some(vec![628]),
+                    random_bosses: false,
                 },
             )
             .unwrap();
@@ -1153,6 +1159,7 @@ fn retail_arukenimon_is_a_complete_expandable_donor_and_keeps_its_native_encount
                 donors: DONORS,
                 warp: None,
                 only: Some(vec![614]),
+                random_bosses: false,
             },
         )
         .unwrap();

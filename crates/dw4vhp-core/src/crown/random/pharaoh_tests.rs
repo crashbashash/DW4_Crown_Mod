@@ -48,6 +48,7 @@ fn retail_pharaoh_summons_follow_selected_families() {
                 donors: DONORS,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -190,8 +191,10 @@ fn build_pharaoh_gamecube_gameplay_fixture() {
             donors: 1,
             warp: None,
             only: Some(vec![249]),
+            random_bosses: false,
         }),
         false,
+        None,
     )
     .unwrap();
     let report = crate::disc::inspect_retail_bytes(&iso).unwrap();

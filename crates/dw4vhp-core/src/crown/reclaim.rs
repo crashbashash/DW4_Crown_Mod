@@ -58,6 +58,7 @@ fn unreferenced(p: &Pack, candidates: &BTreeSet<u32>) -> Result<BTreeSet<u32>> {
 }
 
 fn retire(b: &[u8], dead: &BTreeSet<u32>) -> Result<Vec<u8>> {
+    let _timing = crate::profiling::measure("reclaim.retire");
     if dead.is_empty() {
         return Ok(b.to_vec());
     }
@@ -209,6 +210,7 @@ pub(super) fn pool_script_dependency(
 /// owned resources. Keep companion projectiles/effects registered independently:
 /// other attacks can resolve those by name without requiring the enemy body.
 pub(super) fn unused(b: &[u8], model: &str) -> Result<Option<Vec<u8>>> {
+    let _timing = crate::profiling::measure("reclaim.unused");
     if script_dependency(b, model, true)? {
         return Ok(None);
     }
@@ -217,7 +219,8 @@ pub(super) fn unused(b: &[u8], model: &str) -> Result<Option<Vec<u8>>> {
     let root = u32at(b, p.table + 8 + 2 * p.ids.len())?;
     let mut roots = BTreeSet::new();
     let mut models = BTreeSet::new();
-    for id in p.array(root)? {
+    let registry = p.array(root)?;
+    for &id in &registry {
         let name = graft::name_of(&p, p.rec(id)?).unwrap_or_default();
         if related(name) {
             roots.insert(id);
@@ -226,6 +229,24 @@ pub(super) fn unused(b: &[u8], model: &str) -> Result<Option<Vec<u8>>> {
             }
         }
     }
+    // A scene named after one enemy can draw several native or imported
+    // families. Keep that scene registered when retiring its namesake; action
+    // infos retain switches, but they do not retain the switches' draw parents.
+    let foreign_switches = registry
+        .iter()
+        .copied()
+        .filter(|&id| p.class(id, "beAction2Info").is_ok() && !roots.contains(&id))
+        .map(|id| p.val(id, 7))
+        .collect::<Result<BTreeSet<_>>>()?;
+    let mut shared_scenes = BTreeSet::new();
+    for &id in &roots {
+        if p.class(id, "igSceneInfo").is_ok()
+            && !graft::scene_nodes(&p, id)?.is_disjoint(&foreign_switches)
+        {
+            shared_scenes.insert(id);
+        }
+    }
+    roots.retain(|id| !shared_scenes.contains(id));
     let scripts = (0..p.ids.len() as u32)
         .filter(|&id| p.class(id, "beLuaData").is_ok())
         .filter(|&id| {
@@ -289,7 +310,8 @@ pub(super) fn unused(b: &[u8], model: &str) -> Result<Option<Vec<u8>>> {
             // A shared material's igAttrSet name can retain an old projectile
             // label; that label is not a model lookup command.
             if slot == 2
-                && (after.classes[record.class].name == "beAsTargetModelData"
+                && (shared_scenes.contains(&(id as u32))
+                    || after.classes[record.class].name == "beAsTargetModelData"
                     || matches!(
                         after.classes[record.class].name.as_str(),
                         "igAttrSet"
@@ -339,6 +361,7 @@ pub(super) fn unused(b: &[u8], model: &str) -> Result<Option<Vec<u8>>> {
 /// Shrink only audited native pools. The shared mesh/animation
 /// definitions survive; redundant private actors and their buffers are retired.
 pub(super) fn shrink(b: &[u8], model: &str, count: usize) -> Result<Vec<u8>> {
+    let _timing = crate::profiling::measure("reclaim.shrink");
     let p = Pack::parse(b)?;
     let old = capacity::slots(&p, model)?;
     if count >= old || count == 0 {

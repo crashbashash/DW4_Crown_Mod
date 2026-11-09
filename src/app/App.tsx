@@ -46,6 +46,7 @@ function AppInner() {
   const [crownDrops, setCrownDrops] = useState(DEFAULT_PATCH_SELECTION.crownDrops);
   const [randomCrownColours, setRandomCrownColours] = useState(DEFAULT_PATCH_SELECTION.randomCrownColours);
   const [randomEnemies, setRandomEnemies] = useState(DEFAULT_PATCH_SELECTION.randomEnemies);
+  const [randomBosses, setRandomBosses] = useState(DEFAULT_PATCH_SELECTION.randomBosses);
   const [enemySeed, setEnemySeed] = useState("");
   const appliedOptionsEpoch = useRef<number | null>(null);
   const applyDetectedOptions = useCallback((status: DiscStatus, epoch: number) => {
@@ -59,6 +60,7 @@ function AppInner() {
       setRandomCrownColours(options?.randomCrownColours ?? false);
       const seed = status.modMetadata?.randomEnemies?.seed ?? options?.enemySeed;
       setRandomEnemies(options?.randomEnemies ?? false);
+      setRandomBosses(options?.randomEnemies === true && options?.randomBosses === true);
       if (options?.randomEnemies === true && typeof seed === "number") setEnemySeed(String(seed));
     }
   }, []);
@@ -141,7 +143,7 @@ function AppInner() {
 
   const info = selectedStatus?.discInfo;
   const enemySeedValue = randomEnemies ? parseSeed(enemySeed) : null;
-  const selection: PatchSelection = { crownMod, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, enemySeed: enemySeedValue };
+  const selection: PatchSelection = { crownMod, fourPlayerSpawns, crownDrops, randomCrownColours, randomEnemies, randomBosses, enemySeed: enemySeedValue };
   const analyzed = disc.status?.kind === "ok";
   const hasOptions = crownMod || fourPlayerSpawns || randomCrownColours || randomEnemies;
   const canPatch = hasOptions && (analyzed || selectedStatus?.reason === "already-modded")
@@ -161,6 +163,7 @@ function AppInner() {
 
   const changeRandomEnemies = (selected: boolean) => {
     setRandomEnemies(selected);
+    if (!selected) setRandomBosses(false);
     if (selected && parseSeed(enemySeed) === null) setEnemySeed(newSeed());
   };
 
@@ -170,6 +173,7 @@ function AppInner() {
     setFourPlayerSpawns(settings.fourPlayerSpawns);
     setRandomCrownColours(settings.randomCrownColours);
     setRandomEnemies(settings.randomEnemies);
+    setRandomBosses(settings.randomEnemies && settings.randomBosses);
     setEnemySeed(settings.enemySeed === null ? "" : String(settings.enemySeed));
   };
 
@@ -276,7 +280,7 @@ function AppInner() {
               onPick={() => void disc.pickDisc()}
               onCommitDiscPath={setDiscPath}
             />
-            <SettingsPanel crownMod={crownMod} onCrownModChange={changeCrownMod} fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || settingsBusy || disc.analyzing}
+            <SettingsPanel crownMod={crownMod} onCrownModChange={changeCrownMod} fourPlayerSpawns={fourPlayerSpawns} onFourPlayerSpawnsChange={setFourPlayerSpawns} crownDrops={crownDrops} onCrownDropsChange={setCrownDrops} randomCrownColours={randomCrownColours} onRandomCrownColoursChange={setRandomCrownColours} randomEnemies={randomEnemies} onRandomEnemiesChange={changeRandomEnemies} randomBosses={randomBosses} onRandomBossesChange={setRandomBosses} enemySeed={enemySeed} onEnemySeedChange={setEnemySeed} busy={busy || updating || settingsBusy || disc.analyzing}
               fileActions={<SettingsFiles
                 selection={{ ...selection, enemySeed: parseSeed(enemySeed) }}
                 valid={!randomEnemies || enemySeedValue !== null}

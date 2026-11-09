@@ -257,6 +257,7 @@ fn list_elements(p: &Pack, owner: &Record, block: u32) -> Result<Vec<u32>> {
 /// Every object and memory block reachable from `roots`, plus every memory block that is a
 /// table of IDs (object lists and mesh stream tables) with how many leading words are IDs.
 pub(super) fn closure(p: &Pack, roots: &[u32]) -> Result<(BTreeSet<u32>, HashMap<u32, usize>)> {
+    let _timing = crate::profiling::measure("graft.closure");
     let mut seen = BTreeSet::new();
     let mut tables = HashMap::new();
     let mut queue = roots.to_vec();
@@ -460,6 +461,48 @@ pub(super) fn model_scene(sp: &Pack, model: &str) -> Result<ModelScene> {
     Ok(ModelScene::Info(id))
 }
 
+/// Actual draw ancestry, rather than resource-reference reachability: an action
+/// info can retain a model switch even after its scene registration is removed.
+pub(super) fn scene_nodes(p: &Pack, scene: u32) -> Result<BTreeSet<u32>> {
+    p.class(scene, "igSceneInfo")?;
+    let mut queue = vec![p.val(scene, 5)?];
+    let additional = p.val(scene, 11)?;
+    if additional != NULL {
+        queue.extend(p.array(additional)?);
+    }
+    let mut nodes = BTreeSet::new();
+    while let Some(id) = queue.pop() {
+        if id == NULL || !nodes.insert(id) {
+            continue;
+        }
+        let record = p.rec(id)?;
+        if !p.classes[record.class]
+            .fields
+            .iter()
+            .any(|&(kind, field, _)| kind == 0 && field == 7)
+        {
+            continue;
+        }
+        let children = p.val(id, 7)?;
+        if children != NULL && p.class(children, "igNodeList").is_ok() {
+            queue.extend(p.array(children)?);
+        }
+    }
+    Ok(nodes)
+}
+
+pub(super) fn model_is_drawn(p: &Pack, model: &str) -> Result<bool> {
+    let action = p.named("beAction2Info", model)?;
+    let switch = p.val(action, 7)?;
+    let registry = u32at(p.b, p.table + 8 + 2 * p.ids.len())?;
+    for info in p.array(registry)? {
+        if p.class(info, "igSceneInfo").is_ok() && scene_nodes(p, info)?.contains(&switch) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The effect number each enemy model owns: its bullets and magic are `x_NNNe...` models and
 /// `y_NNNe...` effects (Infermon is 026). Read off which models every stage using the number
 /// carries (`probe_numbers`).
@@ -543,6 +586,7 @@ struct Attach {
 }
 
 /// The nodes whose child list holds `child`: (node, child list).
+#[cfg(test)]
 fn node_holders(p: &Pack, child: u32) -> Vec<(u32, u32)> {
     let mut found = Vec::new();
     for id in 0..p.ids.len() as u32 {
@@ -566,6 +610,47 @@ fn node_holders(p: &Pack, child: u32) -> Vec<(u32, u32)> {
     found
 }
 
+/// Reverse the scene's child lists once per immutable pack view. Looking up
+/// every ancestor by rescanning every object repeats the same work for each
+/// effect and for each level of its render ancestry.
+struct SceneIndex {
+    holders: BTreeMap<u32, Vec<(u32, u32)>>,
+}
+impl SceneIndex {
+    fn new(p: &Pack) -> Self {
+        let _timing = crate::profiling::measure("graft.scene_index");
+        let mut holders: BTreeMap<u32, Vec<(u32, u32)>> = BTreeMap::new();
+        for (id, index) in p.ids.iter().enumerate() {
+            let Some(index) = index else { continue };
+            let r = &p.objects[*index];
+            for (slot, memory) in ref_slots(p, r) {
+                if memory {
+                    continue;
+                }
+                let Ok(list) = r.val(p.b, slot) else { continue };
+                if list == NULL || p.class(list, "igNodeList").is_err() {
+                    continue;
+                }
+                let Ok(children) = p.array(list) else {
+                    continue;
+                };
+                // The old lookup used contains(): duplicate children count once
+                // per owner field, while duplicate owner fields remain distinct.
+                for child in children.into_iter().collect::<BTreeSet<_>>() {
+                    holders.entry(child).or_default().push((id as u32, list));
+                }
+            }
+        }
+        Self { holders }
+    }
+    fn holders(&self, child: u32) -> &[(u32, u32)] {
+        self.holders
+            .get(&child)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
 fn is_promoted(p: &Pack, id: u32) -> bool {
     p.rec(id).is_ok_and(|r| {
         p.classes[r.class].name == "igAttrSet" && name_of(p, r) == Some(b"PromotedAttr")
@@ -574,13 +659,13 @@ fn is_promoted(p: &Pack, id: u32) -> bool {
 
 /// Climb from a model's switch to the effect pass. Shared/ambiguous ancestry is
 /// refused: selecting an arbitrary parent can change the texture or blending.
-fn attach_point(sp: &Pack, switch: u32) -> Result<Option<Attach>> {
+fn attach_point(sp: &Pack, switch: u32, index: &SceneIndex) -> Result<Option<Attach>> {
     let mut chain = vec![switch];
     let mut path = Vec::new();
     loop {
         need(chain.len() < 16, "scene nesting too deep")?;
         let child = *chain.last().unwrap();
-        let holders = node_holders(sp, child);
+        let holders = index.holders(child);
         match holders.len() {
             0 => break,
             1 => {
@@ -621,14 +706,14 @@ fn node_children(p: &Pack, node: u32) -> Result<u32> {
 
 /// Find the same render pass, without guessing at child indexes inside it. The
 /// imported branch supplies its own complete attribute stack below this node.
-fn effect_pass(sp: &Pack, dp: &Pack, top: u32) -> Result<Option<u32>> {
+fn effect_pass(sp: &Pack, dp: &Pack, top: u32, index: &SceneIndex) -> Result<Option<u32>> {
     let r = sp.rec(top)?;
     let tops = (0..dp.ids.len() as u32)
         .filter(|&id| {
             dp.rec(id).is_ok_and(|d| {
                 dp.classes[d.class].name == sp.classes[r.class].name
                     && name_of(dp, d) == name_of(sp, r)
-            }) && node_holders(dp, id).is_empty()
+            }) && index.holders(id).is_empty()
         })
         .collect::<Vec<_>>();
     if tops.len() != 1 {
@@ -653,18 +738,21 @@ fn render_source(
     report: &mut Report,
 ) -> Result<RenderSource> {
     let bullets = companion_models(sp, dp, models)?;
+    let source_index = SceneIndex::new(sp);
+    let destination_index = dp.map(SceneIndex::new);
     let mut attached = BTreeMap::new();
     let mut selected: BTreeMap<u32, (u32, BTreeSet<u32>)> = BTreeMap::new();
     for (switch, own, name) in effect_switches(sp, dp, models, &bullets.iter().collect::<Vec<_>>())?
     {
-        let Some(at) = attach_point(sp, switch)? else {
+        let Some(at) = attach_point(sp, switch, &source_index)? else {
             if own {
                 report.unattached.push(format!("{name} (no tree)"));
             }
             continue;
         };
         let destination = if let Some(dp) = dp {
-            let Some(list) = effect_pass(sp, dp, at.top)? else {
+            let Some(list) = effect_pass(sp, dp, at.top, destination_index.as_ref().unwrap())?
+            else {
                 if own {
                     report.unattached.push(format!("{name} (no pass)"));
                 }
@@ -852,13 +940,45 @@ pub(super) fn add_enemy_group(dst: &[u8], src: &[u8], native: &str) -> Result<Ve
 
 /// Copy the named models' record subgraphs, scripts included, from `src` into `dst`.
 pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Edit>, Report)> {
+    graft_with_scripts(dst, src, models, &MODEL_SCRIPTS)
+}
+
+/// Keep the list's backing ID while inserting at its logical end. Reclamation
+/// can leave spare NULL words beyond the count; growing after those words would
+/// publish NULL entries and hide the last imported objects from the engine.
+fn write_list(p: &Pack, builder: &mut Builder, list: u32, entries: &[u32]) -> Result<()> {
+    let block = p.val(list, 4)?;
+    let range = p
+        .memory
+        .get(block as usize)
+        .and_then(Option::as_ref)
+        .ok_or_else(|| bad("missing list memory"))?;
+    let mut bytes = words(entries);
+    bytes.resize(bytes.len().max(range.len()), 0xff);
+    builder.rewrite_mem(block, bytes)?;
+    builder.modify(
+        list,
+        &[(2, entries.len() as u32), (3, entries.len() as u32)],
+    )
+}
+
+/// Explicit script policy for development grafts that also supply arena-owned
+/// callbacks. Ordinary enemy imports retain their existing script policy.
+pub(super) fn graft_with_scripts(
+    dst: &[u8],
+    src: &[u8],
+    models: &[String],
+    prefixes: &[&str],
+) -> Result<(Vec<Edit>, Report)> {
     let dp = Pack::parse(dst)?;
+    let _timing = crate::profiling::measure("graft.copy");
     let original = Pack::parse(src)?;
     let mut report = Report::default();
     let RenderSource {
         bytes: rendered,
         attached,
-    } = render_source(&original, Some(&dp), models, &mut report)?;
+    } = render_source(&original, Some(&dp), models, &mut report)
+        .map_err(|e| bad(&format!("render source: {e}")))?;
     let sp = Pack::parse(&rendered)?;
     let mut roots = Vec::new();
     let mut infos = Vec::new();
@@ -911,7 +1031,7 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
             roots.push(id);
             infos.push(id);
         }
-        for prefix in MODEL_SCRIPTS {
+        for prefix in prefixes {
             let name = format!("{prefix}{m}.lua");
             if let Some(id) = find_named(&sp, "beLuaData", &name)? {
                 need(
@@ -937,13 +1057,17 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     roots.extend(attached.iter().map(|&(top, _)| top));
     let (ids, owners) = closure(&sp, &roots)?;
     check_blocks(&sp, &ids, &owners)?;
-    let mut builder = Builder::new(&dp);
-    let map = copy_graph(&dp, &sp, &mut builder, &ids, &owners, &mut report)?;
+    let mut builder = if prefixes.contains(&"ded_") {
+        Builder::new(&dp).reuse_directories()
+    } else {
+        Builder::new(&dp)
+    };
+    let map = copy_graph(&dp, &sp, &mut builder, &ids, &owners, &mut report)
+        .map_err(|e| bad(&format!("copy resource graph: {e}")))?;
 
     // Register the models and scripts where the engine looks them up.
     let root = u32at(dp.b, dp.table + 8 + 2 * dp.ids.len())?;
     dp.class(root, "igInfoList")?;
-    let registered = dp.array(root)?.len();
     let mut list = dp.array(root)?;
     list.extend(infos.iter().map(|i| map[i]));
     report.registered = infos.len();
@@ -951,8 +1075,7 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     // the engine keep the whole stage pack resident after the stage is left (about 6 MB
     // each time, so the next stage runs out of memory). Other reference-bearing
     // lists must retain their backing blocks too, including the script registry.
-    builder.grow_mem(dp.val(root, 4)?, words(&list[registered..]))?;
-    builder.modify(root, &[(2, list.len() as u32), (3, list.len() as u32)])?;
+    write_list(&dp, &mut builder, root, &list)?;
     let template = dp.val(root, 4)?;
 
     if !scripts.is_empty() {
@@ -972,9 +1095,7 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
             entries.insert(at, map[id]);
         }
         report.scripts = scripts.len();
-        let template = dp.val(lua, 4)?;
-        builder.rewrite_mem(template, words(&entries))?;
-        builder.modify(lua, &[(2, entries.len() as u32), (3, entries.len() as u32)])?;
+        write_list(&dp, &mut builder, lua, &entries)?;
     }
     // Draw registration: the enemy model switches hang under a scene group of the stage.
     let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -1004,18 +1125,14 @@ pub(super) fn graft(dst: &[u8], src: &[u8], models: &[String]) -> Result<(Vec<Ed
     for (list, added) in children {
         let mut entries = dp.array(list)?;
         entries.extend(&added);
-        let template = dp.val(list, 4)?;
-        builder.grow_mem(template, words(&added))?;
-        builder.modify(
-            list,
-            &[(2, entries.len() as u32), (3, entries.len() as u32)],
-        )?;
+        write_list(&dp, &mut builder, list, &entries)?;
     }
     let grows = builder.grown();
     let rewrites = builder.rewrites.clone();
     let edits = builder.finish(template)?;
     let out = materialize(dst, &edits)?;
-    verify(&dp, &sp, &out, &map, &owners, &grows, &rewrites)?;
+    verify(&dp, &sp, &out, &map, &owners, &grows, &rewrites)
+        .map_err(|e| bad(&format!("verify resource graph: {e}")))?;
     Ok((edits, report))
 }
 
@@ -1035,7 +1152,7 @@ pub(super) fn copy_graph(
         .map(|(k, &s)| (s, base + k as u32))
         .collect();
     need(
-        dp.ids.len() + ids.len() < u16::MAX as usize,
+        dp.ids.len() + ids.len() < u16::MAX as usize || builder.reuses_directories(),
         &format!(
             "grafted pack exceeds 16-bit directory index ({} objects, {} more needed, {} allowed)",
             dp.ids.len(),
@@ -1125,12 +1242,13 @@ pub(super) fn verify(
             )?;
             let slots = ref_slots(sp, sr).map(|(n, _)| n).collect::<BTreeSet<_>>();
             for (n, range) in &sr.fields {
-                let (a, b) = (&sp.b[range.clone()], &v.b[dr.fields[n].clone()]);
+                let destination_range = dr.field(*n)?;
+                let (a, b) = (&sp.b[range.clone()], &v.b[destination_range.clone()]);
                 if slots.contains(n) {
                     let x = u32at(sp.b, range.start)?;
                     let want = if x == NULL { NULL } else { map[&x] };
                     need(
-                        u32at(v.b, dr.fields[n].start)? == want,
+                        u32at(v.b, destination_range.start)? == want,
                         "copied reference differs",
                     )?;
                 } else {
@@ -1610,18 +1728,28 @@ impl Profile {
 /// Run every source-side check [`graft`] makes, and refuse hit scripts that touch the
 /// kill-count quest counters (those stages count kills in the model's own script).
 pub(super) fn profile(sp: &Pack, model: &str) -> Result<Profile> {
+    profile_with_scripts(sp, model, &MODEL_SCRIPTS)
+}
+
+pub(super) fn profile_with_scripts(sp: &Pack, model: &str, prefixes: &[&str]) -> Result<Profile> {
+    let _timing = crate::profiling::measure("graft.profile");
     let RenderSource {
         bytes: rendered,
         attached,
     } = render_source(sp, None, &[model.to_string()], &mut Report::default())?;
     let source = Pack::parse(&rendered)?;
-    let (mut roots, ram) = model_roots(&source, model)?;
+    let (mut roots, ram) = model_roots_with_scripts(&source, model, prefixes)?;
     roots.extend(attached.iter().map(|&(top, _)| top));
     profile_of(&source, model, roots, ram)
 }
 
 /// The records [`graft`] copies for a donor model in `sp`, and the model's RAM budget.
+#[cfg(all(test, feature = "devtools"))]
 pub(super) fn model_roots(sp: &Pack, model: &str) -> Result<(Vec<u32>, u32)> {
+    model_roots_with_scripts(sp, model, &MODEL_SCRIPTS)
+}
+
+fn model_roots_with_scripts(sp: &Pack, model: &str, prefixes: &[&str]) -> Result<(Vec<u32>, u32)> {
     let mut roots = Vec::new();
     let mut ram = 0;
     for class in REGISTERED {
@@ -1632,7 +1760,7 @@ pub(super) fn model_roots(sp: &Pack, model: &str) -> Result<(Vec<u32>, u32)> {
         }
         roots.push(id);
     }
-    for prefix in MODEL_SCRIPTS {
+    for prefix in prefixes {
         let name = format!("{prefix}{model}.lua");
         if let Some(id) = find_named(sp, "beLuaData", &name)? {
             let object = sp.val(id, 3)?;
@@ -1664,19 +1792,20 @@ pub(super) fn model_roots(sp: &Pack, model: &str) -> Result<(Vec<u32>, u32)> {
         }
     }
     let mut units = BTreeSet::new();
+    let scene_index = SceneIndex::new(sp);
     for (switch, _, _) in effect_switches(
         sp,
         None,
         &[model.to_string()],
         &bullets.iter().collect::<Vec<_>>(),
     )? {
-        if let Some(at) = attach_point(sp, switch)? {
+        if let Some(at) = attach_point(sp, switch, &scene_index)? {
             units.insert(at.unit);
         }
     }
     roots.extend(units);
     for bullet in companion_models(sp, None, &[model.to_string()])? {
-        for prefix in MODEL_SCRIPTS {
+        for prefix in prefixes {
             if let Some(id) = find_named(sp, "beLuaData", &format!("{prefix}{bullet}.lua"))? {
                 roots.push(id);
             }
@@ -1726,6 +1855,7 @@ pub(super) fn has_group(p: &Pack, name: &[u8]) -> bool {
 /// The scene nodes [`graft`] would hang for a model's bullets and effects in an identical stage.
 #[cfg(all(test, feature = "devtools"))]
 pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
+    let scene_index = SceneIndex::new(sp);
     let bullets = companion_models(sp, None, &[model.to_string()])?;
     let mut units = Vec::new();
     for (switch, _, _) in effect_switches(
@@ -1734,7 +1864,7 @@ pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
         &[model.to_string()],
         &bullets.iter().collect::<Vec<_>>(),
     )? {
-        if let Some(at) = attach_point(sp, switch)? {
+        if let Some(at) = attach_point(sp, switch, &scene_index)? {
             units.push(at.unit);
         }
     }
@@ -1744,3 +1874,92 @@ pub(super) fn scene_units(sp: &Pack, model: &str) -> Result<Vec<u32>> {
 #[cfg(test)]
 #[path = "particle_tests.rs"]
 mod particle_tests;
+
+#[cfg(test)]
+mod scene_index_tests {
+    use super::*;
+
+    #[test]
+    fn importing_after_list_compaction_fills_spare_capacity_before_growing() {
+        let original = crate::formats::igb::fixtures::object_graph();
+        let p = Pack::parse(&original).unwrap();
+        let mut builder = Builder::new(&p);
+        builder.modify(1, &[(2, 1), (3, 1)]).unwrap();
+        let compacted = materialize(&original, &builder.finish(0).unwrap()).unwrap();
+        let p = Pack::parse(&compacted).unwrap();
+        assert_eq!(p.array(1).unwrap(), [2]);
+        assert_eq!(p.memory[0].as_ref().unwrap().len(), 8);
+        for entries in [vec![2], vec![2, 2], vec![2, 2, 2, 2]] {
+            let mut builder = Builder::new(&p);
+            write_list(&p, &mut builder, 1, &entries).unwrap();
+            let grows = builder.grown();
+            let rewrites = builder.rewrites.clone();
+            let out = materialize(&compacted, &builder.finish(0).unwrap()).unwrap();
+            let after = Pack::parse(&out).unwrap();
+            assert_eq!(after.array(1).unwrap(), entries);
+            assert_eq!(
+                after.val(1, 4).unwrap(),
+                0,
+                "backing block must remain owned"
+            );
+            assert_eq!(after.val(1, 3).unwrap(), entries.len() as u32);
+            assert_eq!(
+                p.b[p.memory[3].clone().unwrap()],
+                after.b[after.memory[3].clone().unwrap()],
+                "another block sharing the descriptor changed"
+            );
+            verify_pool_rewrites(&p, &after, &grows, &rewrites).unwrap();
+        }
+    }
+
+    #[test]
+    fn shared_directories_keep_graft_object_references_32_bit() {
+        let source_bytes = crate::formats::igb::fixtures::object_graph();
+        let source = Pack::parse(&source_bytes).unwrap();
+        let mut builder = Builder::new(&source).reuse_directories();
+        for _ in 0..u16::MAX as usize {
+            builder.mem(words(&[NULL]), 0).unwrap();
+        }
+        let bytes = materialize(&source_bytes, &builder.finish(0).unwrap()).unwrap();
+        let destination = Pack::parse(&bytes).unwrap();
+        assert!(destination.ids.len() > u16::MAX as usize);
+        assert!(destination.dirs.len() < 10);
+        let (ids, owners) = closure(&source, &[1]).unwrap();
+        let mut builder = Builder::new(&destination).reuse_directories();
+        let map = copy_graph(
+            &destination,
+            &source,
+            &mut builder,
+            &ids,
+            &owners,
+            &mut Report::default(),
+        )
+        .unwrap();
+        let out = materialize(&bytes, &builder.finish(0).unwrap()).unwrap();
+        let result = Pack::parse(&out).unwrap();
+        assert!(map[&2] > u16::MAX as u32);
+        assert_eq!(result.array(map[&1]).unwrap(), [map[&2], NULL]);
+        assert_eq!(result.array(1).unwrap(), [2, NULL]);
+    }
+
+    #[test]
+    fn duplicate_children_owner_fields_and_unregistered_owners_keep_the_old_semantics() {
+        let mut bytes = crate::formats::igb::fixtures::object_graph();
+        let pool = Pack::parse(&bytes).unwrap().pool;
+        put(&mut bytes, pool + 4, 2); // The same child twice in the node list.
+        let mut p = Pack::parse(&bytes).unwrap();
+        p.classes[3].name = "igNodeList".into();
+        p.classes[4].fields = vec![(0, 2, 4), (0, 3, 4)];
+        let root = p.table + 8 + 2 * p.ids.len(); // Contains node-list ID 1.
+        p.objects[1].fields = BTreeMap::from([(2, root..root + 4), (3, root..root + 4)]).into();
+        let orphan = p.objects[1].clone();
+        p.objects.push(orphan);
+        p.ids[3] = Some(2); // An owner not registered in the root list.
+        p.memory[3] = None;
+        let index = SceneIndex::new(&p);
+        assert_eq!(index.holders(2), [(2, 1), (2, 1), (3, 1), (3, 1)]);
+        for child in 0..p.ids.len() as u32 {
+            assert_eq!(index.holders(child), node_holders(&p, child));
+        }
+    }
+}

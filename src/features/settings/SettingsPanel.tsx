@@ -3,7 +3,7 @@ import { Button, Switch } from "react-aria-components";
 import { newSeed, parseSeed } from "./seed";
 
 /** Optional patches start disabled. */
-export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, enemySeed, onEnemySeedChange, busy, fileActions }: {
+export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, randomBosses, onRandomBossesChange, enemySeed, onEnemySeedChange, busy, fileActions }: {
   fileActions?: ReactNode;
   crownMod: boolean;
   onCrownModChange: (selected: boolean) => void;
@@ -15,6 +15,8 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
   onRandomCrownColoursChange: (selected: boolean) => void;
   randomEnemies: boolean;
   onRandomEnemiesChange: (selected: boolean) => void;
+  randomBosses: boolean;
+  onRandomBossesChange: (selected: boolean) => void;
   /** The seed field's text; a valid seed is filled in when the option is switched on. */
   enemySeed: string;
   onEnemySeedChange: (text: string) => void;
@@ -94,13 +96,24 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
             <span className="badge-experimental">Experimental</span>
           </span>
           <span className="setting-description" id={`${id}-random-enemies-description`}>
-            Different regular enemies on each difficulty, with matching stats. Bosses and protected encounters stay intact.
+            Different regular enemies on each difficulty, with matching stats. Protected encounters stay intact.
           </span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
       </Switch>
       {randomEnemies && (
         <div className="setting-submenu" role="group" aria-label="Random enemies options">
+          <Switch className="setting-row" isSelected={randomBosses} onChange={onRandomBossesChange}
+            isDisabled={busy}
+            aria-labelledby={`${id}-random-bosses-label`} aria-describedby={`${id}-random-bosses-description`}>
+            <span className="setting-copy">
+              <span className="setting-title" id={`${id}-random-bosses-label`}>Random bosses</span>
+              <span className="setting-description" id={`${id}-random-bosses-description`}>
+                Shuffle dungeon bosses while keeping the four world bosses fixed.
+              </span>
+            </span>
+            <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+          </Switch>
           <label className="setting-field" htmlFor={`${id}-enemy-seed`}>
             <span className="setting-title">Seed</span>
             <span className="setting-description">The same seed on the same version gives the same game.</span>

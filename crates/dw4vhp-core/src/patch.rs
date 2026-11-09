@@ -44,7 +44,7 @@ pub struct PatchOutcome {
 
 /// Applies `plan` to the disc's authored table and returns the transformed
 /// table with the transform's summary.
-fn derive_patch(report: &DiscReport, plan: &PatchPlan) -> (EnemyTable, PlanSummary) {
+pub(crate) fn derive_patch(report: &DiscReport, plan: &PatchPlan) -> (EnemyTable, PlanSummary) {
     let ratio = RatioVector::derive(&report.authored);
     transform(&report.authored, plan, &ratio)
 }
@@ -64,6 +64,7 @@ pub fn plan_regions(
     plan: &PatchPlan,
     layout: &Layout,
 ) -> Result<(Vec<WriteRegion>, PlanSummary)> {
+    let _timing = crate::profiling::measure("patch.plan_regions");
     let (new_table, summary) = derive_patch(report, plan);
     let new_blocks = new_table.blocks();
     let old_blocks = report.authored.blocks();
@@ -134,8 +135,14 @@ pub fn patch_file(
     opts: &PatchOptions,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
+    let _timing = crate::profiling::measure("patch.total");
     if plan.crown_drops && !plan.crown_mod {
         return Err(Error::CrownData("Crown Drops requires Crown Mod.".into()));
+    }
+    if plan.random_bosses && !plan.random_enemies {
+        return Err(Error::CrownData(
+            "Random bosses requires Random enemies.".into(),
+        ));
     }
     let mut resolved = plan.clone();
     if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
@@ -305,7 +312,13 @@ fn patch_file_internal(
         overwrite: opts.overwrite,
     };
     let verify = |path: &Path| {
-        verify_output(path, &blocks, layout, &reward_tables)?;
+        verify_output(
+            path,
+            &blocks,
+            layout,
+            &reward_tables,
+            crowns.as_ref().map(|_| mmap.len()),
+        )?;
         if let Some(crowns) = &crowns {
             let file = File::open(path)?;
             // Safety: the completed private output is read-only during verification.
@@ -357,18 +370,27 @@ fn patch_file_internal(
 }
 
 /// Re-reads the written file and confirms the computed table blocks are exactly
-/// what landed: the anchors hold them byte-for-byte and each occurs
-/// [`Layout::expected_copies`] times.
+/// what landed in the original image span. Appended resources are verified by
+/// the archive plan, including their additional localized database copies.
 fn verify_output(
     path: &Path,
     blocks: &[Vec<u8>; 3],
     layout: &Layout,
     rewards: &[WriteRegion],
+    original_size: Option<usize>,
 ) -> Result<()> {
     let file = File::open(path)?;
     // Safety: the mapping is read-only and `path` is not modified while mapped.
     let mmap = unsafe { Mmap::map(&file)? };
-    verify_blocks(&mmap[..], blocks, layout, rewards)
+    // Original table copies are verified here. Appended resources, including
+    // localized copies with their final balance, are verified byte-for-byte
+    // by CrownPlan::verify. Their duplicate tables are outside this count.
+    verify_blocks(
+        &mmap[..original_size.unwrap_or(mmap.len())],
+        blocks,
+        layout,
+        rewards,
+    )
 }
 
 /// The block-level checks [`verify_output`] applies against an image in memory.

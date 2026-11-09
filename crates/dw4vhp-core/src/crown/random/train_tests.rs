@@ -58,6 +58,7 @@ fn retail_train_sides_are_ranged_on_every_difficulty_and_boarders_stay_native() 
                     donors: DONORS,
                     warp: None,
                     only: Some(vec![658]),
+                    random_bosses: false,
                 },
             )
             .unwrap();

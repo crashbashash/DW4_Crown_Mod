@@ -76,6 +76,7 @@ fn retail_difficulty_rosters_are_distinct_balanced_and_backed_by_their_own_resou
                 donors: DONORS,
                 warp: None,
                 only: None,
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -220,6 +221,7 @@ fn cannon_and_train_entrances_survive_randomisation() {
             donors: 0,
             warp: None,
             only: None,
+            random_bosses: false,
         },
     )
     .unwrap();
@@ -307,6 +309,7 @@ fn mangrove_randomises_intro_and_boss_waves_with_matching_scripts() {
                     donors: DONORS,
                     warp: None,
                     only: Some(vec![686]),
+                    random_bosses: false,
                 },
             )
             .unwrap();
@@ -487,6 +490,7 @@ fn seed_1520_gamecube_humid_cave_omits_unused_imports() {
             donors: DONORS,
             warp: None,
             only: Some(vec![179, 187]),
+            random_bosses: false,
         },
     )
     .unwrap();
@@ -595,6 +599,7 @@ fn retail_four_family_distribution_reclaims_unused_natives() {
                     donors: DONORS,
                     warp: None,
                     only: None,
+                    random_bosses: false,
                 },
             )
             .unwrap();
@@ -766,6 +771,7 @@ fn seed_1520_gamecube_shared_capacity_covers_every_generator() {
                 donors,
                 warp: None,
                 only: Some(vec![614]),
+                random_bosses: false,
             },
         )
         .unwrap();
@@ -985,6 +991,7 @@ fn sukamon_intro_retargets_wait_and_control_on_every_release() {
                     donors: DONORS,
                     warp: None,
                     only: Some(vec![187]),
+                    random_bosses: false,
                 },
             )
             .unwrap();
@@ -1105,6 +1112,7 @@ fn seed_67_abyss_inherits_encounter_stats_with_and_without_crowns() {
                 donors: DONORS,
                 warp: None,
                 only: Some(vec![621]),
+                random_bosses: false,
             },
         )
         .unwrap();

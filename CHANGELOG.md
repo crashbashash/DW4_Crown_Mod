@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.18.0
+
+- Added optional dungeon boss randomisation with matching intro text. The four main world bosses remain unchanged.
+- Boss replacements preserve encounter frequencies and avoid enemies already in the dungeon's patrols.
+- Fixed loading crashes and invisible enemies in randomised stages.
+- Improved ISO generation and game-data parsing speed.
 
 ## v0.17.0
 

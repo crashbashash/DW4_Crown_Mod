@@ -101,6 +101,7 @@ fn expanded_crowns_and_imported_scripts_keep_backing_blocks() {
                 donors: crate::crown::RANDOM_DONORS,
                 warp: None,
                 only: Some(vec![679, 686]),
+                random_bosses: false,
             },
         )
         .unwrap();

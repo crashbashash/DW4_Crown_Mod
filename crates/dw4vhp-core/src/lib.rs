@@ -13,6 +13,7 @@ pub mod layout;
 pub mod options;
 pub mod patch;
 pub mod plan;
+pub mod profiling;
 mod ps2_memory;
 pub mod ratio;
 pub mod region;

@@ -1,7 +1,7 @@
 //! IGB class metadata, object/memory directories, references and lossless edits.
 //! Game-specific feature policies belong in `crown`, not in this module.
 use crate::error::{Error, Result};
-use std::{collections::BTreeMap, ops::Range};
+use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
 pub(crate) const NULL: u32 = u32::MAX;
 pub(crate) fn bad(s: &str) -> Error {
@@ -44,19 +44,151 @@ pub(crate) struct Class {
     pub(crate) name: String,
     pub(crate) fields: Vec<(u16, u16, u16)>,
 }
+
+/// Offsets common to every instance of a class. A single string changes its
+/// own width and shifts later fields; its contents do not change the layout.
+struct FieldLayout {
+    ranges: Box<[(u16, Range<usize>)]>,
+    size: usize,
+    string: Option<(u16, usize)>,
+    duplicate: bool,
+}
+impl FieldLayout {
+    fn new(
+        mut ranges: Vec<(u16, Range<usize>)>,
+        size: usize,
+        string: Option<(u16, usize)>,
+    ) -> Self {
+        ranges.sort_unstable_by_key(|(id, _)| *id);
+        let duplicate = ranges.windows(2).any(|p| p[0].0 == p[1].0);
+        Self {
+            ranges: ranges.into_boxed_slice(),
+            size,
+            string,
+            duplicate,
+        }
+    }
+
+    fn compile(class: &Class) -> Option<Arc<Self>> {
+        if class
+            .fields
+            .iter()
+            .filter(|&&(kind, _, _)| kind == 4)
+            .count()
+            > 1
+        {
+            return None;
+        }
+        let mut offset = 8;
+        let mut ranges = Vec::with_capacity(class.fields.len());
+        let mut string = None;
+        for &(kind, id, size) in &class.fields {
+            let width = if kind == 4 {
+                string = Some((id, offset));
+                4
+            } else {
+                a4(size as usize)
+            };
+            ranges.push((id, offset..offset + width));
+            offset += width;
+        }
+        Some(Arc::new(Self::new(ranges, offset, string)))
+    }
+}
+
+/// Shared relative offsets avoid allocating a tree for every directory entry
+/// and object. Only classes with several strings need a per-record layout.
+#[derive(Clone)]
+pub(crate) struct FieldRanges {
+    base: usize,
+    layout: Arc<FieldLayout>,
+    string_bytes: usize,
+}
+impl FieldRanges {
+    #[inline]
+    fn absolute(&self, id: u16, range: &Range<usize>) -> Range<usize> {
+        let mut range = self.base + range.start..self.base + range.end;
+        if let Some((string_id, offset)) = self.layout.string {
+            if id == string_id {
+                range.end += self.string_bytes;
+            } else if range.start >= self.base + offset + 4 {
+                range.start += self.string_bytes;
+                range.end += self.string_bytes;
+            }
+        }
+        range
+    }
+    #[inline]
+    fn get(&self, id: u16) -> Option<Range<usize>> {
+        let index = self
+            .layout
+            .ranges
+            .binary_search_by_key(&id, |(key, _)| *key)
+            .ok()?;
+        Some(self.absolute(id, &self.layout.ranges[index].1))
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.layout.ranges.len()
+    }
+    pub(crate) fn iter(&self) -> FieldIter<'_> {
+        FieldIter {
+            fields: self,
+            entries: self.layout.ranges.iter(),
+        }
+    }
+    #[cfg(all(test, feature = "devtools"))]
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &u16> {
+        self.layout.ranges.iter().map(|(id, _)| id)
+    }
+}
+pub(crate) struct FieldIter<'a> {
+    fields: &'a FieldRanges,
+    entries: std::slice::Iter<'a, (u16, Range<usize>)>,
+}
+impl<'a> Iterator for FieldIter<'a> {
+    type Item = (&'a u16, Range<usize>);
+    fn next(&mut self) -> Option<Self::Item> {
+        let (id, range) = self.entries.next()?;
+        Some((id, self.fields.absolute(*id, range)))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+impl<'a> IntoIterator for &'a FieldRanges {
+    type Item = (&'a u16, Range<usize>);
+    type IntoIter = FieldIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+impl std::fmt::Debug for FieldRanges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+#[cfg(test)]
+impl From<BTreeMap<u16, Range<usize>>> for FieldRanges {
+    fn from(fields: BTreeMap<u16, Range<usize>>) -> Self {
+        Self {
+            base: 0,
+            layout: Arc::new(FieldLayout::new(fields.into_iter().collect(), 0, None)),
+            string_bytes: 0,
+        }
+    }
+}
 #[derive(Clone)]
 pub(crate) struct Record {
     pub(crate) class: usize,
     pub(crate) range: Range<usize>,
-    pub(crate) fields: BTreeMap<u16, Range<usize>>,
+    pub(crate) fields: FieldRanges,
 }
 impl Record {
+    #[inline]
     pub(crate) fn field(&self, n: u16) -> Result<Range<usize>> {
-        self.fields
-            .get(&n)
-            .cloned()
-            .ok_or_else(|| bad("missing field"))
+        self.fields.get(n).ok_or_else(|| bad("missing field"))
     }
+    #[inline]
     pub(crate) fn val(&self, b: &[u8], n: u16) -> Result<u32> {
         let r = self.field(n)?;
         need(r.len() == 4, "unexpected field width")?;
@@ -242,7 +374,12 @@ pub(crate) fn add_classes(b: &[u8], add: &[ClassDef]) -> Result<Vec<u8>> {
     put(&mut out, 8, u32at(b, 8)? + added as u32);
     Ok(out)
 }
-pub(crate) fn record(b: &[u8], p: usize, classes: &[Class]) -> Result<Record> {
+fn record(
+    b: &[u8],
+    p: usize,
+    classes: &[Class],
+    layouts: &[Option<Arc<FieldLayout>>],
+) -> Result<Record> {
     let class = u32at(b, p)? as usize;
     let size = u32at(b, p + 4)? as usize;
     let c = classes
@@ -252,24 +389,51 @@ pub(crate) fn record(b: &[u8], p: usize, classes: &[Class]) -> Result<Record> {
         size >= 8 && p.checked_add(size).is_some_and(|e| e <= b.len()),
         "invalid record extent",
     )?;
-    let mut q = p + 8;
-    let mut fields = BTreeMap::new();
-    for &(t, n, s) in &c.fields {
-        let width = if t == 4 {
-            let len = u32at(b, q)? as usize;
+    let fields = if let Some(layout) = &layouts[class] {
+        let string_bytes = if let Some((_, offset)) = layout.string {
+            let len = u32at(b, p + offset)? as usize;
             need(len <= 8192 && len.is_multiple_of(4), "invalid string size")?;
-            4 + len
+            len
         } else {
-            a4(s as usize)
+            0
         };
-        need(q + width <= p + size, "field outside record")?;
-        need(fields.insert(n, q..q + width).is_none(), "duplicate field")?;
-        q += width;
-    }
-    need(q == p + size, "record size disagrees with descriptors")?;
+        need(
+            size == layout.size + string_bytes,
+            "record size disagrees with descriptors",
+        )?;
+        need(!layout.duplicate, "duplicate field")?;
+        FieldRanges {
+            base: p,
+            layout: Arc::clone(layout),
+            string_bytes,
+        }
+    } else {
+        let mut q = p + 8;
+        let mut ranges = Vec::with_capacity(c.fields.len());
+        for &(t, n, s) in &c.fields {
+            let width = if t == 4 {
+                let len = u32at(b, q)? as usize;
+                need(len <= 8192 && len.is_multiple_of(4), "invalid string size")?;
+                4 + len
+            } else {
+                a4(s as usize)
+            };
+            need(q + width <= p + size, "field outside record")?;
+            ranges.push((n, q - p..q + width - p));
+            q += width;
+        }
+        need(q == p + size, "record size disagrees with descriptors")?;
+        let layout = Arc::new(FieldLayout::new(ranges, size, None));
+        need(!layout.duplicate, "duplicate field")?;
+        FieldRanges {
+            base: p,
+            layout,
+            string_bytes: 0,
+        }
+    };
     Ok(Record {
         class,
-        range: p..q,
+        range: p..p + size,
         fields,
     })
 }
@@ -286,13 +450,18 @@ pub(crate) struct Pack<'a> {
 }
 impl<'a> Pack<'a> {
     pub(crate) fn parse(b: &'a [u8]) -> Result<Self> {
+        let _timing = crate::profiling::measure("igb.parse");
         need(b.len() >= 48, "truncated pack header")?;
+        let timing_classes = crate::profiling::measure("igb.parse.classes");
         let classes = classes(b)?;
+        let layouts = classes.iter().map(FieldLayout::compile).collect::<Vec<_>>();
+        drop(timing_classes);
         let count = u32at(b, 4)? as usize;
         need(
             count > 0 && count <= u16::MAX as usize,
             "invalid directory count",
         )?;
+        let timing_directories = crate::profiling::measure("igb.parse.directories");
         let mut dirs = None;
         for start in 0x800..b.len().min(0x20000) {
             let Ok(ci) = u32at(b, start) else { break };
@@ -305,7 +474,7 @@ impl<'a> Pack<'a> {
             let mut q = start;
             let mut candidate = Vec::new();
             for _ in 0..count {
-                match record(b, q, &classes) {
+                match record(b, q, &classes, &layouts) {
                     Ok(r) if classes[r.class].name.ends_with("Entry") => {
                         q = r.range.end;
                         candidate.push(r)
@@ -319,6 +488,7 @@ impl<'a> Pack<'a> {
             }
         }
         let dirs = dirs.ok_or_else(|| bad("cannot locate directory section"))?;
+        drop(timing_directories);
         let table = dirs.last().unwrap().range.end;
         let tb = u32at(b, table)? as usize;
         let n = u32at(b, table + 4)? as usize;
@@ -330,13 +500,17 @@ impl<'a> Pack<'a> {
         let mapping = (0..n)
             .map(|i| u16at(b, table + 8 + 2 * i))
             .collect::<Result<Vec<_>>>()?;
+        let timing_objects = crate::profiling::measure("igb.parse.objects");
         let objects_start = table + tb + 4;
         let mut q = objects_start;
-        let mut objects = Vec::new();
         let obj_count = u32at(b, 20)? as usize;
-        need(obj_count <= b.len() / 8, "invalid object count")?;
+        need(
+            obj_count <= n && obj_count <= b.len() / 8,
+            "invalid object count",
+        )?;
+        let mut objects = Vec::with_capacity(obj_count);
         for _ in 0..obj_count {
-            let r = record(b, q, &classes)?;
+            let r = record(b, q, &classes, &layouts)?;
             q = r.range.end;
             objects.push(r);
         }
@@ -345,39 +519,60 @@ impl<'a> Pack<'a> {
             "object/pool byte counts disagree",
         )?;
         let pool = q;
+        drop(timing_objects);
+        let timing_remap = crate::profiling::measure("igb.parse.remap");
         let mut ids = vec![None; n];
         let mut memory = vec![None; n];
         let mut obj = 0;
+        #[derive(Clone, Copy)]
+        enum DirectoryKind {
+            Object(usize),
+            Memory(usize),
+            Other,
+        }
+        // Reused descriptors occur many times in the ID table. Resolve their
+        // kind and payload once, but validate every object's class and every
+        // memory extent separately. Resolve only descriptors used by the ID table.
+        let mut directory_kinds = vec![None; dirs.len()];
         for (i, &idx) in mapping.iter().enumerate() {
             let d = dirs
                 .get(idx as usize)
                 .ok_or_else(|| bad("directory ID out of bounds"))?;
-            match classes[d.class].name.as_str() {
-                "igObjectDirEntry" => {
+            let kind = match directory_kinds[idx as usize] {
+                Some(kind) => kind,
+                None => {
+                    let kind = match classes[d.class].name.as_str() {
+                        "igObjectDirEntry" => DirectoryKind::Object(d.val(b, 11)? as usize),
+                        "igMemoryDirEntry" => DirectoryKind::Memory(d.val(b, 7)? as usize),
+                        _ => DirectoryKind::Other,
+                    };
+                    directory_kinds[idx as usize] = Some(kind);
+                    kind
+                }
+            };
+            match kind {
+                DirectoryKind::Object(class) => {
                     let r = objects
                         .get(obj)
                         .ok_or_else(|| bad("object ID out of bounds"))?;
-                    need(
-                        d.val(b, 11)? as usize == r.class,
-                        "object remap type mismatch",
-                    )?;
+                    need(class == r.class, "object remap type mismatch")?;
                     ids[i] = Some(obj);
                     obj += 1;
                 }
-                "igMemoryDirEntry" => {
-                    let size = d.val(b, 7)? as usize;
+                DirectoryKind::Memory(size) => {
                     need(size <= b.len() - q, "memory block outside pool")?;
                     memory[i] = Some(q..q + size);
                     q += a4(size);
                     need(q <= b.len(), "memory alignment outside pool")?;
                 }
-                _ => {}
+                DirectoryKind::Other => {}
             }
         }
         need(
             obj == objects.len() && q == b.len(),
             "remap/pool extent mismatch",
         )?;
+        drop(timing_remap);
         Ok(Self {
             b,
             classes,
@@ -488,6 +683,9 @@ impl<'p, 'a> Builder<'p, 'a> {
                 .collect(),
         );
         self
+    }
+    pub(crate) fn reuses_directories(&self) -> bool {
+        self.reusable_dirs.is_some()
     }
     /// Where blocks were grown, as (offset in the pool, length), in pool order.
     pub(crate) fn grown(&self) -> Vec<(usize, usize)> {

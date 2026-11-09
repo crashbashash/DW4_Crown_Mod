@@ -19,6 +19,7 @@ export interface DiscStatus {
       randomCrownColours: boolean;
       /** Present on images built with the enemy randomiser. */
       randomEnemies?: boolean;
+      randomBosses?: boolean;
       enemySeed?: number | null;
     };
     /** What the enemy randomiser did, when the image has random enemies. */

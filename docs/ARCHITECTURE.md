@@ -34,6 +34,10 @@ interface and empty defaults. `npm run check` rejects generated-file drift.
 - Native IPC and application updates: Tauri's `commands.rs` and `updates.rs`.
 - Stat transforms: `plan.rs`, `ratio.rs` and `table.rs`.
 - Enemy choices and capacity: `crown/random.rs`, `random/distribution.rs` and `capacity.rs`. Native-body reclamation and pool shrinking live in `reclaim.rs`.
+- Optional dungeon bosses: `crown/random/boss.rs` applies after patrol planning;
+  `boss_plan.rs` preserves the encounter inventory, and `boss_intro.rs` retargets
+  each arena's localized info card. `PatchSelection.random_bosses` controls this production
+  path; development-report environment variables never enable the feature.
 - Fixed protection policy and explanations: `crown/encounters.rs` and the
   [generated encounter catalogue](randomizer-rules.md).
 - IGB parsing and lossless editing: `formats/igb.rs`.
@@ -45,6 +49,15 @@ interface and empty defaults. `npm run check` rejects generated-file drift.
 - EXP preservation: `crown/rewards.rs`; floating numbers: `crown/exp.rs`.
 - Disc/container formats: `iso9660.rs`, `gcm.rs`, `elf.rs` and `container.rs`.
 - Recovery and identification: `update.rs` and `signature.rs`.
+
+Boss intros retain native language selection and indexed Unicode rendering.
+`boss_intro.rs` appends donor message banks to each arena’s localized AREA packs;
+the difficulty-specific intro scripts select the matching four indexes. Existing
+messages keep their indexes and original resources keep their IDs. The rebuilt
+AREA archive receives final balance and local MODEL mappings before serialization
+and is appended alongside NDMW.AFS, with its ISO/FST extent updated. Original image
+table counts are verified separately from appended resources, which are verified
+byte-for-byte against the plan. Recovery restores both archive extents.
 
 ## Compatibility boundaries
 

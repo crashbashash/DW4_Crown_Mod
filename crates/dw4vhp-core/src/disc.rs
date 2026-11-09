@@ -235,10 +235,12 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             donors: crate::crown::RANDOM_DONORS,
             warp: None,
             only: None,
+            random_bosses: plan.random_bosses,
         })
     } else {
         None
     };
+    let (final_table, _) = crate::patch::derive_patch(&report, plan);
     let crowns = if release.is_gamecube() {
         crate::crown::CrownPlan::build_gcm_with_balance(
             iso,
@@ -248,6 +250,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_colour_seed.unwrap_or(0),
             random,
             plan.crown_mod,
+            Some(&final_table),
         )?
     } else {
         crate::crown::CrownPlan::build_with_balance(
@@ -259,6 +262,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             None,
             random,
             plan.crown_mod,
+            Some(&final_table),
         )?
     };
     progress(200, 1000);
