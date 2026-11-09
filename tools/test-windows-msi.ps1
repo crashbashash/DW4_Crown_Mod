@@ -102,7 +102,7 @@ try {
     $env:CROWN_MSI_SMOKE_INSTALLED = $context.installed
     $stdout = Join-Path $work "route-$($context.installed).stdout.log"
     $stderr = Join-Path $work "route-$($context.installed).stderr.log"
-    $process = Start-Process -FilePath $probePath -ArgumentList @('--exact', 'updates::tests::packaged_msi_route_smoke', '--ignored', '--nocapture', '--color', 'never') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+    $process = Start-Process -FilePath $probePath -ArgumentList @('packaged_msi_route_smoke', '--ignored', '--nocapture', '--color', 'never') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
     Get-Content $stdout
     Get-Content $stderr
     if ($process.ExitCode -ne 0 -or (Get-Content $stdout -Raw) -notmatch 'test result: ok\. 1 passed; 0 failed') {
