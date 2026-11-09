@@ -89,11 +89,11 @@ try {
     }
 '@
   [IO.File]::WriteAllText($sourcePath, $source.Insert($source.LastIndexOf('}'), $probe))
-  $lines = & cargo test --release --manifest-path (Join-Path $SourceRoot 'crates/dw4vhp-tauri/Cargo.toml') --features tauri/custom-protocol --target-dir (Join-Path $SourceRoot 'crates/dw4vhp-tauri/target') --locked --no-run --message-format=json
+  $lines = & cargo test --release --lib --manifest-path (Join-Path $SourceRoot 'crates/dw4vhp-tauri/Cargo.toml') --features tauri/custom-protocol --target-dir (Join-Path $SourceRoot 'crates/dw4vhp-tauri/target') --locked --no-run --message-format=json
   if ($LASTEXITCODE -ne 0) { throw 'Could not build the updater route probe.' }
   $tests = @($lines | ForEach-Object {
     try { $entry = $_ | ConvertFrom-Json -ErrorAction Stop } catch { return }
-    if ($entry.reason -eq 'compiler-artifact' -and $entry.target.name -eq 'dw4-crown-mod' -and $entry.profile.test -and $entry.executable) { $entry.executable }
+    if ($entry.reason -eq 'compiler-artifact' -and $entry.target.name -eq 'dw4vhp_tauri' -and $entry.profile.test -and $entry.executable) { $entry.executable }
   })
   if ($tests.Count -ne 1) { throw 'Expected one updater route probe.' }
   foreach ($context in @(@{ dir = $location; installed = '1' }, @{ dir = $portable; installed = '0' })) {
