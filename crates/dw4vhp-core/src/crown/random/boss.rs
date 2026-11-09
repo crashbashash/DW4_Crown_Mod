@@ -400,26 +400,6 @@ impl Randomiser {
                         "boss duplicates a selected patrol",
                     )?;
                     let donor = ARENAS.iter().find(|d| d.model == to).unwrap();
-                    let mut model = prepare_model(
-                        &f.models[difficulty],
-                        data(donor.entry),
-                        arena,
-                        to,
-                        original.most as usize,
-                    )?;
-                    model = intro::retarget(&model, arena, to, message_bases[&arena.entry])?;
-                    let companions = graft::companion_models(
-                        &Pack::parse(data(donor.entry))?,
-                        None,
-                        std::slice::from_ref(to),
-                    )?;
-                    let sounds = super::super::sound::graft_enemy(
-                        &f.sounds[difficulty],
-                        data(donor.entry - 1),
-                        data(donor.entry - 1),
-                        to,
-                        &companions,
-                    )?;
                     let all_packs = self.stages[&arena.entry].gens.clone();
                     let used = all_packs
                         .iter()
@@ -445,27 +425,29 @@ impl Randomiser {
                         .entry(pack)
                         .or_default()
                         .insert(arena.generator.to_string(), row as u32);
-                    let current = materialize(data(pack), &edits[pack])?;
-                    let rt = Retarget {
-                        rows: BTreeMap::from([(arena.generator.to_string(), row as u32)]),
-                        ..Default::default()
-                    };
-                    let (generator_bytes, count) = graft::retarget_rows(&current, &rt)?;
-                    need(count == 1, "boss retarget count differs")?;
-                    let before = Pack::parse(&current)?;
-                    let mut expected = current.clone();
-                    let field = before
-                        .rec(before.named("beGeneraterData", arena.generator)?)?
-                        .field(graft::GENERATOR_ROW)?;
-                    expected[field].copy_from_slice(&(row as u32).to_le_bytes());
-                    need(
-                        generator_bytes == expected,
-                        "boss retarget changed native callbacks or counts",
-                    )?;
-                    edits[pack] = vec![Edit {
-                        range: 0..entries[pack].1,
-                        bytes: generator_bytes,
-                    }];
+                    if !self.opts.picks_only {
+                        let current = materialize(data(pack), &edits[pack])?;
+                        let rt = Retarget {
+                            rows: BTreeMap::from([(arena.generator.to_string(), row as u32)]),
+                            ..Default::default()
+                        };
+                        let (generator_bytes, count) = graft::retarget_rows(&current, &rt)?;
+                        need(count == 1, "boss retarget count differs")?;
+                        let before = Pack::parse(&current)?;
+                        let mut expected = current.clone();
+                        let field = before
+                            .rec(before.named("beGeneraterData", arena.generator)?)?
+                            .field(graft::GENERATOR_ROW)?;
+                        expected[field].copy_from_slice(&(row as u32).to_le_bytes());
+                        need(
+                            generator_bytes == expected,
+                            "boss retarget changed native callbacks or counts",
+                        )?;
+                        edits[pack] = vec![Edit {
+                            range: 0..entries[pack].1,
+                            bytes: generator_bytes,
+                        }];
+                    }
                     self.plans
                         .entry(pack)
                         .or_default()
@@ -473,14 +455,36 @@ impl Randomiser {
                         .insert(arena.generator.to_string(), combat);
                     // Model preparation never alters the localized stat table;
                     // this shared reward plan applies vanilla encounter stats once.
-                    let p = Pack::parse(&model)?;
-                    need(
-                        graft::find_named(&p, "beModelCtrlInfo", to)?.is_some(),
-                        "replacement boss missing",
-                    )?;
-                    model.shrink_to_fit();
-                    f.models[difficulty] = model;
-                    f.sounds[difficulty] = sounds;
+                    if !self.opts.picks_only {
+                        let mut model = prepare_model(
+                            &f.models[difficulty],
+                            data(donor.entry),
+                            arena,
+                            to,
+                            original.most as usize,
+                        )?;
+                        model = intro::retarget(&model, arena, to, message_bases[&arena.entry])?;
+                        let companions = graft::companion_models(
+                            &Pack::parse(data(donor.entry))?,
+                            None,
+                            std::slice::from_ref(to),
+                        )?;
+                        let sounds = super::super::sound::graft_enemy(
+                            &f.sounds[difficulty],
+                            data(donor.entry - 1),
+                            data(donor.entry - 1),
+                            to,
+                            &companions,
+                        )?;
+                        let p = Pack::parse(&model)?;
+                        need(
+                            graft::find_named(&p, "beModelCtrlInfo", to)?.is_some(),
+                            "replacement boss missing",
+                        )?;
+                        model.shrink_to_fit();
+                        f.models[difficulty] = model;
+                        f.sounds[difficulty] = sounds;
+                    }
                 }
                 self.stats.trace.push(format!(
                     "boss {difficulty} {} {} {to}",

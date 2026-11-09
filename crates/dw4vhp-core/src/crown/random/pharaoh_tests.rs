@@ -44,6 +44,7 @@ fn retail_pharaoh_summons_follow_selected_families() {
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 1520,
                 donors: DONORS,
                 warp: None,
@@ -187,6 +188,7 @@ fn build_pharaoh_gamecube_gameplay_fixture() {
         false,
         0,
         Some(Options {
+            picks_only: false,
             seed: 1520,
             donors: 1,
             warp: None,

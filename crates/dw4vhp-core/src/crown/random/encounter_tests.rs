@@ -42,6 +42,7 @@ fn randomised_minotaurmon_bypass_healing_for_native_and_imported_models() {
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 1520,
                 donors: DONORS,
                 warp: None,
@@ -171,6 +172,7 @@ fn every_scripted_spawn_and_quest_dependency_survives() {
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 1520,
                 donors: 0,
                 warp: None,
@@ -333,6 +335,7 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
             &entries,
             table.clone(),
             Options {
+                picks_only: false,
                 seed: 67,
                 donors: DONORS,
                 warp: None,
@@ -496,6 +499,7 @@ fn reviewed_scripts_and_normal_entrances_follow_replacements() {
             &entries,
             table,
             Options {
+                picks_only: false,
                 seed: 67,
                 donors: DONORS,
                 warp: None,
@@ -564,6 +568,7 @@ fn practice_randomisation_preserves_lessons_and_party_branches() {
                 &entries,
                 table.clone(),
                 Options {
+                    picks_only: false,
                     seed: 67,
                     donors: DONORS,
                     warp: None,
@@ -759,6 +764,7 @@ fn river_replacements_use_only_ranged_families() {
                 &entries,
                 table.clone(),
                 Options {
+                    picks_only: false,
                     seed,
                     donors,
                     warp: None,
@@ -1155,6 +1161,7 @@ fn retail_arukenimon_is_a_complete_expandable_donor_and_keeps_its_native_encount
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 151,
                 donors: DONORS,
                 warp: None,

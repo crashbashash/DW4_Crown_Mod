@@ -72,6 +72,7 @@ fn retail_difficulty_rosters_are_distinct_balanced_and_backed_by_their_own_resou
             &entries,
             table,
             Options {
+                picks_only: false,
                 seed: 1520,
                 donors: DONORS,
                 warp: None,
@@ -217,6 +218,7 @@ fn cannon_and_train_entrances_survive_randomisation() {
         &entries,
         EnemyTable::read(&iso, &layout).unwrap(),
         Options {
+            picks_only: false,
             seed: 7,
             donors: 0,
             warp: None,
@@ -305,6 +307,7 @@ fn mangrove_randomises_intro_and_boss_waves_with_matching_scripts() {
                 &entries,
                 EnemyTable::read(&iso, &layout).unwrap(),
                 Options {
+                    picks_only: false,
                     seed,
                     donors: DONORS,
                     warp: None,
@@ -486,6 +489,7 @@ fn seed_1520_gamecube_humid_cave_omits_unused_imports() {
         &entries,
         EnemyTable::read(&iso, &layout).unwrap(),
         Options {
+            picks_only: false,
             seed: 1520,
             donors: DONORS,
             warp: None,
@@ -595,6 +599,7 @@ fn retail_four_family_distribution_reclaims_unused_natives() {
                 &entries,
                 table.clone(),
                 Options {
+                    picks_only: false,
                     seed,
                     donors: DONORS,
                     warp: None,
@@ -767,6 +772,7 @@ fn seed_1520_gamecube_shared_capacity_covers_every_generator() {
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 1520,
                 donors,
                 warp: None,
@@ -987,6 +993,7 @@ fn sukamon_intro_retargets_wait_and_control_on_every_release() {
                 &entries,
                 EnemyTable::read(&iso, &layout).unwrap(),
                 Options {
+                    picks_only: false,
                     seed,
                     donors: DONORS,
                     warp: None,
@@ -1108,6 +1115,7 @@ fn seed_67_abyss_inherits_encounter_stats_with_and_without_crowns() {
             &entries,
             table.clone(),
             Options {
+                picks_only: false,
                 seed: 67,
                 donors: DONORS,
                 warp: None,

@@ -229,6 +229,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
     }
     let random = if plan.random_enemies {
         Some(crate::crown::RandomOptions {
+            picks_only: false,
             seed: u64::from(plan.enemy_seed.ok_or_else(|| {
                 Error::CrownData("enemy seed must be resolved before planning".into())
             })?),

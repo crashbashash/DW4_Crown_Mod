@@ -19,6 +19,7 @@ fn main() {
         exit(2);
     }
     let options = RandomOptions {
+        picks_only: false,
         random_bosses: false,
         seed: args[3].parse().expect("seed"),
         donors: args.get(4).map_or(3, |d| d.parse().expect("donors")),

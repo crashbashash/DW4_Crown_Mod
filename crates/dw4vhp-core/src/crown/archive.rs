@@ -143,6 +143,14 @@ pub(crate) fn rebuild_afs(
             "invalid archive entry extent/order",
         )?;
         let data = &afs[off..off + len];
+        // Picks need only the stage packs as the planner receives them.
+        if random
+            .as_ref()
+            .is_some_and(|r| r.opts.picks_only && !r.is_stage(i))
+        {
+            entry_edits.push(Vec::new());
+            continue;
+        }
         let edits = if memchr::memmem::find(data, b"i_rareicon").is_some() {
             crown_packs += 1;
             let edits = expand(data)?;
@@ -321,6 +329,25 @@ pub(crate) fn rebuild_afs(
                     .map_err(|_| bad("cannot encode boss roster"))?,
             )?;
         }
+    }
+    #[cfg(feature = "devtools")]
+    if let (Some(r), Some(out)) = (random.as_ref(), std::env::var_os("DW4_PICKS_OUT")) {
+        // Validation: the choices a full image build made, for comparison with picks mode.
+        std::fs::write(
+            out,
+            serde_json::to_vec(&r.picks()).map_err(|_| bad("cannot encode picks"))?,
+        )?;
+    }
+    if let Some(r) = random.as_ref().filter(|r| r.opts.picks_only) {
+        return Ok(Rebuilt {
+            pieces: Vec::new(),
+            length: 0,
+            random: Some(r.picks()),
+            rewards: rewards::Plan::default(),
+            regions: Vec::new(),
+            difficulty: false,
+            area: None,
+        });
     }
     if let Some(r) = random.as_mut() {
         for (i, bytes) in std::mem::take(&mut r.sounds) {
@@ -604,6 +631,42 @@ impl CrownPlan {
     pub fn build_graft(iso: &[u8], spec: &graft::Spec) -> Result<Self> {
         Self::build_with_options(iso, false, false, false, 0, Some(spec), None)
     }
+    /// Analysis: the enemy randomiser's choices for a PS2 or GameCube image built with the
+    /// same settings, without building the image. Requires `options.picks_only`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn random_picks(
+        iso: &[u8],
+        four_player_spawns: bool,
+        crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
+        options: RandomOptions,
+        crown_mod: bool,
+    ) -> Result<serde_json::Value> {
+        need(options.picks_only, "picks require the analysis option")?;
+        let (base, size) = if crate::release::detect(iso)?.is_gamecube() {
+            let file = gcm::find_file(iso, "ndmw.afs")?;
+            (file.offset as usize, file.size as usize)
+        } else {
+            let file = iso9660::find_file(iso, "NDMW.AFS")?;
+            (file.lba as usize * 2048, file.size as usize)
+        };
+        rebuild_afs(
+            iso,
+            base,
+            size,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+            None,
+            Some(options),
+            crown_mod,
+            None,
+        )?
+        .random
+        .ok_or_else(|| bad("no randomiser picks"))
+    }
     /// Experimental: the usual crown expansion plus the enemy randomiser.
     pub fn build_random(iso: &[u8], options: RandomOptions) -> Result<Self> {
         Self::build_with_options(iso, false, false, false, 0, None, Some(options))
@@ -641,6 +704,10 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
+        need(
+            random.as_ref().is_none_or(|r| !r.picks_only),
+            "picks-only randomiser analysis cannot build an image",
+        )?;
         let file = iso9660::find_file(iso, "NDMW.AFS")?;
         let base = file.lba as usize * 2048;
         let size = file.size as usize;
@@ -760,6 +827,10 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
+        need(
+            random.as_ref().is_none_or(|r| !r.picks_only),
+            "picks-only randomiser analysis cannot build an image",
+        )?;
         let file = gcm::find_file(disc, "ndmw.afs")?;
         let (base, size) = (file.offset as usize, file.size as usize);
         let Rebuilt {

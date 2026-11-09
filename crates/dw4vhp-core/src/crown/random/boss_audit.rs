@@ -379,6 +379,7 @@ fn prototype_boss_rosters_follow_final_patrols_and_preserve_counts() {
         &entries,
         table,
         Options {
+            picks_only: false,
             seed: 1520,
             donors: DONORS,
             warp: None,

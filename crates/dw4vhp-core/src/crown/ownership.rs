@@ -97,6 +97,7 @@ fn expanded_crowns_and_imported_scripts_keep_backing_blocks() {
             &entries,
             crate::table::EnemyTable::read(&bytes, &layout).unwrap(),
             RandomOptions {
+                picks_only: false,
                 seed: 2162128323,
                 donors: crate::crown::RANDOM_DONORS,
                 warp: None,

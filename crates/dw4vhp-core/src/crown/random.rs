@@ -35,6 +35,10 @@ pub struct Options {
     pub warp: Option<String>,
     /// Randomise only these model packs (others still supply models); `None` randomises every stage.
     pub only: Option<Vec<usize>>,
+    /// Analysis only: make every choice exactly as an image build would, but skip byte
+    /// work that cannot change a choice (audio, capacity, reclaim, script edits,
+    /// verification). The result reports the choices; it cannot be written as an image.
+    pub picks_only: bool,
 }
 
 pub(super) use super::encounters::REGULAR;
@@ -574,6 +578,51 @@ impl Randomiser {
         Ok(me)
     }
 
+    /// Every choice that decides what a player meets: generator rows and entrances per
+    /// difficulty pack, local stat/reward variants, imported models and boss swaps.
+    pub(super) fn picks(&self) -> serde_json::Value {
+        let plans: BTreeMap<_, _> = self
+            .plans
+            .iter()
+            .map(|(pack, plan)| {
+                (
+                    pack.to_string(),
+                    serde_json::json!({"rows": plan.rows, "sequences": plan.sequences}),
+                )
+            })
+            .collect();
+        let rewards: BTreeMap<_, _> = self
+            .rewards
+            .iter()
+            .map(|(entry, r)| {
+                let rows: BTreeMap<_, _> = r
+                    .rows
+                    .iter()
+                    .map(|(row, v)| (row.to_string(), [v.combat, v.reward]))
+                    .collect();
+                (
+                    entry.to_string(),
+                    serde_json::json!({"rows": rows, "targets": r.targets}),
+                )
+            })
+            .collect();
+        let choices: Vec<_> = self
+            .stats
+            .trace
+            .iter()
+            .filter(|line| !line.starts_with("reclaim "))
+            .collect();
+        serde_json::json!({
+            "rulesVersion": RULES_VERSION,
+            "seed": self.opts.seed,
+            "randomBosses": self.opts.random_bosses,
+            "plans": plans,
+            "rewards": rewards,
+            "choices": choices,
+            "bossReport": self.boss_report,
+        })
+    }
+
     pub(super) fn plans_for(&self, entry: usize) -> bool {
         self.plans.contains_key(&entry)
     }
@@ -682,6 +731,9 @@ impl Randomiser {
     }
 
     fn finish_stage(&self, entry: usize, mut dst: Vec<u8>) -> Result<Vec<u8>> {
+        if self.opts.picks_only {
+            return Ok(dst);
+        }
         if super::encounters::ranged_stage(entry)
             && self
                 .opts
@@ -921,14 +973,16 @@ impl Randomiser {
                             report.unattached
                         ));
                     }
-                    let sound_entry = entry - 1;
-                    let current = self
-                        .sounds
-                        .get(&sound_entry)
-                        .map(Vec::as_slice)
-                        .unwrap_or(data(sound_entry)?);
-                    let sounds = self.import_sounds(m, donor, current, &data)?;
-                    self.sounds.insert(sound_entry, sounds);
+                    if !self.opts.picks_only {
+                        let sound_entry = entry - 1;
+                        let current = self
+                            .sounds
+                            .get(&sound_entry)
+                            .map(Vec::as_slice)
+                            .unwrap_or(data(sound_entry)?);
+                        let sounds = self.import_sounds(m, donor, current, &data)?;
+                        self.sounds.insert(sound_entry, sounds);
+                    }
                     self.stats.copied += 1;
                     self.stats.approximate += report.approximate.len();
                     self.stats.unattached += report.unattached.len();
@@ -1292,7 +1346,28 @@ impl Randomiser {
         // Candidate imports make selection independent of how many generators
         // eventually use each family. Rebuild without unused candidates: even
         // unreachable objects are allocated by the game's IGB loader.
-        if imports
+        if self.opts.picks_only {
+            // Record the retained imports as the rebuild below does.
+            if imports
+                .iter()
+                .any(|(model, _)| demand.get(*model).copied().unwrap_or(0) == 0)
+            {
+                self.stats.copied = original_stats.0;
+                self.stats.trace.truncate(original_stats.3);
+                for (model, scene) in &imports {
+                    if demand.get(*model).copied().unwrap_or(0) == 0 {
+                        self.log.push(format!("stage {entry}: omit unused {model}"));
+                        pool.retain(|(m, _, _)| m != model);
+                        continue;
+                    }
+                    self.stats.copied += 1;
+                    let source = self.donors[&(*model, *scene)].source;
+                    self.stats
+                        .trace
+                        .push(format!("copy {entry} {model} {source}"));
+                }
+            }
+        } else if imports
             .iter()
             .any(|(model, _)| demand.get(*model).copied().unwrap_or(0) == 0)
         {
@@ -1327,7 +1402,7 @@ impl Randomiser {
             self.sounds.insert(entry - 1, sounds);
         }
         let assigned: BTreeSet<_> = choice.values().cloned().collect();
-        for model in &assigned {
+        for model in assigned.iter().filter(|_| !self.opts.picks_only) {
             let needed = demand.get(model).copied().unwrap_or(0);
             let old = super::capacity::slots(&Pack::parse(&dst)?, model)?;
             if needed > old {
@@ -1401,8 +1476,14 @@ impl Randomiser {
                 } else {
                     rewards = attempt;
                 }
-                let base = super::capacity::slots(&Pack::parse(&dst)?, model)?.max(demand[model]);
-                dst = super::capacity::expand(&dst, model, base + super::pharaoh::LIMIT)?;
+                let base = if self.opts.picks_only {
+                    0
+                } else {
+                    let base =
+                        super::capacity::slots(&Pack::parse(&dst)?, model)?.max(demand[model]);
+                    dst = super::capacity::expand(&dst, model, base + super::pharaoh::LIMIT)?;
+                    base
+                };
                 summons.push(super::pharaoh::Target {
                     model: model.to_string(),
                     entrance: if entrances[model].contains("SQ_NENTR") {
@@ -1421,7 +1502,9 @@ impl Randomiser {
                 !summons.is_empty(),
                 &format!("stage {entry}: no compatible Pharaohmon summons"),
             )?;
-            dst = super::pharaoh::rewrite(&dst, &summons, entry)?;
+            if !self.opts.picks_only {
+                dst = super::pharaoh::rewrite(&dst, &summons, entry)?;
+            }
             self.log.push(format!(
                 "stage {entry}: Pharaohmon rolls each summon from {summons:?}"
             ));
@@ -1433,158 +1516,162 @@ impl Randomiser {
             ));
             self.rewards.insert(entry, rewards);
         }
-        if assigned.contains(super::height::MODEL)
-            && !stage.residents.contains_key(super::height::MODEL)
-        {
-            let edits = super::height::imperial(&dst)?;
-            dst = materialize(&dst, &edits)?;
-            self.log.push(format!(
-                "stage {entry}: imported Imperialdramon model and collision lowered by 13"
-            ));
-        }
-        // More enemy instances can also exceed the base crown inventory bound.
-        let p = Pack::parse(&dst)?;
-        let mut enemy_slots = 0usize;
-        for (id, ix) in p.ids.iter().enumerate() {
-            if let Some(ix) = ix {
-                let r = &p.objects[*ix];
-                if p.classes[r.class].name == "beModelCtrlInfo"
-                    && r.field(7)
-                        .is_ok_and(|f| p.b[f.start + 4..f.end].starts_with(b"KIND_ENEMY\0"))
-                {
-                    enemy_slots += p.array(p.val(id as u32, 6)?)?.len();
-                }
-            }
-        }
-        if graft::find_named(&p, "beModelCtrlInfo", "i_rareicon")?.is_some() {
-            dst = super::capacity::expand(
-                &dst,
-                "i_rareicon",
-                (enemy_slots + 4).max(CAPACITY as usize),
-            )?;
-        }
-        if let Some(intro) = intro {
-            if !names.is_empty() {
-                let more = lua_names::rename_in_pack(&dst, &[intro.script.to_string()], &names)?;
-                dst = materialize(&dst, &more)?;
-            }
-        }
-        if let Some(rule) = family_remap {
-            if entry == super::ranged_ai::ENTRY {
-                // Reward fallback has finalized the assignments. Cleanup and
-                // freeze must cover every family actually used by the banks.
-                let families = first
-                    .iter()
-                    .filter(|g| family(g.row) == Some("e_nume"))
-                    .map(|g| {
-                        choice
-                            .get(&g.name)
-                            .cloned()
-                            .unwrap_or_else(|| "e_nume".into())
-                    })
-                    .collect();
-                let edits = super::river_mix::remap_scripts(&dst, rule.scripts, &families)?;
+        // Everything below until the statistics edits only bytes for choices already made.
+        if !self.opts.picks_only {
+            if assigned.contains(super::height::MODEL)
+                && !stage.residents.contains_key(super::height::MODEL)
+            {
+                let edits = super::height::imperial(&dst)?;
                 dst = materialize(&dst, &edits)?;
-            } else {
-                let names = rule
-                    .models
-                    .iter()
-                    .map(|&original| {
-                        let replacement = first
-                            .iter()
-                            .find(|g| family(g.row) == Some(original))
-                            .and_then(|g| choice.get(&g.name))
-                            .cloned()
-                            .unwrap_or_else(|| original.to_string());
-                        (original.to_string(), replacement)
-                    })
-                    .collect();
-                let scripts = rule
-                    .scripts
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>();
-                let edits = lua_names::rename_in_pack(&dst, &scripts, &names)?;
-                dst = materialize(&dst, &edits)?;
+                self.log.push(format!(
+                    "stage {entry}: imported Imperialdramon model and collision lowered by 13"
+                ));
             }
-        }
-        if entry == 686 {
-            // Do this after reward-slot fallback has finalized the choices, so
-            // a retained native wave keeps its native wait/cleanup target.
-            // Wave families may also appear in ordinary patrols, as they do in
-            // retail; reserving both would unnecessarily narrow patrol variety.
-            let waves: BTreeMap<String, String> = MANGROVE_WAVES
-                .iter()
-                .map(|&(generator, original)| {
-                    (
-                        original.to_string(),
-                        choice
-                            .get(generator)
-                            .cloned()
-                            .unwrap_or_else(|| original.into()),
-                    )
-                })
-                .collect();
-            for script in ["mate00.lua", "tim_g_orbz03.lua"] {
-                let names = waves
-                    .iter()
-                    .filter(|(original, _)| script != "mate00.lua" || *original == "e_otama")
-                    .map(|(a, b)| (a.clone(), b.clone()))
-                    .collect();
-                let edits = lua_names::rename_in_pack(&dst, &[script.into()], &names)?;
-                dst = materialize(&dst, &edits)?;
-            }
-        }
-        if allowed.is_none() {
-            for model in stage.residents.keys().filter(|m| replaceable(m)) {
-                if stage.pinned_families.contains(model.as_str()) {
-                    continue;
-                }
-                let count = native_demand.get(model).copied().unwrap_or(0);
-                let mut external_script = false;
-                for &pack in &stage.gens {
-                    external_script |=
-                        super::reclaim::script_dependency(data(pack)?, model, count == 0)?;
-                }
-                if external_script {
-                    continue;
-                }
-                let before = dst.len();
-                let reviewed_intro = intro
-                    .filter(|_| {
-                        sites.iter().any(|(gen, original)| {
-                            choice.get(*gen).map(String::as_str).unwrap_or(original) == model
-                        })
-                    })
-                    .map(|site| site.script);
-                let reclaimed = if count == 0 {
-                    super::reclaim::unused(&dst, model)
-                } else if !super::reclaim::pool_script_dependency(
-                    &dst,
-                    model,
-                    false,
-                    reviewed_intro,
-                )? {
-                    super::reclaim::shrink(&dst, model, count).map(Some)
-                } else {
-                    Ok(None)
-                };
-                match reclaimed {
-                    Ok(Some(bytes)) if bytes.len() < before => {
-                        let saved = before - bytes.len();
-                        dst = bytes;
-                        if count == 0 {
-                            pool.retain(|(m, _, _)| m != model);
-                        }
-                        self.log.push(format!("stage {entry}: reclaim native {model}, {count} required slots, {saved} serialized bytes saved"));
-                        self.stats
-                            .trace
-                            .push(format!("reclaim {entry} {model} {count} {saved}"));
+            // More enemy instances can also exceed the base crown inventory bound.
+            let p = Pack::parse(&dst)?;
+            let mut enemy_slots = 0usize;
+            for (id, ix) in p.ids.iter().enumerate() {
+                if let Some(ix) = ix {
+                    let r = &p.objects[*ix];
+                    if p.classes[r.class].name == "beModelCtrlInfo"
+                        && r.field(7)
+                            .is_ok_and(|f| p.b[f.start + 4..f.end].starts_with(b"KIND_ENEMY\0"))
+                    {
+                        enemy_slots += p.array(p.val(id as u32, 6)?)?.len();
                     }
-                    Err(error) => self.log.push(format!(
-                        "stage {entry}: retain native {model} resources: {error}"
-                    )),
-                    _ => {}
+                }
+            }
+            if graft::find_named(&p, "beModelCtrlInfo", "i_rareicon")?.is_some() {
+                dst = super::capacity::expand(
+                    &dst,
+                    "i_rareicon",
+                    (enemy_slots + 4).max(CAPACITY as usize),
+                )?;
+            }
+            if let Some(intro) = intro {
+                if !names.is_empty() {
+                    let more =
+                        lua_names::rename_in_pack(&dst, &[intro.script.to_string()], &names)?;
+                    dst = materialize(&dst, &more)?;
+                }
+            }
+            if let Some(rule) = family_remap {
+                if entry == super::ranged_ai::ENTRY {
+                    // Reward fallback has finalized the assignments. Cleanup and
+                    // freeze must cover every family actually used by the banks.
+                    let families = first
+                        .iter()
+                        .filter(|g| family(g.row) == Some("e_nume"))
+                        .map(|g| {
+                            choice
+                                .get(&g.name)
+                                .cloned()
+                                .unwrap_or_else(|| "e_nume".into())
+                        })
+                        .collect();
+                    let edits = super::river_mix::remap_scripts(&dst, rule.scripts, &families)?;
+                    dst = materialize(&dst, &edits)?;
+                } else {
+                    let names = rule
+                        .models
+                        .iter()
+                        .map(|&original| {
+                            let replacement = first
+                                .iter()
+                                .find(|g| family(g.row) == Some(original))
+                                .and_then(|g| choice.get(&g.name))
+                                .cloned()
+                                .unwrap_or_else(|| original.to_string());
+                            (original.to_string(), replacement)
+                        })
+                        .collect();
+                    let scripts = rule
+                        .scripts
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>();
+                    let edits = lua_names::rename_in_pack(&dst, &scripts, &names)?;
+                    dst = materialize(&dst, &edits)?;
+                }
+            }
+            if entry == 686 {
+                // Do this after reward-slot fallback has finalized the choices, so
+                // a retained native wave keeps its native wait/cleanup target.
+                // Wave families may also appear in ordinary patrols, as they do in
+                // retail; reserving both would unnecessarily narrow patrol variety.
+                let waves: BTreeMap<String, String> = MANGROVE_WAVES
+                    .iter()
+                    .map(|&(generator, original)| {
+                        (
+                            original.to_string(),
+                            choice
+                                .get(generator)
+                                .cloned()
+                                .unwrap_or_else(|| original.into()),
+                        )
+                    })
+                    .collect();
+                for script in ["mate00.lua", "tim_g_orbz03.lua"] {
+                    let names = waves
+                        .iter()
+                        .filter(|(original, _)| script != "mate00.lua" || *original == "e_otama")
+                        .map(|(a, b)| (a.clone(), b.clone()))
+                        .collect();
+                    let edits = lua_names::rename_in_pack(&dst, &[script.into()], &names)?;
+                    dst = materialize(&dst, &edits)?;
+                }
+            }
+            if allowed.is_none() {
+                for model in stage.residents.keys().filter(|m| replaceable(m)) {
+                    if stage.pinned_families.contains(model.as_str()) {
+                        continue;
+                    }
+                    let count = native_demand.get(model).copied().unwrap_or(0);
+                    let mut external_script = false;
+                    for &pack in &stage.gens {
+                        external_script |=
+                            super::reclaim::script_dependency(data(pack)?, model, count == 0)?;
+                    }
+                    if external_script {
+                        continue;
+                    }
+                    let before = dst.len();
+                    let reviewed_intro = intro
+                        .filter(|_| {
+                            sites.iter().any(|(gen, original)| {
+                                choice.get(*gen).map(String::as_str).unwrap_or(original) == model
+                            })
+                        })
+                        .map(|site| site.script);
+                    let reclaimed = if count == 0 {
+                        super::reclaim::unused(&dst, model)
+                    } else if !super::reclaim::pool_script_dependency(
+                        &dst,
+                        model,
+                        false,
+                        reviewed_intro,
+                    )? {
+                        super::reclaim::shrink(&dst, model, count).map(Some)
+                    } else {
+                        Ok(None)
+                    };
+                    match reclaimed {
+                        Ok(Some(bytes)) if bytes.len() < before => {
+                            let saved = before - bytes.len();
+                            dst = bytes;
+                            if count == 0 {
+                                pool.retain(|(m, _, _)| m != model);
+                            }
+                            self.log.push(format!("stage {entry}: reclaim native {model}, {count} required slots, {saved} serialized bytes saved"));
+                            self.stats
+                                .trace
+                                .push(format!("reclaim {entry} {model} {count} {saved}"));
+                        }
+                        Err(error) => self.log.push(format!(
+                            "stage {entry}: retain native {model} resources: {error}"
+                        )),
+                        _ => {}
+                    }
                 }
             }
         }

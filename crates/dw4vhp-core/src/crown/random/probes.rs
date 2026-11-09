@@ -803,6 +803,7 @@ fn probe_census() {
         &entries,
         table,
         Options {
+            picks_only: false,
             seed: 1,
             donors: 3,
             warp: None,
@@ -924,6 +925,7 @@ fn probe_river_donors() {
             &entries,
             EnemyTable::read(&iso, &layout).unwrap(),
             Options {
+                picks_only: false,
                 seed: 67,
                 donors: DONORS,
                 warp: None,
@@ -1003,6 +1005,7 @@ fn probe_build_river_image() {
     }
 
     let options = Options {
+        picks_only: false,
         seed: 67,
         donors: models.len(),
         warp: None,
@@ -1320,6 +1323,7 @@ fn probe_build_arukenimon_native_image() {
         &entries,
         EnemyTable::read(&iso, &layout).unwrap(),
         Options {
+            picks_only: false,
             seed: 1,
             donors,
             warp: None,
@@ -1377,6 +1381,7 @@ fn probe_build_arukenimon_native_image() {
     }
     let slots = super::super::capacity::slots(&Pack::parse(&model).unwrap(), "e_arachne").unwrap();
     let options = Options {
+        picks_only: false,
         seed,
         donors,
         warp: None,

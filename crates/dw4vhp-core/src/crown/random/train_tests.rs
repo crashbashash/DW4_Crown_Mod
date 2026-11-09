@@ -54,6 +54,7 @@ fn retail_train_sides_are_ranged_on_every_difficulty_and_boarders_stay_native() 
                 &entries,
                 table,
                 Options {
+                    picks_only: false,
                     seed,
                     donors: DONORS,
                     warp: None,

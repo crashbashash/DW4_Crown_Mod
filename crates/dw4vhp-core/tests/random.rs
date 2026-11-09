@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 fn options(seed: u64) -> RandomOptions {
     RandomOptions {
+        picks_only: false,
         seed,
         donors: 3,
         warp: None,
@@ -153,5 +154,38 @@ fn every_release_builds_and_records_its_plan() {
             list.windows(2).all(|w| w[0] == w[1]),
             "{platform} releases disagree: {list:?}"
         );
+    }
+}
+
+/// Analysis picks must equal the choices a full image build makes for the same seed.
+#[cfg(feature = "devtools")]
+#[test]
+fn picks_only_matches_the_full_build() {
+    let Some(path) = std::env::var_os("DW4_RETAIL_USA_ISO").map(PathBuf::from) else {
+        eprintln!("SKIP: DW4_RETAIL_USA_ISO not configured");
+        return;
+    };
+    let iso = std::fs::read(path).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let full_picks = tmp.path().join("full.json");
+    for (seed, bosses) in [(24, true), (99, false)] {
+        let options = |picks_only| RandomOptions {
+            seed,
+            donors: dw4vhp_core::crown::RANDOM_DONORS,
+            warp: None,
+            only: None,
+            random_bosses: bosses,
+            picks_only,
+        };
+        // DW4_PICKS_OUT is read only by this test; the other tests do not set it.
+        std::env::set_var("DW4_PICKS_OUT", &full_picks);
+        CrownPlan::build_random(&iso, options(false)).unwrap();
+        std::env::remove_var("DW4_PICKS_OUT");
+        let full: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&full_picks).unwrap()).unwrap();
+        let picks =
+            CrownPlan::random_picks(&iso, false, false, false, 0, options(true), true).unwrap();
+        assert_eq!(full, picks, "seed {seed}");
+        assert!(CrownPlan::build_random(&iso, options(true)).is_err());
     }
 }
