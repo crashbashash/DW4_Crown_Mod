@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 26;
+pub const RULES_VERSION: u32 = 27;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -89,17 +89,26 @@ pub(super) fn nearest_row(table: &EnemyTable, row: u32, model: &str) -> Option<u
         .map(|r| r as u32)
 }
 
+const RNG_STEP: u64 = 0x9E37_79B9_7F4A_7C15;
+
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 struct Rng(u64);
 impl Rng {
+    /// Hash the seed and salt into the start state. XORing them directly left small
+    /// seeds on one shared stream: `next` steps by the multiplier used for the salt,
+    /// so salts differing by `k` started `k` draws apart.
     fn new(seed: u64, salt: u64) -> Self {
-        Self(seed ^ salt.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        let seed = mix(seed.wrapping_add(RNG_STEP));
+        Self(mix(seed.wrapping_add(salt.wrapping_mul(RNG_STEP))))
     }
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
+        self.0 = self.0.wrapping_add(RNG_STEP);
+        mix(self.0)
     }
     fn shuffle<T>(&mut self, items: &mut [T]) {
         for i in (1..items.len()).rev() {
@@ -289,6 +298,10 @@ struct Donor {
     profile: graft::Profile,
     /// Rarities (crown tiers) the model has enemy rows for.
     rarities: BTreeSet<u8>,
+    /// Named sequences and projectile models from the source pack, read once:
+    /// the source bytes never change while stages are planned.
+    sequences: BTreeSet<String>,
+    companions: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -517,6 +530,8 @@ impl Randomiser {
                             source: e,
                             ram: profile.ram,
                             rarities: rarities(&me.table, m),
+                            sequences: model_sequences(&p, m)?,
+                            companions: graft::companion_models(&p, None, &[m.to_string()])?,
                             profile,
                         },
                     );
@@ -550,6 +565,8 @@ impl Randomiser {
                 source: stage,
                 ram: profile.ram,
                 rarities: rarities(&me.table, model),
+                sequences: model_sequences(&p, model)?,
+                companions: graft::companion_models(&p, None, &[model.to_string()])?,
                 profile,
             },
         );
@@ -685,7 +702,7 @@ impl Randomiser {
     fn import_sounds<'a>(
         &self,
         model: &str,
-        source: usize,
+        donor: &Donor,
         dst: &[u8],
         data: &impl Fn(usize) -> Result<&'a [u8]>,
     ) -> Result<Vec<u8>> {
@@ -693,9 +710,13 @@ impl Randomiser {
             .audio_sources
             .get(model)
             .ok_or_else(|| bad(&format!("{model}: no complete audio source")))?;
-        let companions =
-            graft::companion_models(&Pack::parse(data(source)?)?, None, &[model.to_string()])?;
-        super::sound::graft_enemy(dst, data(source - 1)?, data(audio)?, model, &companions)
+        super::sound::graft_enemy(
+            dst,
+            data(donor.source - 1)?,
+            data(audio)?,
+            model,
+            &donor.companions,
+        )
     }
 
     /// Copy donors, choose generators and retain the resources used by the resulting stage.
@@ -867,7 +888,7 @@ impl Randomiser {
                     .push(format!("stage {entry}: {m} does not fit: {why}"));
                 continue;
             }
-            let sequences = model_sequences(&Pack::parse(data(donor.source)?)?, m)?;
+            let sequences = &donor.sequences;
             if !first.iter().any(|g| {
                 !stage.pinned.contains(&g.name)
                     && !sites.iter().any(|(name, _)| *name == g.name)
@@ -906,7 +927,7 @@ impl Randomiser {
                         .get(&sound_entry)
                         .map(Vec::as_slice)
                         .unwrap_or(data(sound_entry)?);
-                    let sounds = self.import_sounds(m, donor.source, current, &data)?;
+                    let sounds = self.import_sounds(m, donor, current, &data)?;
                     self.sounds.insert(sound_entry, sounds);
                     self.stats.copied += 1;
                     self.stats.approximate += report.approximate.len();
@@ -1295,7 +1316,7 @@ impl Randomiser {
                 let (edits, report) =
                     graft::graft(&dst, data(donor.source)?, &[model.to_string()])?;
                 dst = materialize(&dst, &edits)?;
-                sounds = self.import_sounds(model, donor.source, &sounds, &data)?;
+                sounds = self.import_sounds(model, donor, &sounds, &data)?;
                 self.stats.copied += 1;
                 self.stats.approximate += report.approximate.len();
                 self.stats.unattached += report.unattached.len();

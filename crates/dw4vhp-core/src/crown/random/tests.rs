@@ -1206,3 +1206,26 @@ fn seed_67_abyss_inherits_encounter_stats_with_and_without_crowns() {
         }
     }
 }
+
+#[test]
+fn salted_streams_do_not_overlap_for_small_or_large_seeds() {
+    // Every archive entry that can salt a stage, plus the three boss salts.
+    let salts = (0..800u64)
+        .chain(0xB055_0000..0xB055_0003)
+        .collect::<Vec<_>>();
+    let inverse = (0..6).fold(1u64, |x, _| {
+        x.wrapping_mul(2u64.wrapping_sub(RNG_STEP.wrapping_mul(x)))
+    });
+    assert_eq!(RNG_STEP.wrapping_mul(inverse), 1);
+    for seed in (0..256).chain([1520, 65_535, u64::from(u32::MAX)]) {
+        let mut starts = salts
+            .iter()
+            .map(|&salt| Rng::new(seed, salt).0.wrapping_mul(inverse))
+            .collect::<Vec<_>>();
+        starts.sort_unstable();
+        // Starts are ordered in draw counts, so any overlap shows as a small gap.
+        for pair in starts.windows(2) {
+            assert!(pair[1] - pair[0] > 1 << 20, "seed {seed} shares a stream");
+        }
+    }
+}

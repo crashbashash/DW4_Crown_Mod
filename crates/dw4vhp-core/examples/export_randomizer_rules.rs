@@ -22,7 +22,7 @@ fn main() {
     for model in importable_models() {
         println!("- `{model}`");
     }
-    println!("\nRegular MR04 (`e_mecha4`) is included; the separate boss model (`e_mecha4bs`) is not an import candidate. Arukenimon (`e_arachne`) imports her complete body, animation, hit script, web projectile and effects without a stage-specific file-loading callback. Her native Grief Wasteland introduction remains unchanged.\n");
+    println!("\nRegular MR04 (`e_mecha4`) is included; the separate boss model (`e_mecha4bs`) is not an import candidate. Arukenimon (`e_arachne`) imports her complete body, animation, hit script, web projectile and effects without a stage-specific file-loading callback. Her native Grief Wasteland introduction remains unchanged. Tortamon (`e_torta`) imports from its embedded body in `stag0301` and is not imported into Mangrove Forest, which keeps its separately loaded Tortamon resource.\n");
     println!("## Riverbank and train-side projectile pool\n\nReplacement families must have an attack event that spawns a separate moving projectile with a damaging hitbox. Eligible families:\n");
     for model in river_ranged_models() {
         println!("- `{model}`");

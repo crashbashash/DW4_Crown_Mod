@@ -42,6 +42,13 @@ the arena's health display. Reviewed entrance fallbacks prefer `SQ_ENTR`:
 Blossomon's `SQ_NENTR` selects normal-enemy death labels and can prevent the
 arena's victory callback from running.
 
+Rules 27 adds Tortamon to the import pool, from its embedded body in `stag0301`.
+Mangrove Forest cannot import it because it keeps the separately loaded native
+resource. Rules 27 also hashes the seed and salt into each stream's start state;
+XORing them let small seeds share one random stream between stages. A PS2 USA
+image with Tortamon forced into Goblin Pass passed live spawn, rendering, combat,
+defeat, EXP, drop and stage-exit checks. GameCube has static test coverage only.
+
 The earlier USA prototype used literal English cards. Rules 26 retains native
 Unicode rendering and supplies localized message banks in a rebuilt AREA archive;
 difficulty-specific intro scripts select the donor’s four message indexes. All

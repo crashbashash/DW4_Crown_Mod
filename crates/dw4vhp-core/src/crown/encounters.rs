@@ -25,9 +25,10 @@ pub(crate) const REGULAR: &[&str] = &[
     "e_mecha5",
     "e_pharaoh",
     "e_arachne",
+    "e_torta",
 ];
-/// Tortamon loads from a separate file and is never copied elsewhere.
-pub(crate) const REPLACEABLE: &[&str] = &["e_torta"];
+/// Enemies retired from stages without being offered as imports. None currently.
+pub(crate) const REPLACEABLE: &[&str] = &[];
 /// Custom encounter and tutorial packs never supply models to other stages.
 pub(crate) const FORBIDDEN_SOURCES: &[usize] = &[449, 457, 464, 603, 607, 786];
 /// The developer world (603) and the final bosses: left as shipped.
@@ -116,7 +117,14 @@ pub(crate) fn ranged_stage(entry: usize) -> bool {
     matches!(entry, 628 | 658)
 }
 
+/// Mangrove keeps its separate Tortamon preload, so an embedded import there would
+/// register the same model name twice.
+const SEPARATE_TORTAMON: usize = 686;
+
 pub(crate) fn replacement_allowed(entry: usize, model: &str) -> bool {
+    if entry == SEPARATE_TORTAMON && model == "e_torta" {
+        return false;
+    }
     !ranged_stage(entry) || RIVER_RANGED.contains(&model)
 }
 
@@ -171,8 +179,11 @@ mod tests {
         for entry in [614, 686] {
             assert!(REGULAR
                 .iter()
+                .filter(|model| (entry, **model) != (SEPARATE_TORTAMON, "e_torta"))
                 .all(|model| replacement_allowed(entry, model)));
         }
+        assert!(replacement_allowed(614, "e_torta"));
+        assert!(!replacement_allowed(SEPARATE_TORTAMON, "e_torta"));
     }
 
     #[test]
