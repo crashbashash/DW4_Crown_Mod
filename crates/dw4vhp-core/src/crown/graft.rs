@@ -1,6 +1,7 @@
 //! Copy enemy model subgraphs and retarget generator rows for the randomizer.
 //! The public graft specifications also support focused development fixtures.
 use super::*;
+use crate::formats::igb::Class;
 use std::collections::{BTreeSet, HashMap};
 
 /// The records the engine registers per model, in the pack's root `igInfoList`.
@@ -544,7 +545,7 @@ pub(super) const EFFECT_NUMBERS: [(&str, &str); 30] = [
 /// `sp` registers and `dp` (when given) lacks.
 pub(super) fn companion_models(
     sp: &Pack,
-    dp: Option<&Pack>,
+    dp: Option<&dyn Destination>,
     models: &[String],
 ) -> Result<Vec<String>> {
     let prefixes: Vec<String> = models
@@ -564,12 +565,7 @@ pub(super) fn companion_models(
             continue;
         };
         if prefixes.iter().any(|p| name.starts_with(p.as_str()))
-            && dp.is_none_or(|d| {
-                find_named(d, "beModelCtrlInfo", &name)
-                    .ok()
-                    .flatten()
-                    .is_none()
-            })
+            && dp.is_none_or(|d| d.named("beModelCtrlInfo", &name).ok().flatten().is_none())
         {
             out.insert(name);
         }
@@ -608,6 +604,437 @@ fn node_holders(p: &Pack, child: u32) -> Vec<(u32, u32)> {
         }
     }
     found
+}
+
+/// The destination lookups that decide what a graft copies. A real pack answers
+/// them from its records; the analysis destination answers them from a summary
+/// that each planned graft updates, without copying any bytes.
+pub(super) trait Destination {
+    /// `find_named`: none, one (an ID) or an error for several.
+    fn named(&self, class: &str, name: &str) -> Result<Option<u32>>;
+    /// `group_children`: the child list of the unique group with this name.
+    fn group(&self, name: &[u8]) -> Result<u32>;
+    /// Whether an effect info with this class and name is registered.
+    fn has_effect(&self, class: &str, name: &str) -> Result<bool>;
+    /// The child list of the unique unparented node with this class and name.
+    fn pass(&self, class: &str, name: &[u8]) -> Result<Option<u32>>;
+    fn classes(&self) -> &[Class];
+}
+
+pub(super) struct PackDestination<'p, 'a> {
+    p: &'p Pack<'a>,
+    index: std::cell::OnceCell<SceneIndex>,
+    effects: std::cell::OnceCell<BTreeSet<(String, String)>>,
+}
+
+impl<'p, 'a> PackDestination<'p, 'a> {
+    pub(super) fn new(p: &'p Pack<'a>) -> Self {
+        Self {
+            p,
+            index: std::cell::OnceCell::new(),
+            effects: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn effect_keys(&self) -> Result<&BTreeSet<(String, String)>> {
+        if self.effects.get().is_none() {
+            let keys = effect_infos(self.p)?
+                .into_iter()
+                .map(|(c, n, _)| (c, n))
+                .collect();
+            let _ = self.effects.set(keys);
+        }
+        Ok(self.effects.get().unwrap())
+    }
+}
+
+impl Destination for PackDestination<'_, '_> {
+    fn named(&self, class: &str, name: &str) -> Result<Option<u32>> {
+        find_named(self.p, class, name)
+    }
+    fn group(&self, name: &[u8]) -> Result<u32> {
+        group_children(self.p, name)
+    }
+    fn has_effect(&self, class: &str, name: &str) -> Result<bool> {
+        Ok(self
+            .effect_keys()?
+            .contains(&(class.to_string(), name.to_string())))
+    }
+    fn pass(&self, class: &str, name: &[u8]) -> Result<Option<u32>> {
+        effect_pass(
+            self.p,
+            class,
+            name,
+            self.index.get_or_init(|| SceneIndex::new(self.p)),
+        )
+    }
+    fn classes(&self) -> &[Class] {
+        &self.p.classes
+    }
+}
+
+/// The single scene child list of a node, as `group_children` and
+/// `node_children` require it.
+fn one_child_list(p: &Pack, id: u32) -> Option<u32> {
+    let r = p.rec(id).ok()?;
+    let lists = ref_slots(p, r)
+        .filter(|&(_, memory)| !memory)
+        .filter_map(|(n, _)| r.val(p.b, n).ok())
+        .filter(|&v| v != NULL && p.class(v, "igNodeList").is_ok())
+        .collect::<Vec<_>>();
+    (lists.len() == 1).then(|| lists[0])
+}
+
+#[derive(Clone)]
+struct NamedNode {
+    list: Option<u32>,
+    unheld: bool,
+}
+
+/// Analysis destination: the facts [`Destination`] needs about a stage pack,
+/// updated by each planned graft as the copied records would update the pack.
+#[derive(Clone)]
+pub(super) struct VirtualDestination {
+    ids: usize,
+    names: HashMap<(String, Vec<u8>), Vec<NamedNode>>,
+    counts: HashMap<String, usize>,
+    effects: BTreeSet<(String, String)>,
+    classes: Vec<Class>,
+}
+
+impl VirtualDestination {
+    pub(super) fn new(p: &Pack) -> Result<Self> {
+        let index = SceneIndex::new(p);
+        let mut me = Self {
+            ids: p.ids.len(),
+            names: HashMap::new(),
+            counts: HashMap::new(),
+            effects: PackDestination::new(p).effect_keys()?.clone(),
+            classes: p.classes.clone(),
+        };
+        for id in 0..p.ids.len() as u32 {
+            let unheld = index.holders(id).is_empty();
+            me.record(p, id, unheld);
+        }
+        Ok(me)
+    }
+
+    fn record(&mut self, p: &Pack, id: u32, unheld: bool) {
+        let Some(index) = p.ids[id as usize] else {
+            return;
+        };
+        let r = &p.objects[index];
+        let class = &p.classes[r.class].name;
+        *self.counts.entry(class.clone()).or_default() += 1;
+        if let Some(name) = name_of(p, r) {
+            self.names
+                .entry((class.clone(), name.to_vec()))
+                .or_default()
+                .push(NamedNode {
+                    list: one_child_list(p, id),
+                    unheld,
+                });
+        }
+    }
+
+    pub(super) fn id_count(&self) -> usize {
+        self.ids
+    }
+
+    /// Define classes as `add_classes` does before a successful graft.
+    fn add_classes(&mut self, defs: &[ClassDef]) {
+        self.classes.extend(defs.iter().map(|d| d.class.clone()));
+    }
+
+    fn nodes(&self, class: &str, name: &[u8]) -> &[NamedNode] {
+        self.names
+            .get(&(class.to_string(), name.to_vec()))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+impl Destination for VirtualDestination {
+    fn named(&self, class: &str, name: &str) -> Result<Option<u32>> {
+        match self.nodes(class, name.as_bytes()).len() {
+            0 => Ok(None),
+            1 => Ok(Some(0)),
+            _ => Err(bad(&format!("several {class} records named {name}"))),
+        }
+    }
+    fn group(&self, name: &[u8]) -> Result<u32> {
+        let groups = self.nodes("igGroup", name);
+        need(groups.len() == 1, "expected one destination scene group")?;
+        groups[0]
+            .list
+            .ok_or_else(|| bad("expected one child list on the scene group"))
+    }
+    fn has_effect(&self, class: &str, name: &str) -> Result<bool> {
+        Ok(self
+            .effects
+            .contains(&(class.to_string(), name.to_string())))
+    }
+    fn pass(&self, class: &str, name: &[u8]) -> Result<Option<u32>> {
+        let tops = self
+            .nodes(class, name)
+            .iter()
+            .filter(|n| n.unheld)
+            .collect::<Vec<_>>();
+        if tops.len() != 1 {
+            return Ok(None);
+        }
+        tops[0]
+            .list
+            .map(Some)
+            .ok_or_else(|| bad("expected one effect child list"))
+    }
+    fn classes(&self) -> &[Class] {
+        &self.classes
+    }
+}
+
+/// One destination lookup made while planning a copy, with its answer.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Lookup {
+    Named(String, String, std::result::Result<Option<u32>, String>),
+    Group(Vec<u8>, std::result::Result<u32, String>),
+    Effect(String, String, std::result::Result<bool, String>),
+    Pass(String, Vec<u8>, std::result::Result<Option<u32>, String>),
+}
+
+/// The planning code uses only whether a record or list exists, never which
+/// destination ID it has, so answers record IDs as 0.
+fn answer<T>(r: &Result<T>, shape: impl Fn(&T) -> T) -> std::result::Result<T, String> {
+    r.as_ref().map(shape).map_err(ToString::to_string)
+}
+
+fn some(o: &Option<u32>) -> Option<u32> {
+    o.map(|_| 0)
+}
+
+fn zero(_: &u32) -> u32 {
+    0
+}
+
+fn same(b: &bool) -> bool {
+    *b
+}
+
+/// Records every lookup the planning code makes, in order.
+struct Recording<'d> {
+    inner: &'d dyn Destination,
+    log: std::cell::RefCell<Vec<Lookup>>,
+}
+
+impl Destination for Recording<'_> {
+    fn named(&self, class: &str, name: &str) -> Result<Option<u32>> {
+        let r = self.inner.named(class, name);
+        self.log
+            .borrow_mut()
+            .push(Lookup::Named(class.into(), name.into(), answer(&r, some)));
+        r
+    }
+    fn group(&self, name: &[u8]) -> Result<u32> {
+        let r = self.inner.group(name);
+        self.log
+            .borrow_mut()
+            .push(Lookup::Group(name.to_vec(), answer(&r, zero)));
+        r
+    }
+    fn has_effect(&self, class: &str, name: &str) -> Result<bool> {
+        let r = self.inner.has_effect(class, name);
+        self.log
+            .borrow_mut()
+            .push(Lookup::Effect(class.into(), name.into(), answer(&r, same)));
+        r
+    }
+    fn pass(&self, class: &str, name: &[u8]) -> Result<Option<u32>> {
+        let r = self.inner.pass(class, name);
+        self.log
+            .borrow_mut()
+            .push(Lookup::Pass(class.into(), name.to_vec(), answer(&r, some)));
+        r
+    }
+    fn classes(&self) -> &[Class] {
+        self.inner.classes()
+    }
+}
+
+impl Lookup {
+    /// Whether `dest` still gives the recorded answer.
+    fn holds(&self, dest: &dyn Destination) -> bool {
+        match self {
+            Lookup::Named(c, n, a) => answer(&dest.named(c, n), some) == *a,
+            Lookup::Group(n, a) => answer(&dest.group(n), zero) == *a,
+            Lookup::Effect(c, n, a) => answer(&dest.has_effect(c, n), same) == *a,
+            Lookup::Pass(c, n, a) => answer(&dest.pass(c, n), some) == *a,
+        }
+    }
+}
+
+/// What a planned copy adds to the destination summary.
+#[derive(Clone)]
+struct Delta {
+    ids: usize,
+    scripts: bool,
+    records: Vec<(String, Option<Vec<u8>>, NamedNode)>,
+    effects: Vec<(String, String)>,
+}
+
+type Variants = Vec<(Vec<Lookup>, std::result::Result<Delta, String>)>;
+type PlanKey = ([u8; 16], Vec<String>);
+
+/// Planned copies by (source pack contents, models), each valid for the recorded
+/// lookups. Plans depend only on those, so analysis runs share one cache.
+static VIRTUAL_PLANS: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<PlanKey, std::sync::Arc<std::sync::RwLock<Variants>>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// The content fingerprint of a donor source pack.
+pub(super) fn source_fingerprint(src: &[u8]) -> [u8; 16] {
+    use md5::{Digest, Md5};
+    Md5::digest(src).into()
+}
+
+fn plan_delta(dest: &dyn Destination, src: &[u8], models: &[String]) -> Result<Delta> {
+    let original = Pack::parse(src)?;
+    let RenderSource {
+        bytes: rendered,
+        attached,
+    } = render_source(&original, Some(dest), models, &mut Report::default())
+        .map_err(|e| bad(&format!("render source: {e}")))?;
+    let sp = Pack::parse(&rendered)?;
+    let CopyPlan {
+        infos,
+        scripts,
+        all,
+        ids,
+        ..
+    } = copy_plan(dest, &sp, &attached, models, &MODEL_SCRIPTS)?;
+    // Copied nodes the destination's own lists will hold: effect tops join a
+    // render pass and model switches join their scene group.
+    let mut held: BTreeSet<u32> = attached.iter().map(|&(top, _)| top).collect();
+    for (m, strict) in &all {
+        let scene = if *strict {
+            Some(model_scene(&sp, m)?)
+        } else {
+            model_scene(&sp, m).ok()
+        };
+        let Some(ModelScene::Group(name)) = scene else {
+            continue;
+        };
+        if !*strict && dest.group(&name).is_err() {
+            continue;
+        }
+        let info =
+            find_named(&sp, "beAction2Info", m)?.ok_or_else(|| bad("source lacks action info"))?;
+        dest.group(&name)?;
+        held.insert(sp.val(info, 7)?);
+    }
+    let index = SceneIndex::new(&sp);
+    let mut records = Vec::new();
+    for &id in &ids {
+        let Some(i) = sp.ids[id as usize] else {
+            continue;
+        };
+        let r = &sp.objects[i];
+        let unheld = !held.contains(&id)
+            && !index
+                .holders(id)
+                .iter()
+                .any(|(owner, _)| ids.contains(owner));
+        records.push((
+            sp.classes[r.class].name.clone(),
+            name_of(&sp, r).map(<[u8]>::to_vec),
+            NamedNode {
+                list: one_child_list(&sp, id),
+                unheld,
+            },
+        ));
+    }
+    let mut effects = Vec::new();
+    for id in infos {
+        let r = sp.rec(id)?;
+        let class = &sp.classes[r.class].name;
+        if EFFECT_CLASSES.contains(&class.as_str()) {
+            if let Some(name) = name_of(&sp, r).filter(|n| !n.is_empty()) {
+                effects.push((class.clone(), String::from_utf8_lossy(name).into_owned()));
+            }
+        }
+    }
+    Ok(Delta {
+        ids: ids.len(),
+        scripts: !scripts.is_empty(),
+        records,
+        effects,
+    })
+}
+
+/// Plan [`graft`] against an analysis destination: the same checks and the same
+/// copy, with no bytes written. Returns how many IDs the copy adds.
+pub(super) fn virtual_graft(
+    dest: &mut VirtualDestination,
+    source: ([u8; 16], &[u8]),
+    models: &[String],
+    missing: &[ClassDef],
+) -> Result<usize> {
+    let _timing = crate::profiling::measure("graft.virtual");
+    let variants = VIRTUAL_PLANS
+        .lock()
+        .map_err(|_| bad("virtual plan cache poisoned"))?
+        .entry((source.0, models.to_vec()))
+        .or_default()
+        .clone();
+    let found = variants
+        .read()
+        .map_err(|_| bad("virtual plan cache poisoned"))?
+        .iter()
+        .find(|(lookups, _)| lookups.iter().all(|l| l.holds(&*dest)))
+        .map(|(_, delta)| delta.clone());
+    let delta = match found {
+        Some(delta) => delta,
+        None => {
+            let _miss = crate::profiling::measure("graft.virtual.miss");
+            let recording = Recording {
+                inner: &*dest,
+                log: Default::default(),
+            };
+            let delta = plan_delta(&recording, source.1, models).map_err(|e| e.to_string());
+            variants
+                .write()
+                .map_err(|_| bad("virtual plan cache poisoned"))?
+                .push((recording.log.into_inner(), delta.clone()));
+            delta
+        }
+    }
+    .map_err(|e| bad(&e))?;
+    need(
+        dest.ids + delta.ids < u16::MAX as usize,
+        &format!(
+            "copy resource graph: grafted pack exceeds 16-bit directory index ({} objects, {} more needed, {} allowed)",
+            dest.ids,
+            delta.ids,
+            u16::MAX
+        ),
+    )?;
+    if delta.scripts {
+        need(
+            dest.counts.get("beLuaDataList").copied() == Some(1),
+            "expected one script list",
+        )?;
+    }
+    for (class, name, node) in delta.records {
+        *dest.counts.entry(class.clone()).or_default() += 1;
+        if let Some(name) = name {
+            dest.names.entry((class, name)).or_default().push(node);
+        }
+    }
+    dest.effects.extend(delta.effects);
+    // `Builder::finish` pads an odd number of new IDs with one NULL block.
+    let added = delta.ids + delta.ids % 2;
+    dest.ids += added;
+    dest.add_classes(missing);
+    Ok(added)
 }
 
 /// Reverse the scene's child lists once per immutable pack view. Looking up
@@ -706,14 +1133,12 @@ fn node_children(p: &Pack, node: u32) -> Result<u32> {
 
 /// Find the same render pass, without guessing at child indexes inside it. The
 /// imported branch supplies its own complete attribute stack below this node.
-fn effect_pass(sp: &Pack, dp: &Pack, top: u32, index: &SceneIndex) -> Result<Option<u32>> {
-    let r = sp.rec(top)?;
+fn effect_pass(dp: &Pack, class: &str, name: &[u8], index: &SceneIndex) -> Result<Option<u32>> {
     let tops = (0..dp.ids.len() as u32)
         .filter(|&id| {
-            dp.rec(id).is_ok_and(|d| {
-                dp.classes[d.class].name == sp.classes[r.class].name
-                    && name_of(dp, d) == name_of(sp, r)
-            }) && index.holders(id).is_empty()
+            dp.rec(id)
+                .is_ok_and(|d| dp.classes[d.class].name == class && name_of(dp, d) == Some(name))
+                && index.holders(id).is_empty()
         })
         .collect::<Vec<_>>();
     if tops.len() != 1 {
@@ -733,13 +1158,12 @@ struct RenderSource {
 /// both graph traversal and the loader's reference tables.
 fn render_source(
     sp: &Pack,
-    dp: Option<&Pack>,
+    dp: Option<&dyn Destination>,
     models: &[String],
     report: &mut Report,
 ) -> Result<RenderSource> {
     let bullets = companion_models(sp, dp, models)?;
     let source_index = SceneIndex::new(sp);
-    let destination_index = dp.map(SceneIndex::new);
     let mut attached = BTreeMap::new();
     let mut selected: BTreeMap<u32, (u32, BTreeSet<u32>)> = BTreeMap::new();
     for (switch, own, name) in effect_switches(sp, dp, models, &bullets.iter().collect::<Vec<_>>())?
@@ -751,7 +1175,11 @@ fn render_source(
             continue;
         };
         let destination = if let Some(dp) = dp {
-            let Some(list) = effect_pass(sp, dp, at.top, destination_index.as_ref().unwrap())?
+            let top = sp.rec(at.top)?;
+            let Some(list) = dp.pass(
+                &sp.classes[top.class].name,
+                name_of(sp, top).unwrap_or_default(),
+            )?
             else {
                 if own {
                     report.unattached.push(format!("{name} (no pass)"));
@@ -818,7 +1246,7 @@ fn render_source(
 /// enemy of the source stage.
 fn effect_switches(
     sp: &Pack,
-    dp: Option<&Pack>,
+    dp: Option<&dyn Destination>,
     models: &[String],
     bullets: &[&String],
 ) -> Result<Vec<(u32, bool, String)>> {
@@ -833,15 +1261,10 @@ fn effect_switches(
             out.push((sp.val(info, 7)?, true, m.to_string()));
         }
     }
-    let have: BTreeSet<(String, String)> = match dp {
-        Some(d) => effect_infos(d)?
-            .into_iter()
-            .map(|(c, n, _)| (c, n))
-            .collect(),
-        None => BTreeSet::new(),
-    };
     for (class, name, id) in effect_infos(sp)? {
-        if class == "beParticleCtrl2Info" && !have.contains(&(class, name.clone())) {
+        if class == "beParticleCtrl2Info"
+            && !dp.map_or(Ok(false), |d| d.has_effect(&class, &name))?
+        {
             if let Ok(switch) = sp.val(id, 7) {
                 out.push((
                     switch,
@@ -974,89 +1397,20 @@ pub(super) fn graft_with_scripts(
     let _timing = crate::profiling::measure("graft.copy");
     let original = Pack::parse(src)?;
     let mut report = Report::default();
+    let destination = PackDestination::new(&dp);
     let RenderSource {
         bytes: rendered,
         attached,
-    } = render_source(&original, Some(&dp), models, &mut report)
+    } = render_source(&original, Some(&destination), models, &mut report)
         .map_err(|e| bad(&format!("render source: {e}")))?;
     let sp = Pack::parse(&rendered)?;
-    let mut roots = Vec::new();
-    let mut infos = Vec::new();
-    let mut scripts = Vec::new();
-    let companions = companion_models(&sp, Some(&dp), models)?;
-    let all: Vec<(&String, bool)> = models
-        .iter()
-        .map(|m| (m, true))
-        .chain(
-            companions
-                .iter()
-                .filter(|c| !models.contains(c))
-                .map(|c| (c, false)),
-        )
-        .collect();
-    for &(m, strict) in &all {
-        for class in REGISTERED {
-            need(
-                find_named(&dp, class, m)?.is_none(),
-                "destination already carries the model",
-            )?;
-            match find_named(&sp, class, m)? {
-                Some(id) => {
-                    roots.push(id);
-                    infos.push(id);
-                }
-                None if strict => return Err(bad(&format!("source lacks {class} {m}"))),
-                None => {}
-            }
-        }
-        // A bullet is drawn however its source stage draws it; one the destination cannot
-        // hang in the same way is registered without a scene node.
-        let scene = if strict {
-            Some(model_scene(&sp, m)?)
-        } else {
-            model_scene(&sp, m).ok().filter(|s| match s {
-                ModelScene::Info(_) => group_children(&dp, b"EM01").is_err(),
-                ModelScene::Group(name) => group_children(&dp, name).is_ok(),
-            })
-        };
-        if let Some(ModelScene::Info(id)) = scene {
-            need(
-                find_named(&dp, "igSceneInfo", m)?.is_none(),
-                "destination already carries the model's scene",
-            )?;
-            need(
-                group_children(&dp, b"EM01").is_err(),
-                "a one-model scene cannot join a stage with an enemy group",
-            )?;
-            roots.push(id);
-            infos.push(id);
-        }
-        for prefix in prefixes {
-            let name = format!("{prefix}{m}.lua");
-            if let Some(id) = find_named(&sp, "beLuaData", &name)? {
-                need(
-                    find_named(&dp, "beLuaData", &name)?.is_none(),
-                    "destination already carries the script",
-                )?;
-                roots.push(id);
-                scripts.push((name.into_bytes(), id));
-            }
-        }
-    }
-    // Effects the source stage registers that this stage lacks.
-    let have: BTreeSet<(String, String)> = effect_infos(&dp)?
-        .into_iter()
-        .map(|(c, n, _)| (c, n))
-        .collect();
-    for (class, name, id) in effect_infos(&sp)? {
-        if !have.contains(&(class, name)) {
-            roots.push(id);
-            infos.push(id);
-        }
-    }
-    roots.extend(attached.iter().map(|&(top, _)| top));
-    let (ids, owners) = closure(&sp, &roots)?;
-    check_blocks(&sp, &ids, &owners)?;
+    let CopyPlan {
+        infos,
+        scripts,
+        all,
+        ids,
+        owners,
+    } = copy_plan(&destination, &sp, &attached, models, prefixes)?;
     let mut builder = if prefixes.contains(&"ded_") {
         Builder::new(&dp).reuse_directories()
     } else {
@@ -1099,7 +1453,8 @@ pub(super) fn graft_with_scripts(
     }
     // Draw registration: the enemy model switches hang under a scene group of the stage.
     let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for &(m, strict) in &all {
+    for (m, strict) in &all {
+        let (m, strict) = (m.as_str(), *strict);
         let scene = if strict {
             Some(model_scene(&sp, m)?)
         } else {
@@ -1134,6 +1489,106 @@ pub(super) fn graft_with_scripts(
     verify(&dp, &sp, &out, &map, &owners, &grows, &rewrites)
         .map_err(|e| bad(&format!("verify resource graph: {e}")))?;
     Ok((edits, report))
+}
+
+/// What a graft copies and registers, decided only by the source and these
+/// destination lookups. The real graft and the analysis destination share it.
+pub(super) struct CopyPlan {
+    infos: Vec<u32>,
+    scripts: Vec<(Vec<u8>, u32)>,
+    all: Vec<(String, bool)>,
+    ids: BTreeSet<u32>,
+    owners: HashMap<u32, usize>,
+}
+
+fn copy_plan(
+    dp: &dyn Destination,
+    sp: &Pack,
+    attached: &[(u32, u32)],
+    models: &[String],
+    prefixes: &[&str],
+) -> Result<CopyPlan> {
+    let mut roots = Vec::new();
+    let mut infos = Vec::new();
+    let mut scripts = Vec::new();
+    let companions = companion_models(sp, Some(dp), models)?;
+    let all: Vec<(String, bool)> = models
+        .iter()
+        .map(|m| (m.clone(), true))
+        .chain(
+            companions
+                .iter()
+                .filter(|c| !models.contains(c))
+                .map(|c| (c.clone(), false)),
+        )
+        .collect();
+    for (m, strict) in &all {
+        let (m, strict) = (m.as_str(), *strict);
+        for class in REGISTERED {
+            need(
+                dp.named(class, m)?.is_none(),
+                "destination already carries the model",
+            )?;
+            match find_named(sp, class, m)? {
+                Some(id) => {
+                    roots.push(id);
+                    infos.push(id);
+                }
+                None if strict => return Err(bad(&format!("source lacks {class} {m}"))),
+                None => {}
+            }
+        }
+        // A bullet is drawn however its source stage draws it; one the destination cannot
+        // hang in the same way is registered without a scene node.
+        let scene = if strict {
+            Some(model_scene(sp, m)?)
+        } else {
+            model_scene(sp, m).ok().filter(|s| match s {
+                ModelScene::Info(_) => dp.group(b"EM01").is_err(),
+                ModelScene::Group(name) => dp.group(name).is_ok(),
+            })
+        };
+        if let Some(ModelScene::Info(id)) = scene {
+            need(
+                dp.named("igSceneInfo", m)?.is_none(),
+                "destination already carries the model's scene",
+            )?;
+            need(
+                dp.group(b"EM01").is_err(),
+                "a one-model scene cannot join a stage with an enemy group",
+            )?;
+            roots.push(id);
+            infos.push(id);
+        }
+        for prefix in prefixes {
+            let name = format!("{prefix}{m}.lua");
+            if let Some(id) = find_named(sp, "beLuaData", &name)? {
+                need(
+                    dp.named("beLuaData", &name)?.is_none(),
+                    "destination already carries the script",
+                )?;
+                roots.push(id);
+                scripts.push((name.into_bytes(), id));
+            }
+        }
+    }
+    // Effects the source stage registers that this stage lacks.
+    for (class, name, id) in effect_infos(sp)? {
+        if !dp.has_effect(&class, &name)? {
+            roots.push(id);
+            infos.push(id);
+        }
+    }
+    roots.extend(attached.iter().map(|&(top, _)| top));
+    let (ids, owners) = closure(sp, &roots)?;
+    check_blocks(sp, &ids, &owners)?;
+    Ok(CopyPlan {
+        infos,
+        scripts,
+        all,
+        ids,
+        owners,
+    })
 }
 
 /// Append a closed subgraph with translated object, memory and class references.
@@ -1698,27 +2153,33 @@ pub(super) struct Profile {
 impl Profile {
     /// The classes `dp` still has to define before it can take the copy.
     pub(super) fn missing(&self, dp: &Pack) -> Vec<ClassDef> {
+        self.missing_in(&PackDestination::new(dp))
+    }
+
+    pub(super) fn missing_in(&self, dp: &dyn Destination) -> Vec<ClassDef> {
         self.classes
             .iter()
-            .filter(|c| !dp.classes.iter().any(|d| d.name == c.class.name))
+            .filter(|c| !dp.classes().iter().any(|d| d.name == c.class.name))
             .cloned()
             .collect()
     }
 
     /// Why `dp` cannot take the copy: a class laid out differently, or no scene group to hang it on.
     pub(super) fn misfit(&self, dp: &Pack) -> Option<String> {
+        self.misfit_in(&PackDestination::new(dp))
+    }
+
+    pub(super) fn misfit_in(&self, dp: &dyn Destination) -> Option<String> {
         if let Some(c) = self.classes.iter().find(|c| {
-            dp.classes
+            dp.classes()
                 .iter()
                 .any(|d| d.name == c.class.name && d.fields != c.class.fields)
         }) {
             return Some(format!("class {} is laid out differently", c.class.name));
         }
-        let grouped = group_children(dp, b"EM01").is_ok();
+        let grouped = dp.group(b"EM01").is_ok();
         match &self.scene {
-            ModelScene::Group(name) if group_children(dp, name).is_err() => {
-                Some("no enemy group".into())
-            }
+            ModelScene::Group(name) if dp.group(name).is_err() => Some("no enemy group".into()),
             ModelScene::Info(_) if grouped => Some("stage has an enemy group".into()),
             _ => None,
         }

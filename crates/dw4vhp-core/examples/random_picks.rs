@@ -2,6 +2,8 @@
 //! Usage: random_picks <clean image> <output dir> <threads> <bosses 0|1> <seed>...
 //! Writes `<dir>/<seed>.json`. Picks match an image built with the same settings:
 //! Crown Mod and the other options off, unless `DW4_PICKS_CROWN=1`.
+//! With `DW4_PROFILE=1 PROF_OUT=<file>`, each worker writes its timings there on exit
+//! (the last worker to finish wins); use one thread for a whole-run profile.
 use dw4vhp_core::crown::{CrownPlan, RandomOptions, RANDOM_DONORS};
 use std::{
     env, fs,
@@ -27,6 +29,9 @@ fn main() {
             let (iso, queue, dir) = (iso.clone(), queue.clone(), dir.clone());
             std::thread::spawn(move || loop {
                 let Some(seed) = queue.lock().unwrap().pop() else {
+                    if let Ok(out) = env::var("PROF_OUT") {
+                        dw4vhp_core::profiling::write(std::path::Path::new(&out)).unwrap();
+                    }
                     break;
                 };
                 let started = std::time::Instant::now();

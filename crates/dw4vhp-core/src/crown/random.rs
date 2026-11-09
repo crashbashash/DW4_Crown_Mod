@@ -306,6 +306,8 @@ struct Donor {
     /// the source bytes never change while stages are planned.
     sequences: BTreeSet<String>,
     companions: Vec<String>,
+    /// Source contents, which key analysis plans.
+    fingerprint: [u8; 16],
 }
 
 #[derive(Clone)]
@@ -536,6 +538,7 @@ impl Randomiser {
                             rarities: rarities(&me.table, m),
                             sequences: model_sequences(&p, m)?,
                             companions: graft::companion_models(&p, None, &[m.to_string()])?,
+                            fingerprint: graft::source_fingerprint(d),
                             profile,
                         },
                     );
@@ -571,6 +574,7 @@ impl Randomiser {
                 rarities: rarities(&me.table, model),
                 sequences: model_sequences(&p, model)?,
                 companions: graft::companion_models(&p, None, &[model.to_string()])?,
+                fingerprint: graft::source_fingerprint(&source),
                 profile,
             },
         );
@@ -730,8 +734,15 @@ impl Randomiser {
         }
     }
 
+    /// Analysis may skip byte work after the choices, except in boss arenas:
+    /// boss replacement copies into the finished arena pack.
+    fn skip_bytes(&self, entry: usize) -> bool {
+        self.opts.picks_only
+            && !(self.opts.random_bosses && boss::ARENAS.iter().any(|a| a.entry == entry))
+    }
+
     fn finish_stage(&self, entry: usize, mut dst: Vec<u8>) -> Result<Vec<u8>> {
-        if self.opts.picks_only {
+        if self.skip_bytes(entry) {
             return Ok(dst);
         }
         if super::encounters::ranged_stage(entry)
@@ -785,6 +796,7 @@ impl Randomiser {
             return Ok(dst);
         };
         let _timing = crate::profiling::measure("random.plan_stage");
+        let skip_bytes = self.skip_bytes(entry);
         let _stage_timing = crate::profiling::measure_owned(format!(
             "stage.{entry}.tier.{}",
             tier.unwrap_or(entry)
@@ -923,6 +935,16 @@ impl Randomiser {
         );
         let mut imports = Vec::new();
         let (mut added, mut tried) = (0, 0);
+        // Picks for stages whose bytes nothing later reads are planned against a
+        // summary of the pack instead of real copies. DW4_VIRTUAL_CHECK=1 also runs
+        // the real copies and stops at the first disagreement.
+        let virtual_only = self.skip_bytes(entry);
+        let check = virtual_only && env::var_os("DW4_VIRTUAL_CHECK").is_some();
+        let mut virt = if virtual_only {
+            Some(graft::VirtualDestination::new(&Pack::parse(&dst)?)?)
+        } else {
+            None
+        };
         for (m, own_scene) in candidates {
             // Off-platform stages have a restricted ranged pool: exhaust the
             // shuffled candidates before retaining natives after failed grafts.
@@ -935,7 +957,20 @@ impl Randomiser {
             if pool.iter().any(|(model, _, _)| model == m) {
                 continue;
             }
-            if let Some(why) = donor.profile.misfit(&Pack::parse(&dst)?) {
+            let why = match &virt {
+                Some(v) if !check => donor.profile.misfit_in(v),
+                _ => {
+                    let why = donor.profile.misfit(&Pack::parse(&dst)?);
+                    if let Some(v) = &virt {
+                        need(
+                            donor.profile.misfit_in(v) == why,
+                            &format!("virtual misfit differs: stage {entry} {m}"),
+                        )?;
+                    }
+                    why
+                }
+            };
+            if let Some(why) = why {
                 self.log
                     .push(format!("stage {entry}: {m} does not fit: {why}"));
                 continue;
@@ -959,6 +994,56 @@ impl Randomiser {
                 continue;
             }
             tried += 1;
+            if let Some(v) = virt.as_mut() {
+                let missing = donor.profile.missing_in(&*v);
+                let outcome = graft::virtual_graft(
+                    v,
+                    (donor.fingerprint, data(donor.source)?),
+                    &[m.to_string()],
+                    &missing,
+                );
+                if !check {
+                    match outcome {
+                        Ok(_) => {
+                            self.stats.copied += 1;
+                            self.stats
+                                .trace
+                                .push(format!("copy {entry} {m} {}", donor.source));
+                            imports.push((m, own_scene));
+                            pool.push((m.to_string(), donor.ram, donor.rarities.clone()));
+                            added += 1;
+                            self.log.push(format!(
+                                "stage {entry}: + {m} from {} (pack now {} of 65535 objects)",
+                                donor.source,
+                                v.id_count()
+                            ));
+                        }
+                        Err(err) => self
+                            .log
+                            .push(format!("stage {entry}: {m} not copied: {err}")),
+                    }
+                    continue;
+                }
+                let real = Pack::parse(&dst)?.ids.len();
+                let missing_real = donor.profile.missing(&Pack::parse(&dst)?);
+                let base = if missing_real.is_empty() {
+                    dst.clone()
+                } else {
+                    add_classes(&dst, &missing_real)?
+                };
+                let expected = graft::graft(&base, data(donor.source)?, &[m.to_string()]).and_then(
+                    |(edits, _)| Ok(Pack::parse(&materialize(&base, &edits)?)?.ids.len() - real),
+                );
+                need(
+                    outcome.as_ref().ok() == expected.as_ref().ok()
+                        && outcome.is_err() == expected.is_err(),
+                    &format!(
+                        "virtual graft differs: stage {entry} {m}: virtual {:?}, real {:?}",
+                        outcome.as_ref().map_err(ToString::to_string),
+                        expected.as_ref().map_err(ToString::to_string)
+                    ),
+                )?;
+            }
             let missing = donor.profile.missing(&Pack::parse(&dst)?);
             let base = if missing.is_empty() {
                 dst.clone()
@@ -973,7 +1058,7 @@ impl Randomiser {
                             report.unattached
                         ));
                     }
-                    if !self.opts.picks_only {
+                    if !skip_bytes {
                         let sound_entry = entry - 1;
                         let current = self
                             .sounds
@@ -1021,7 +1106,15 @@ impl Randomiser {
         let model_pack = Pack::parse(&dst)?;
         let entrances = pool
             .iter()
-            .map(|(model, _, _)| Ok((model.clone(), model_sequences(&model_pack, model)?)))
+            .map(|(model, _, _)| {
+                // A copied model carries its source's sequence records unchanged.
+                let imported = imports.iter().find(|(m, _)| *m == model.as_str());
+                let sequences = match imported {
+                    Some(key) if virt.is_some() && !check => self.donors[key].sequences.clone(),
+                    _ => model_sequences(&model_pack, model)?,
+                };
+                Ok((model.clone(), sequences))
+            })
             .collect::<Result<BTreeMap<_, _>>>()?;
 
         // This difficulty decides its own generators and scripted targets.
@@ -1346,7 +1439,7 @@ impl Randomiser {
         // Candidate imports make selection independent of how many generators
         // eventually use each family. Rebuild without unused candidates: even
         // unreachable objects are allocated by the game's IGB loader.
-        if self.opts.picks_only {
+        if skip_bytes {
             // Record the retained imports as the rebuild below does.
             if imports
                 .iter()
@@ -1402,7 +1495,7 @@ impl Randomiser {
             self.sounds.insert(entry - 1, sounds);
         }
         let assigned: BTreeSet<_> = choice.values().cloned().collect();
-        for model in assigned.iter().filter(|_| !self.opts.picks_only) {
+        for model in assigned.iter().filter(|_| !skip_bytes) {
             let needed = demand.get(model).copied().unwrap_or(0);
             let old = super::capacity::slots(&Pack::parse(&dst)?, model)?;
             if needed > old {
@@ -1476,7 +1569,7 @@ impl Randomiser {
                 } else {
                     rewards = attempt;
                 }
-                let base = if self.opts.picks_only {
+                let base = if skip_bytes {
                     0
                 } else {
                     let base =
@@ -1502,7 +1595,7 @@ impl Randomiser {
                 !summons.is_empty(),
                 &format!("stage {entry}: no compatible Pharaohmon summons"),
             )?;
-            if !self.opts.picks_only {
+            if !skip_bytes {
                 dst = super::pharaoh::rewrite(&dst, &summons, entry)?;
             }
             self.log.push(format!(
@@ -1517,7 +1610,7 @@ impl Randomiser {
             self.rewards.insert(entry, rewards);
         }
         // Everything below until the statistics edits only bytes for choices already made.
-        if !self.opts.picks_only {
+        if !skip_bytes {
             if assigned.contains(super::height::MODEL)
                 && !stage.residents.contains_key(super::height::MODEL)
             {
