@@ -2,6 +2,10 @@ name: Release Windows
 
 on:
   workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
 
 permissions:
   # Build-only reusable workflow; the caller publishes both platforms together.
@@ -23,8 +27,17 @@ jobs:
       - name: Prepare version-checked release notes
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: node tools/release-notes.mjs --tag "$env:RELEASE_TAG" --output release-notes.md
+      - name: Verify application source matches the release tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          git fetch --depth 1 origin "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Release tag was not found" }
+          git diff --exit-code FETCH_HEAD -- crates src public Cargo.toml Cargo.lock package.json package-lock.json
+          if ($LASTEXITCODE -ne 0) { throw "Application source differs from the release tag" }
       - name: Build the frontend and the Tauri app (MSI via the bundler)
         run: |
           npm ci
@@ -35,7 +48,7 @@ jobs:
       - name: Package Windows (zip)
         shell: pwsh
         env:
-          ASSET_VERSION: ${{ github.ref_name }}
+          ASSET_VERSION: ${{ inputs.release_tag }}
         run: |
           $version = $env:ASSET_VERSION
           $zip = "dw4-crown-mod-$version-windows-x86_64.zip"
@@ -46,7 +59,7 @@ jobs:
       - name: Package Windows (MSI name)
         shell: pwsh
         env:
-          ASSET_VERSION: ${{ github.ref_name }}
+          ASSET_VERSION: ${{ inputs.release_tag }}
         run: |
           $version = $env:ASSET_VERSION.TrimStart("v")
           # The bundler's MSI (WiX, UpgradeCode pinned in tauri.conf.json)
@@ -61,7 +74,7 @@ jobs:
       - name: Smoke-test Windows installer and portable update routes
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           $version = $env:RELEASE_TAG.TrimStart("v")
           ./tools/test-windows-msi.ps1 -SourceRoot "$env:GITHUB_WORKSPACE" -MsiPath "dw4-crown-mod-$version-windows-x86_64.msi" -ExpectedVersion $version

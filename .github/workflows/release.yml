@@ -3,9 +3,15 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild (application source must match)
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -14,8 +20,12 @@ permissions:
 jobs:
   windows:
     uses: ./.github/workflows/release-windows.yml
+    with:
+      release_tag: ${{ inputs.tag || github.ref_name }}
   linux:
     uses: ./.github/workflows/release-linux.yml
+    with:
+      release_tag: ${{ inputs.tag || github.ref_name }}
   publish:
     name: Publish complete release
     needs: [windows, linux]
@@ -29,7 +39,7 @@ jobs:
       - uses: actions/setup-node@v4
       - name: Prepare changelog
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: node tools/release-notes.mjs --tag "$RELEASE_TAG" --output release-notes.md
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -38,7 +48,7 @@ jobs:
           path: release-assets
       - name: Verify complete download set
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           version="${RELEASE_TAG#v}"
           for file in \
@@ -52,8 +62,8 @@ jobs:
       - name: Upload complete release as draft
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          name: DW4 Crown Mod ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
+          name: DW4 Crown Mod ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
           draft: true
           prerelease: false
           body_path: release-notes.md
@@ -64,5 +74,5 @@ jobs:
       - name: Publish after every asset is uploaded
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

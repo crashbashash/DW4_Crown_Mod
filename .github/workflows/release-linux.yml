@@ -2,6 +2,10 @@ name: Release Linux
 
 on:
   workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
 
 permissions:
   # Build-only reusable workflow; the caller publishes both platforms together.
@@ -35,8 +39,14 @@ jobs:
       - uses: actions/setup-node@v4
       - name: Prepare version-checked release notes
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: node tools/release-notes.mjs --tag "$RELEASE_TAG" --output release-notes.md
+      - name: Verify application source matches the release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          git fetch --depth 1 origin "refs/tags/$RELEASE_TAG"
+          git diff --exit-code FETCH_HEAD -- crates src public Cargo.toml Cargo.lock package.json package-lock.json
       - name: Build the frontend and the Tauri app
         run: |
           npm ci
@@ -44,7 +54,7 @@ jobs:
           cargo build --release --manifest-path crates/dw4vhp-tauri/Cargo.toml --features tauri/custom-protocol --target-dir target
       - name: Package Linux (AppImage, deb, tarball)
         env:
-          ASSET_VERSION: ${{ github.ref_name }}
+          ASSET_VERSION: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           DEB_VERSION="${ASSET_VERSION#v}"

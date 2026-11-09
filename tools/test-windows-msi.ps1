@@ -100,9 +100,16 @@ try {
     $probePath = Join-Path $context.dir 'updater-route-smoke.exe'
     Copy-Item $tests[0] $probePath
     $env:CROWN_MSI_SMOKE_INSTALLED = $context.installed
-    & $probePath --exact updates::tests::packaged_msi_route_smoke --ignored --nocapture
-    if ($LASTEXITCODE -ne 0) { throw 'Packaged updater selected the wrong update route.' }
-    Remove-Item $probePath
+    $stdout = Join-Path $work "route-$($context.installed).stdout.log"
+    $stderr = Join-Path $work "route-$($context.installed).stderr.log"
+    $process = Start-Process -FilePath $probePath -ArgumentList @('--exact', 'updates::tests::packaged_msi_route_smoke', '--ignored', '--nocapture', '--color', 'never') -RedirectStandardOutput $stdout -RedirectStandardError $stderr -Wait -PassThru
+    Get-Content $stdout
+    Get-Content $stderr
+    if ($process.ExitCode -ne 0 -or (Get-Content $stdout -Raw) -notmatch 'test result: ok\. 1 passed; 0 failed') {
+      throw 'Packaged updater route probe did not execute and pass its test.'
+    }
+    Remove-Item $probePath -Force
+
   }
   @{ version = $ExpectedVersion; installedLaunch = $true; portableLaunch = $true; installedMsiRoute = $true; portableBrowserRoute = $true } |
     ConvertTo-Json | Set-Content (Join-Path $work 'result.json')

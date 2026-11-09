@@ -32,7 +32,10 @@ so Windows Installer can finish reading it after the app closes.
 
 `release.yml` calls the Windows and Linux build workflows, waits for both, checks
 all five download files, uploads them to a draft release, then publishes it. This
-keeps incomplete releases out of the update feed. Both release notes and the
+keeps incomplete releases out of the update feed. A failed packaging run can be
+restarted from the Release workflow’s manual input with the existing tag; source
+checks require the application files to match that tag, without moving it.
+Both release notes and the
 in-app changelog come from `CHANGELOG.md`, through `tools/release-notes.mjs` and
 GitHub's release body. The script requires the tag, package.json, both Rust crates
 and Tauri config to agree on the app version. No tag or release is created by
