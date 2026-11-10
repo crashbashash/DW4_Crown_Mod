@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.19.0
+
+- Tortamon can now appear as a random enemy, except in Mangrove Forest.
+- UI improvements: patching and updating now show steady progress and the current step.
+
 ## v0.18.0
 
 - Added optional dungeon boss randomisation with matching intro text. The four main world bosses remain unchanged.
