@@ -1,6 +1,7 @@
 //! Keep native language selection and Unicode glyph codes. Add donor message
-//! banks to each arena’s localized packs; difficulty-specific intro scripts use
-//! their new indexes. Original messages and databases retain their identities.
+//! banks to each arena’s and supported introduction’s localized packs;
+//! difficulty-specific intro scripts use their new indexes. Original messages
+//! and databases retain their identities.
 use super::*;
 
 type Messages = [Vec<u8>; 4];
@@ -11,6 +12,95 @@ const FONTS: [&str; 4] = [
     "DMINFOFONT02/font01/",
     "DMINFOFONT02/font02/",
 ];
+
+/// Retail information cards for importable families: model, stage and the
+/// card's four message rows. Several stages hold two cards, so the rows are
+/// explicit and checked against the stage's scripts. MR04 and MR05 use their
+/// boss-arena cards; MR01-MR03 and MarineDevimon have no retail card.
+pub(in crate::crown) const FAMILY_CARDS: &[(&str, usize, [usize; 4])] = &[
+    ("e_scum", 187, [9, 10, 11, 12]),
+    ("e_minotaru", 241, [9, 10, 11, 12]),
+    ("e_pharaoh", 257, [10, 11, 12, 13]),
+    ("e_mecha4", 319, [10, 11, 12, 13]),
+    ("e_rare", 394, [9, 10, 11, 12]),
+    ("e_mecha5", 394, [14, 15, 16, 17]),
+    ("e_goburi", 614, [13, 10, 14, 15]),
+    ("e_nume", 614, [16, 17, 18, 19]),
+    ("e_ogre", 621, [9, 10, 11, 12]),
+    ("e_cockatri", 635, [9, 10, 11, 12]),
+    ("e_mummy", 642, [9, 10, 11, 12]),
+    ("e_tyrano", 642, [13, 14, 15, 16]),
+    ("e_arachne", 649, [9, 10, 11, 12]),
+    ("e_otama", 679, [9, 10, 11, 12]),
+    ("e_geko", 679, [13, 10, 14, 15]),
+    ("e_torta", 686, [10, 11, 12, 13]),
+    ("e_infermo", 709, [9, 10, 11, 12]),
+    ("e_megadra", 709, [13, 14, 15, 16]),
+    ("e_impdra", 723, [9, 10, 11, 12]),
+];
+
+pub(in crate::crown) fn has_family_card(model: &str) -> bool {
+    FAMILY_CARDS.iter().any(|(m, _, _)| *m == model)
+}
+
+/// Whether `stage`'s introduction shows a retail card for its native `model`.
+pub(in crate::crown) fn has_intro_card(stage: usize, model: &str) -> bool {
+    FAMILY_CARDS
+        .iter()
+        .any(|(m, entry, _)| *m == model && *entry == stage)
+}
+
+fn card_destinations() -> impl Iterator<Item = usize> {
+    ARENAS
+        .iter()
+        .map(|a| a.entry)
+        .chain(INTRO_STAGES.iter().map(|s| s.model_entry))
+}
+
+fn card_constant(row: usize, line: usize) -> String {
+    format!("{}I<{row}>", FONTS[line])
+}
+
+/// Script constant renames that make an introduction show each site's
+/// selected family card from the appended bank. `sites` lists each carded
+/// site's (native family, selected family). A site whose family has no card
+/// keeps its native card. Cards can share a row (Otamamon's and Gekomon's
+/// type line); it changes only when every card using it agrees.
+pub(in crate::crown) fn intro_cards(
+    stage: usize,
+    sites: &[(&str, &str)],
+    base: usize,
+) -> Result<BTreeMap<String, String>> {
+    let mut wanted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for &(native, model) in sites {
+        let (_, _, rows) = FAMILY_CARDS
+            .iter()
+            .find(|(m, entry, _)| *m == native && *entry == stage)
+            .ok_or_else(|| bad("introduction has no native card"))?;
+        let donor = FAMILY_CARDS
+            .iter()
+            .position(|(m, _, _)| *m == model)
+            .filter(|_| model != native);
+        for (line, &row) in rows.iter().enumerate() {
+            let to = match donor {
+                Some(card) => card_constant(base + 4 * (ARENAS.len() + card) + line, line),
+                None => card_constant(row, line),
+            };
+            wanted
+                .entry(card_constant(row, line))
+                .or_default()
+                .insert(to);
+        }
+    }
+    Ok(wanted
+        .into_iter()
+        .filter(|(_, to)| to.len() == 1)
+        .filter_map(|(from, to)| {
+            let to = to.into_iter().next()?;
+            (from != to).then_some((from, to))
+        })
+        .collect())
+}
 
 fn selectors(bytes: &[u8], arena: &Arena) -> Result<[String; 4]> {
     let p = Pack::parse(bytes)?;
@@ -28,6 +118,33 @@ fn selectors(bytes: &[u8], arena: &Arena) -> Result<[String; 4]> {
         );
     }
     out.try_into().map_err(|_| bad("missing boss intro text"))
+}
+
+/// A family card must be the exact card one of its stage's scripts shows.
+fn check_family_rows(stage: &[u8], rows: [usize; 4]) -> Result<()> {
+    let p = Pack::parse(stage)?;
+    let wanted = FONTS
+        .iter()
+        .zip(rows)
+        .map(|(font, row)| format!("{font}I<{row}>"))
+        .collect::<Vec<_>>();
+    for id in 0..p.ids.len() as u32 {
+        if p.class(id, "beLuaData").is_err() {
+            continue;
+        }
+        let Some(name) = graft::name_of(&p, p.rec(id)?).and_then(|s| std::str::from_utf8(s).ok())
+        else {
+            continue;
+        };
+        let constants = lua_names::constants(script(&p, name)?)?;
+        if wanted
+            .iter()
+            .all(|w| constants.iter().any(|c| c.text == w.as_bytes()))
+        {
+            return Ok(());
+        }
+    }
+    Err(bad("family card rows are not shown by their stage"))
 }
 
 fn message_indexes(bytes: &[u8], arena: &Arena) -> Result<[usize; 4]> {
@@ -86,11 +203,15 @@ struct Language {
     entry: usize,
     offset: usize,
     size: usize,
-    messages: Messages,
     count: usize,
 }
 
-type Library = BTreeMap<usize, BTreeMap<Vec<u8>, Language>>;
+struct Library {
+    /// Each card stage's localized packs, by language file name.
+    packs: BTreeMap<usize, BTreeMap<Vec<u8>, Language>>,
+    /// The appended bank, in order: the boss arenas' cards, then [`FAMILY_CARDS`].
+    cards: Vec<BTreeMap<Vec<u8>, Messages>>,
+}
 
 fn file<'a>(iso: &'a [u8], name: &str) -> Result<(usize, &'a [u8])> {
     let (at, size) = if crate::release::detect(iso)?.is_gamecube() {
@@ -135,37 +256,37 @@ fn load(iso: &[u8], afs: &[u8], entries: &[(usize, usize)]) -> Result<Library> {
     }
     let (base, area) = file(iso, "AREA.AFS")?;
     need(area.get(..4) == Some(b"AFS\0"), "invalid boss text archive")?;
-    let mut library = BTreeMap::new();
-    for arena in ARENAS {
+    let language_pack = |entry: usize| -> Result<(usize, &[u8])> {
+        need(
+            entry < u32at(area, 4)? as usize,
+            "boss language entry outside archive",
+        )?;
+        let at = u32at(area, 8 + 8 * entry)? as usize;
+        let size = u32at(area, 12 + 8 * entry)? as usize;
+        Ok((
+            at,
+            area.get(at..at + size)
+                .ok_or_else(|| bad("boss language pack outside archive"))?,
+        ))
+    };
+    let mut packs = BTreeMap::new();
+    let stages = card_destinations()
+        .chain(FAMILY_CARDS.iter().map(|(_, entry, _)| *entry))
+        .collect::<BTreeSet<_>>();
+    for stage in stages {
         let directories = files
             .iter()
-            .filter(|(part, entry, _, _)| *part == 0 && *entry == arena.entry + 5)
+            .filter(|(part, entry, _, _)| *part == 0 && *entry == stage + 5)
             .map(|(_, _, _, path)| path)
             .collect::<BTreeSet<_>>();
         need(directories.len() == 1, "ambiguous boss text directory")?;
         let directory = *directories.first().unwrap();
-        let (at, size) = entries[arena.entry];
-        let rows = message_indexes(&afs[at..at + size], arena)?;
         let mut languages = BTreeMap::new();
         for (_, entry, name, _) in files.iter().filter(|(part, _, name, path)| {
             *part == 1 && path == directory && name.ends_with(b"_pack.igb")
         }) {
-            need(
-                *entry < u32at(area, 4)? as usize,
-                "boss language entry outside archive",
-            )?;
-            let at = u32at(area, 8 + 8 * entry)? as usize;
-            let size = u32at(area, 12 + 8 * entry)? as usize;
-            let bytes = area
-                .get(at..at + size)
-                .ok_or_else(|| bad("boss language pack outside archive"))?;
+            let (at, bytes) = language_pack(*entry)?;
             let p = Pack::parse(bytes)?;
-            let messages = rows
-                .map(|row| indexed_text(&p, row))
-                .into_iter()
-                .collect::<Result<Vec<_>>>()?
-                .try_into()
-                .map_err(|_| bad("missing boss messages"))?;
             need(
                 languages
                     .insert(
@@ -173,8 +294,7 @@ fn load(iso: &[u8], afs: &[u8], entries: &[(usize, usize)]) -> Result<Library> {
                         Language {
                             entry: *entry,
                             offset: base + at,
-                            size,
-                            messages,
+                            size: bytes.len(),
                             count: p.array(unicode_list(&p)?)?.len(),
                         },
                     )
@@ -186,9 +306,38 @@ fn load(iso: &[u8], afs: &[u8], entries: &[(usize, usize)]) -> Result<Library> {
             !languages.is_empty(),
             "missing localized boss language packs",
         )?;
-        library.insert(arena.entry, languages);
+        packs.insert(stage, languages);
     }
-    Ok(library)
+    let stage = |entry: usize| {
+        let (at, size) = entries[entry];
+        afs.get(at..at + size)
+            .ok_or_else(|| bad("card stage outside archive"))
+    };
+    let mut sources = Vec::new();
+    for arena in ARENAS {
+        sources.push((arena.entry, message_indexes(stage(arena.entry)?, arena)?));
+    }
+    for &(_, entry, rows) in FAMILY_CARDS {
+        check_family_rows(stage(entry)?, rows)?;
+        sources.push((entry, rows));
+    }
+    let mut cards = Vec::new();
+    for (entry, rows) in sources {
+        let mut texts = BTreeMap::new();
+        for (name, language) in &packs[&entry] {
+            let (_, bytes) = language_pack(language.entry)?;
+            let p = Pack::parse(bytes)?;
+            let messages = rows
+                .map(|row| indexed_text(&p, row))
+                .into_iter()
+                .collect::<Result<Vec<_>>>()?
+                .try_into()
+                .map_err(|_| bad("missing boss messages"))?;
+            texts.insert(name.clone(), messages);
+        }
+        cards.push(texts);
+    }
+    Ok(Library { packs, cards })
 }
 
 fn append_messages(bytes: &[u8], base: usize, messages: &[Messages]) -> Result<Vec<u8>> {
@@ -239,6 +388,7 @@ fn append_messages(bytes: &[u8], base: usize, messages: &[Messages]) -> Result<V
 
 fn bases(library: &Library) -> BTreeMap<usize, usize> {
     library
+        .packs
         .iter()
         .map(|(&entry, languages)| {
             (
@@ -249,7 +399,7 @@ fn bases(library: &Library) -> BTreeMap<usize, usize> {
         .collect()
 }
 
-pub(super) fn message_bases(
+pub(in crate::crown) fn message_bases(
     iso: &[u8],
     afs: &[u8],
     entries: &[(usize, usize)],
@@ -278,33 +428,39 @@ pub(super) fn retarget(bytes: &[u8], arena: &Arena, boss: &str, base: usize) -> 
     )
 }
 
+/// Append the card bank to the localized packs of `stages`.
 pub(in crate::crown) fn build(
     iso: &[u8],
     afs: &[u8],
     entries: &[(usize, usize)],
     rewards: &super::super::rewards::Plan,
     table: &EnemyTable,
+    stages: &BTreeSet<usize>,
 ) -> Result<Vec<u8>> {
     let library = load(iso, afs, entries)?;
     let bases = bases(&library);
     let (offset, area) = file(iso, "AREA.AFS")?;
     let balanced = rewards.balanced_copy(iso, offset, area.len(), table)?;
     let mut replacements = BTreeMap::new();
-    for arena in ARENAS {
-        for (language, destination) in &library[&arena.entry] {
-            let messages = ARENAS
+    for stage in stages {
+        let languages = library
+            .packs
+            .get(stage)
+            .ok_or_else(|| bad("stage has no supported intro card"))?;
+        for (language, destination) in languages {
+            let messages = library
+                .cards
                 .iter()
-                .map(|donor| {
-                    library[&donor.entry]
-                        .get(language)
-                        .map(|lang| lang.messages.clone())
+                .map(|card| {
+                    card.get(language)
+                        .cloned()
                         .ok_or_else(|| bad("missing donor boss translation"))
                 })
                 .collect::<Result<Vec<_>>>()?;
             let at = destination.offset - offset;
             let bytes = append_messages(
                 &balanced[at..at + destination.size],
-                bases[&arena.entry],
+                bases[stage],
                 &messages,
             )?;
             need(
@@ -358,6 +514,51 @@ pub(in crate::crown) fn build(
     Ok(output)
 }
 
+/// Check a rebuilt AREA archive: each (stage, model, line, row) holds that
+/// line of the family's retail card in every language. Returns the lines checked.
+#[cfg(test)]
+pub(in crate::crown) fn verify_intro_cards(
+    iso: &[u8],
+    afs: &[u8],
+    entries: &[(usize, usize)],
+    area: &[u8],
+    lines: &[(usize, &str, usize, usize)],
+) -> Result<usize> {
+    let library = load(iso, afs, entries)?;
+    let mut checked = 0;
+    for &(stage, model, line, row) in lines {
+        let card = FAMILY_CARDS
+            .iter()
+            .position(|(m, _, _)| *m == model)
+            .ok_or_else(|| bad("introduction family has no card"))?;
+        for (language, pack) in &library.packs[&stage] {
+            let at = u32at(area, 8 + 8 * pack.entry)? as usize;
+            let len = u32at(area, 12 + 8 * pack.entry)? as usize;
+            let p = Pack::parse(&area[at..at + len])?;
+            need(
+                indexed_text(&p, row)? == library.cards[ARENAS.len() + card][language][line],
+                "introduction card differs from its family",
+            )?;
+            checked += 1;
+        }
+    }
+    Ok(checked)
+}
+
+/// Parse a card constant into its font line and message row.
+#[cfg(test)]
+pub(in crate::crown) fn card_line(constant: &str) -> Option<(usize, usize)> {
+    FONTS.iter().enumerate().find_map(|(line, font)| {
+        constant
+            .strip_prefix(font)?
+            .strip_prefix("I<")?
+            .strip_suffix('>')?
+            .parse()
+            .ok()
+            .map(|row| (line, row))
+    })
+}
+
 #[test]
 #[ignore]
 fn regional_boss_cards_preserve_native_glyphs_and_other_messages() {
@@ -373,16 +574,22 @@ fn regional_boss_cards_preserve_native_glyphs_and_other_messages() {
         .collect::<Vec<_>>();
     let library = load(&iso, afs, &entries).unwrap();
     let bases = bases(&library);
-    let mut checked = 0;
-    for arena in ARENAS {
-        for (language, destination) in &library[&arena.entry] {
-            let messages = ARENAS
+    assert_eq!(library.cards.len(), ARENAS.len() + FAMILY_CARDS.len());
+    let (mut checked, mut intros) = (0, 0);
+    for stage in card_destinations().collect::<BTreeSet<_>>() {
+        let (at, size) = entries[stage];
+        let model = &afs[at..at + size];
+        let arena = ARENAS.iter().find(|a| a.entry == stage);
+        let intro = INTRO_STAGES.iter().find(|s| s.model_entry == stage);
+        for (language, destination) in &library.packs[&stage] {
+            let messages = library
+                .cards
                 .iter()
-                .map(|donor| library[&donor.entry][language].messages.clone())
+                .map(|card| card[language].clone())
                 .collect::<Vec<_>>();
             let output = append_messages(
                 &iso[destination.offset..destination.offset + destination.size],
-                bases[&arena.entry],
+                bases[&stage],
                 &messages,
             )
             .unwrap();
@@ -390,27 +597,68 @@ fn regional_boss_cards_preserve_native_glyphs_and_other_messages() {
             for (index, text) in messages.iter().enumerate() {
                 for (line, message) in text.iter().enumerate() {
                     assert_eq!(
-                        indexed_text(&p, bases[&arena.entry] + 4 * index + line).unwrap(),
+                        indexed_text(&p, bases[&stage] + 4 * index + line).unwrap(),
                         *message
                     );
                 }
-                let (at, size) = entries[arena.entry];
-                let script = retarget(
-                    &afs[at..at + size],
-                    arena,
-                    ARENAS[index].model,
-                    bases[&arena.entry],
-                )
-                .unwrap();
-                assert_eq!(
-                    message_indexes(&script, arena).unwrap(),
-                    std::array::from_fn(|i| bases[&arena.entry] + 4 * index + i)
-                );
-                checked += 1;
+                let expected = std::array::from_fn(|i| bases[&stage] + 4 * index + i);
+                if let (Some(arena), Some(donor)) = (arena, ARENAS.get(index)) {
+                    let script = retarget(model, arena, donor.model, bases[&stage]).unwrap();
+                    assert_eq!(message_indexes(&script, arena).unwrap(), expected);
+                    checked += 1;
+                }
+                let Some((intro, card)) = intro.zip(index.checked_sub(ARENAS.len())) else {
+                    continue;
+                };
+                for &(_, native) in intro.sites {
+                    let (_, _, rows) = FAMILY_CARDS
+                        .iter()
+                        .find(|(m, entry, _)| *m == native && *entry == stage)
+                        .expect("every supported introduction shows a retail card");
+                    let others = intro
+                        .sites
+                        .iter()
+                        .filter(|(_, m)| *m != native)
+                        .map(|(_, m)| (*m, *m));
+                    let picks = std::iter::once((native, FAMILY_CARDS[card].0))
+                        .chain(others)
+                        .collect::<Vec<_>>();
+                    let names = intro_cards(stage, &picks, bases[&stage]).unwrap();
+                    if !names.is_empty() {
+                        let edits =
+                            lua_names::rename_in_pack(model, &[intro.script.to_string()], &names)
+                                .unwrap();
+                        let renamed = materialize(model, &edits).unwrap();
+                        let constants = lua_names::constants(
+                            script(&Pack::parse(&renamed).unwrap(), intro.script).unwrap(),
+                        )
+                        .unwrap();
+                        for to in names.values() {
+                            assert!(constants.iter().any(|c| c.text == to.as_bytes()));
+                        }
+                    }
+                    for (line, &row) in rows.iter().enumerate() {
+                        let shared = picks.iter().skip(1).any(|(other, _)| {
+                            FAMILY_CARDS.iter().any(|(m, entry, r)| {
+                                m == other && *entry == stage && r[line] == row
+                            })
+                        });
+                        let from = card_constant(row, line);
+                        if FAMILY_CARDS[card].0 == native {
+                            assert!(!names.contains_key(&from));
+                        } else if shared {
+                            assert!(!names.contains_key(&from), "shared card row changed");
+                        } else {
+                            assert_eq!(names[&from], card_constant(expected[line], line));
+                        }
+                    }
+                    intros += 1;
+                }
             }
         }
     }
     eprintln!("REGIONAL BOSS CARDS: {checked} arena/donor/language combinations preserve native glyph bytes and all unrelated stage messages");
+    eprintln!("REGIONAL INTRO CARDS: {intros} introduction/family/language combinations select the appended family card");
 }
 #[cfg(all(test, feature = "devtools"))]
 pub(in crate::crown::random) fn archive(iso: &[u8]) -> Result<&[u8]> {
@@ -588,12 +836,12 @@ pub(in crate::crown::random) fn verify_image(
             )?;
             let (_, area) = file(written, "AREA.AFS")?;
             let rows = message_indexes(bytes, arena)?;
-            let donor = ARENAS.iter().find(|a| a.model == boss).unwrap();
-            for (language, original) in &library[&arena.entry] {
+            let donor = ARENAS.iter().position(|a| a.model == boss).unwrap();
+            for (language, original) in &library.packs[&arena.entry] {
                 let at = u32at(area, 8 + 8 * original.entry)? as usize;
                 let len = u32at(area, 12 + 8 * original.entry)? as usize;
                 let p = Pack::parse(&area[at..at + len])?;
-                let expected = &library[&donor.entry][language].messages;
+                let expected = &library.cards[donor][language];
                 for (row, text) in rows.into_iter().zip(expected) {
                     need(
                         indexed_text(&p, row)? == *text,

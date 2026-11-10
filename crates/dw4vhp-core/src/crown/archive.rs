@@ -110,13 +110,14 @@ pub(crate) fn rebuild_afs(
     let mut random = match random {
         Some(options) => {
             let layout = crate::release::detect(iso)?.layout_in(iso)?;
-            let random = random::Randomiser::scan(
+            let mut random = random::Randomiser::scan(
                 afs,
                 &entries,
                 crate::table::EnemyTable::read(iso, &layout)?,
                 options,
             )?;
             random.validate_tiers(iso)?;
+            random.card_bases = random::boss::intro::message_bases(iso, afs, &entries)?;
             Some(random)
         }
         None => None,
@@ -421,16 +422,22 @@ pub(crate) fn rebuild_afs(
         .as_mut()
         .map(|r| std::mem::take(&mut r.extra))
         .unwrap_or_default();
-    let area = if let Some(r) = random.as_ref().filter(|r| r.opts.random_bosses) {
-        Some(random::boss::intro::build(
-            iso,
-            afs,
-            &entries,
-            &rewards,
-            final_table.unwrap_or(&r.table),
-        )?)
-    } else {
-        None
+    let area = match random.as_ref() {
+        Some(r) if r.opts.random_bosses || !r.card_stages.is_empty() => {
+            let mut stages = r.card_stages.clone();
+            if r.opts.random_bosses {
+                stages.extend(random::boss::ARENAS.iter().map(|a| a.entry));
+            }
+            Some(random::boss::intro::build(
+                iso,
+                afs,
+                &entries,
+                &rewards,
+                final_table.unwrap_or(&r.table),
+                &stages,
+            )?)
+        }
+        _ => None,
     };
     let expanded_count = count + 2 * extra.len();
     let difficulty = !extra.is_empty();

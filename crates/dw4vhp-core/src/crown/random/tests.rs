@@ -1,5 +1,34 @@
 use super::*;
 
+/// Families the tier's unprotected, non-introduction generators finally use.
+fn previewed_families(
+    r: &Randomiser,
+    entry: usize,
+    pack: usize,
+    native: &[u8],
+) -> BTreeSet<&'static str> {
+    let stage = &r.stages[&entry];
+    let sites = INTRO_STAGES
+        .iter()
+        .filter(|s| s.model_entry == entry)
+        .flat_map(|s| s.sites.iter().map(|(name, _)| *name))
+        .collect::<BTreeSet<_>>();
+    generators(&Pack::parse(native).unwrap())
+        .unwrap()
+        .into_iter()
+        .filter(|g| !stage.pinned.contains(&g.name) && !sites.contains(g.name.as_str()))
+        .filter_map(|g| {
+            family(
+                r.plans
+                    .get(&pack)
+                    .and_then(|p| p.rows.get(&g.name))
+                    .copied()
+                    .unwrap_or(g.row),
+            )
+        })
+        .collect()
+}
+
 fn table() -> EnemyTable {
     let rows = 650;
     let mut t = EnemyTable {
@@ -337,15 +366,10 @@ fn mangrove_randomises_intro_and_boss_waves_with_matching_scripts() {
                 let mut protected = BTreeSet::new();
                 for pack in [&current_pack] {
                     assert_eq!(family(r.plans[pack].rows["GENE-165"]), Some(intro_model));
-                    for (name, row) in &r.plans[pack].rows {
-                        if name != "GENE-165" {
-                            assert_ne!(
-                                family(*row),
-                                Some(intro_model),
-                                "intro cleanup must not erase patrol {name}"
-                            );
-                        }
-                    }
+                    assert!(
+                        previewed_families(&r, 686, *pack, data(*pack)).contains(intro_model),
+                        "{variable}, seed {seed}: intro {intro_model} previews no stage enemy"
+                    );
                     for &(generator, original) in MANGROVE_WAVES {
                         assert_eq!(
                             family(r.plans[pack].rows[generator]),
@@ -1017,15 +1041,10 @@ fn sukamon_intro_retargets_wait_and_control_on_every_release() {
                 assert_ne!(replacement, "e_scum", "{variable}, seed {seed}");
                 for pack in [&current_pack] {
                     assert_eq!(family(r.plans[pack].rows["GENE-01"]), Some(replacement));
-                    for (name, row) in &r.plans[pack].rows {
-                        if name != "GENE-01" {
-                            assert_ne!(
-                                family(*row),
-                                Some(replacement),
-                                "intro freeze must not affect patrol {name}"
-                            );
-                        }
-                    }
+                    assert!(
+                        previewed_families(&r, 187, *pack, data(*pack)).contains(replacement),
+                        "{variable}, seed {seed}: intro {replacement} previews no stage enemy"
+                    );
                     let source = Pack::parse(data(*pack)).unwrap();
                     let changed = r.retarget(*pack, data(*pack)).unwrap().unwrap();
                     let result = Pack::parse(&changed).unwrap();
@@ -1077,6 +1096,234 @@ fn sukamon_intro_retargets_wait_and_control_on_every_release() {
                 eprintln!("SUKAMON {variable}, seed {seed}, donors {DONORS}: intro -> {replacement}; all difficulties and boss scripts preserved");
             }
         }
+    }
+}
+
+#[test]
+fn introductions_preview_stage_families_with_their_cards() {
+    for variable in [
+        "DW4_RETAIL_USA_ISO",
+        "DW4_RETAIL_EUROPE_ISO",
+        "DW4_RETAIL_JAPAN_ISO",
+        "DW4_RETAIL_GC_USA_ISO",
+        "DW4_RETAIL_GC_JAPAN_ISO",
+    ] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect::<Vec<_>>();
+        let data = |i: usize| {
+            let (o, n) = entries[i];
+            &afs[o..o + n]
+        };
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let bases = boss::intro::message_bases(&iso, afs, &entries).unwrap();
+        let stages = INTRO_STAGES
+            .iter()
+            .map(|s| s.model_entry)
+            .collect::<Vec<_>>();
+        let (mut previews, mut exclusive, mut native, mut lines) = (0, 0, 0, 0);
+        let mut shown = BTreeMap::new();
+        for seed in [7, 67, 1520, 1278675365, 2162128323] {
+            let mut r = Randomiser::scan(
+                afs,
+                &entries,
+                EnemyTable::read(&iso, &layout).unwrap(),
+                Options {
+                    picks_only: false,
+                    seed,
+                    donors: DONORS,
+                    warp: None,
+                    only: Some(stages.clone()),
+                    random_bosses: false,
+                },
+            )
+            .unwrap();
+            r.card_bases = bases.clone();
+            let mut card_lines = Vec::new();
+            for intro in INTRO_STAGES {
+                let entry = intro.model_entry;
+                let stage = r.stages[&entry].clone();
+                let sites = intro
+                    .sites
+                    .iter()
+                    .filter(|(g, m)| {
+                        !stage.pinned.contains(*g) && !stage.pinned_families.contains(m)
+                    })
+                    .copied()
+                    .collect::<Vec<_>>();
+                if sites.is_empty() {
+                    continue;
+                }
+                let initial = materialize(data(entry), &expand(data(entry)).unwrap()).unwrap();
+                let out = r.stage(entry, initial, afs, &entries).unwrap();
+                let protected: BTreeSet<_> = generators(&Pack::parse(data(stage.gens[0])).unwrap())
+                    .unwrap()
+                    .iter()
+                    .filter(|g| stage.pinned.contains(&g.name))
+                    .filter_map(|g| family(g.row))
+                    .collect();
+                let other_scripts: BTreeSet<&str> = FAMILY_REMAPS
+                    .iter()
+                    .filter(|rule| rule.entry == entry)
+                    .flat_map(|rule| rule.scripts.iter().copied())
+                    .chain(if entry == 686 {
+                        vec!["mate00.lua", "tim_g_orbz03.lua"]
+                    } else {
+                        vec![]
+                    })
+                    .collect();
+                for &pack in &stage.gens {
+                    let mut names = BTreeMap::new();
+                    let mut picks = Vec::new();
+                    for &(site, orig) in &sites {
+                        let model = r.plans[&pack]
+                            .rows
+                            .get(site)
+                            .and_then(|row| family(*row))
+                            .unwrap_or(orig);
+                        shown
+                            .entry((entry, site))
+                            .or_insert_with(BTreeSet::new)
+                            .insert(model);
+                        if model == orig {
+                            native += 1;
+                        } else if previewed_families(&r, entry, pack, data(pack)).contains(model) {
+                            previews += 1;
+                        } else {
+                            exclusive += 1;
+                        }
+                        assert!(
+                            model == orig || !protected.contains(model),
+                            "{variable} seed {seed} stage {entry}: intro {model} shares a protected family"
+                        );
+                        if model != orig {
+                            names.insert(orig.to_string(), model.to_string());
+                        }
+                        if boss::intro::has_intro_card(entry, orig) {
+                            picks.push((orig, model));
+                        }
+                    }
+                    let cards = boss::intro::intro_cards(entry, &picks, bases[&entry]).unwrap();
+                    for (orig, model) in &picks {
+                        if orig == model || !boss::intro::has_family_card(model) {
+                            continue;
+                        }
+                        let index = boss::ARENAS.len()
+                            + boss::intro::FAMILY_CARDS
+                                .iter()
+                                .position(|(m, _, _)| m == model)
+                                .unwrap();
+                        let (_, _, rows) = boss::intro::FAMILY_CARDS
+                            .iter()
+                            .find(|(m, e, _)| m == orig && *e == entry)
+                            .unwrap();
+                        let mut changed = 0;
+                        for (line, row) in rows.iter().enumerate() {
+                            let from = format!(
+                                "{}I<{row}>",
+                                [
+                                    "DMINFOFONT01/font00/",
+                                    "DMINFOFONT02/font00/",
+                                    "DMINFOFONT02/font01/",
+                                    "DMINFOFONT02/font02/"
+                                ][line]
+                            );
+                            if let Some(to) = cards.get(&from) {
+                                let (to_line, to_row) = boss::intro::card_line(to).unwrap();
+                                assert_eq!(
+                                    (to_line, to_row),
+                                    (line, bases[&entry] + 4 * index + line)
+                                );
+                                card_lines.push((entry, *model, line, to_row));
+                                changed += 1;
+                            }
+                        }
+                        // Only a row shared with another card can stay native.
+                        assert!(
+                            changed >= 3,
+                            "{variable} seed {seed} stage {entry}: {model} card"
+                        );
+                    }
+                    if !cards.is_empty() {
+                        assert!(r.card_stages.contains(&entry));
+                    }
+                    names.extend(cards);
+                    let source = Pack::parse(data(entry)).unwrap();
+                    let bytes = r.model_for_generator(entry, pack, &out);
+                    let result = Pack::parse(bytes).unwrap();
+                    for id in 0..source.ids.len() as u32 {
+                        if source.class(id, "beLuaData").is_err()
+                            || super::super::reclaim::retired_callback(&source, &result, id)
+                        {
+                            continue;
+                        }
+                        let name = graft::name_of(&source, source.rec(id).unwrap()).unwrap();
+                        let name = std::str::from_utf8(name).unwrap();
+                        // Pharaohmon's summon callback follows the stage's selected families.
+                        if other_scripts.contains(name) || name == "cal_e_pharaoh.lua" {
+                            continue;
+                        }
+                        let text = |p: &Pack, id: u32| {
+                            let object = p.val(id, 3).unwrap();
+                            let memory = p.memory[p.val(object, 3).unwrap() as usize]
+                                .clone()
+                                .unwrap();
+                            p.b[memory][..p.val(object, 2).unwrap() as usize].to_vec()
+                        };
+                        let expected = if name == intro.script && !names.is_empty() {
+                            lua_names::rename(&text(&source, id), &names)
+                                .unwrap()
+                                .unwrap()
+                        } else {
+                            text(&source, id)
+                        };
+                        assert_eq!(
+                            text(&result, id),
+                            expected,
+                            "{variable} seed {seed} stage {entry}: {name}"
+                        );
+                    }
+                }
+            }
+            if !r.card_stages.is_empty() {
+                let area = boss::intro::build(
+                    &iso,
+                    afs,
+                    &entries,
+                    &Default::default(),
+                    &r.table,
+                    &r.card_stages,
+                )
+                .unwrap();
+                lines += boss::intro::verify_intro_cards(&iso, afs, &entries, &area, &card_lines)
+                    .unwrap();
+            }
+        }
+        assert!(
+            previews > 0,
+            "{variable}: no introduction previewed a stage family"
+        );
+        eprintln!("INTRO PREVIEW {variable}: {previews} previews, {exclusive} exclusive fallbacks, {native} native; {lines} localized card lines; shown {shown:?}");
     }
 }
 

@@ -18,7 +18,7 @@ original model's animation/controller; clearing the sequence or assigning anothe
 model loses that motion. Other generators in those stages can still randomize.
 Bosses, script-dependent generators and kill-count restrictions also apply.
 
-The current randomizer uses rules version 25. The same seed is reproducible within
+The current randomizer uses rules version 28. The same seed is reproducible within
 a rules version; older images need rebuilding to receive these fixes.
 Imports fill unused registry capacity before extending it, preserving the backing
 block while keeping empty resource entries outside the active list. This also
@@ -26,6 +26,45 @@ applies to scene children and script registries after native models are retired.
 Retirement also preserves a named scene when its draw tree contains another
 registered model. A retained action/controller alone does not keep its scene
 ancestors registered, so imported actors must remain reachable from a draw scene.
+
+## Introduction previews (rules 28)
+
+Rules 28 makes each enemy introduction preview its stage. Introductions now
+choose after patrol planning, from the compatible families the floor's other
+enemies use on that difficulty. Imports and families with a retail information
+card are preferred. Families of protected encounters, such as MR05 in Mecha Nest
+B3, are never chosen. Two introductions on one stage prefer different families.
+An otherwise unused resident is used only if no stage family fits. This
+applies to all 16 introduction sites the randomizer supports. Arukenimon's Grief
+Wasteland introduction remains native.
+
+Earlier rules kept each introduction family out of the patrols, because the
+scripts freeze, wait for and erase enemies by model name. In retail, though, every
+introduction family also patrols its own stage: the Minotaurmon floor has five
+other Minotaurmon generators, Goblin Pass has 45 Goburimon generators, and so on.
+Sharing a family therefore restores the retail arrangement.
+
+The introduction's card follows its model. Rules 28 adds 19 retail family cards
+to the AREA bank used for boss cards: the arenas' boss cards come first, then the
+family cards. Introduction scripts select the new message rows, separately for
+each difficulty. Destination card rows come from each stage's native card.
+MR01–MR03 and MarineDevimon have no retail card, so those previews keep the
+native text. Forest Entrance's Otamamon and Gekomon cards share a type-line row,
+which changes only when both introductions agree.
+
+Data checks on PS2 USA, Europe and Japan and GameCube USA and Japan covered seeds
+7, 67, 1520, 1278675365 and 2162128323 and every difficulty of the 12 introduction
+stages. They found 240 previews per release, no exclusive fallbacks, no protected
+families and exact script renames, and every changed card line matched its
+family's retail text in all language packs. Every family card was also checked
+against every introduction and language. The GameCube USA seed-1520 image (Hard)
+passed live tests at the Sukamon, Minotaurmon, Raremon, Tortamon and Goblin Pass
+introductions. They showed Kokatorimon, Goburimon, Mummymon, Sukamon and Raremon,
+each with that Digimon's card. During each introduction, only the introduction
+actor was alive. The erasing introductions removed only that actor; control
+returned afterwards. Later patrols of the previewed family spawned and moved on
+the Minotaurmon, Sukamon, Raremon and Tortamon floors. Raremon patrols were not
+reached at the three Goblin Pass generators visited. PS2 has data checks only.
 
 ## Optional dungeon bosses
 

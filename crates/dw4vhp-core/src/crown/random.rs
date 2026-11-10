@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 27;
+pub const RULES_VERSION: u32 = 28;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -157,6 +157,56 @@ fn model_sequences(p: &Pack, model: &str) -> Result<BTreeSet<String>> {
         }
     }
     Ok(sequences)
+}
+
+/// Give every generator of `group` a local variant row on each difficulty, or
+/// leave the plans and rewards unchanged if any of them has no free row.
+fn commit_group(
+    table: &EnemyTable,
+    plans: &mut BTreeMap<usize, Retarget>,
+    rewards: &mut super::rewards::StageRewards,
+    tiers: &[(usize, Vec<Gen>)],
+    choice: &BTreeMap<String, String>,
+    group: &[String],
+) -> bool {
+    let mut attempt = rewards.clone();
+    let mut selected = Vec::new();
+    for name in group {
+        let model = &choice[name];
+        for (pack, gs) in tiers {
+            let Some(g) = gs.iter().find(|g| g.name == *name) else {
+                continue;
+            };
+            let Some(combat) = nearest_row(table, g.row, model) else {
+                return false;
+            };
+            let Some(target) = attempt.assign(combat as usize, g.row as usize) else {
+                return false;
+            };
+            attempt
+                .targets
+                .entry(*pack)
+                .or_default()
+                .insert(name.clone(), target as u32);
+            selected.push((*pack, name.clone(), combat));
+        }
+    }
+    *rewards = attempt;
+    for (pack, name, combat) in selected {
+        let model = &choice[&name];
+        let plan = plans.get_mut(&pack).unwrap();
+        plan.rows.insert(name.clone(), combat);
+        // Native SQ_NENTR keeps SQ_SWON on the normal combat
+        // branch instead of seeking donor-stage healing positions.
+        if model == "e_minotaru" {
+            plan.sequences.insert(name, "SQ_NENTR".into());
+        } else if matches!(model.as_str(), "e_pharaoh" | "e_arachne") {
+            // Use each model's real activation. Pharaohmon's NENTR
+            // omits CHECK; Arukenimon only provides SQ_ENTR.
+            plan.sequences.insert(name, "SQ_ENTR".into());
+        }
+    }
+    true
 }
 
 /// Each tier lists (original family, selected family, maximum live count).
@@ -338,6 +388,10 @@ pub(super) struct Randomiser {
     stats: Stats,
     boss_summary: Option<serde_json::Value>,
     pub(super) boss_report: Option<serde_json::Value>,
+    /// First appended message row of each card stage's localized packs.
+    pub(super) card_bases: BTreeMap<usize, usize>,
+    /// Stages whose introductions show an appended family card.
+    pub(super) card_stages: BTreeSet<usize>,
 }
 
 /// What the randomiser did, for the image signature.
@@ -437,6 +491,8 @@ impl Randomiser {
             stats: Stats::default(),
             boss_summary: None,
             boss_report: None,
+            card_bases: BTreeMap::new(),
+            card_stages: BTreeSet::new(),
         };
         let data = |e: usize| entries.get(e).and_then(|&(o, l)| afs.get(o..o + l));
         for (e, &(_, len)) in entries.iter().enumerate() {
@@ -1170,34 +1226,6 @@ impl Randomiser {
                 other
             }
         };
-        for &(gen, orig) in &sites {
-            let Some(g) = first.iter().find(|g| g.name == gen) else {
-                continue;
-            };
-            // Exclusive introduction/cleanup actors cannot share a patrol
-            // family. Use a compatible resident for that necessary scripted
-            // role, leaving all four imports available to ordinary encounters.
-            let residents = pool
-                .iter()
-                .filter(|(model, _, _)| stage.residents.contains_key(model))
-                .filter(|(model, _, _)| {
-                    model == orig
-                        || !first.iter().any(|other| {
-                            stage.pinned.contains(&other.name)
-                                && family(other.row) == Some(model.as_str())
-                        })
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            let options = eligible(g, &residents, &reserved);
-            if options.is_empty() {
-                continue;
-            }
-            let pick = options[(rng.next() % options.len() as u64) as usize].clone();
-            reserved.insert(pick.clone());
-            choice.insert(gen.to_string(), pick.clone());
-            names.insert(orig.to_string(), pick);
-        }
         if let Some(rule) = family_remap {
             for &original in rule.models {
                 let members: Vec<_> = first
@@ -1245,7 +1273,11 @@ impl Randomiser {
         let mut why: BTreeMap<String, usize> = BTreeMap::new();
         let mut slots = Vec::new();
         for g in &first {
-            if choice.contains_key(&g.name) || stage.pinned.contains(&g.name) {
+            // Introductions choose after the patrols, from the families they use.
+            if choice.contains_key(&g.name)
+                || stage.pinned.contains(&g.name)
+                || sites.iter().any(|(name, _)| *name == g.name)
+            {
                 *why.entry("pinned or site".into()).or_default() += 1;
                 continue;
             }
@@ -1360,60 +1392,136 @@ impl Randomiser {
                 .map(|name| vec![name.clone()]),
         );
         for group in groups {
-            let mut attempt = rewards.clone();
-            let mut selected = Vec::new();
-            let mut fits = true;
-            'members: for name in &group {
-                let model = &choice[name];
-                for (pack, gs) in &tiers {
-                    let Some(g) = gs.iter().find(|g| g.name == *name) else {
-                        continue;
-                    };
-                    let Some(combat) = nearest_row(&self.table, g.row, model) else {
-                        fits = false;
-                        break 'members;
-                    };
-                    let Some(target) = attempt.assign(combat as usize, g.row as usize) else {
-                        fits = false;
-                        break 'members;
-                    };
-                    attempt
-                        .targets
-                        .entry(*pack)
-                        .or_default()
-                        .insert(name.clone(), target as u32);
-                    selected.push((*pack, name.clone(), combat));
-                }
-            }
-            if fits {
-                rewards = attempt;
-                for (pack, name, combat) in selected {
-                    let model = &choice[&name];
-                    let plan = self.plans.get_mut(&pack).unwrap();
-                    plan.rows.insert(name.clone(), combat);
-                    // Native SQ_NENTR keeps SQ_SWON on the normal combat
-                    // branch instead of seeking donor-stage healing positions.
-                    if model == "e_minotaru" {
-                        plan.sequences.insert(name, "SQ_NENTR".into());
-                    } else if matches!(model.as_str(), "e_pharaoh" | "e_arachne") {
-                        // Use each model's real activation. Pharaohmon's NENTR
-                        // omits CHECK; Arukenimon only provides SQ_ENTR.
-                        plan.sequences.insert(name, "SQ_ENTR".into());
-                    }
-                }
-            } else {
+            if !commit_group(
+                &self.table,
+                &mut self.plans,
+                &mut rewards,
+                &tiers,
+                &choice,
+                &group,
+            ) {
                 for name in group {
                     choice.remove(&name);
-                    for &(gen, original) in &sites {
-                        if gen == name {
-                            names.remove(original);
-                        }
-                    }
                     self.log.push(format!(
                         "stage {entry}: retain {name}; local variants unavailable"
                     ));
                 }
             }
+        }
+        // Introductions preview the finished stage: each shows a family its
+        // enemies use on this difficulty, preferring imports and families
+        // with a retail card. Protected encounters' families stay outside the
+        // reach of the introduction's model-wide freeze and cleanup commands.
+        let protected: BTreeSet<&str> = first
+            .iter()
+            .filter(|g| stage.pinned.contains(&g.name))
+            .filter_map(|g| family(g.row))
+            .collect();
+        let enemies: BTreeSet<String> = first
+            .iter()
+            .filter(|g| {
+                !stage.pinned.contains(&g.name) && !sites.iter().any(|(name, _)| *name == g.name)
+            })
+            .filter_map(|g| {
+                choice
+                    .get(&g.name)
+                    .cloned()
+                    .or_else(|| family(g.row).map(str::to_string))
+            })
+            .collect();
+        let carded = |orig: &str| {
+            self.card_bases.contains_key(&entry) && boss::intro::has_intro_card(entry, orig)
+        };
+        let mut shown = BTreeSet::new();
+        for &(gen, orig) in &sites {
+            let Some(g) = first.iter().find(|g| g.name == gen) else {
+                continue;
+            };
+            let candidates = |imported: bool, used: bool| {
+                pool.iter()
+                    .filter(|(m, _, _)| stage.residents.contains_key(m) != imported)
+                    .filter(|(m, _, _)| enemies.contains(m) == used)
+                    .filter(|(m, _, _)| m == orig || !protected.contains(m.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let imports = eligible(g, &candidates(true, true), &reserved);
+            let natives = eligible(g, &candidates(false, true), &reserved);
+            let has_card =
+                |m: &String| m == orig || (carded(orig) && boss::intro::has_family_card(m));
+            let mut order = Vec::new();
+            for (list, card) in [
+                (&imports, true),
+                (&natives, true),
+                (&imports, false),
+                (&natives, false),
+            ] {
+                let mut tier: Vec<String> = list
+                    .iter()
+                    .filter(|m| has_card(m) == card)
+                    .cloned()
+                    .collect();
+                rng.shuffle(&mut tier);
+                // Two introductions on one stage preview different families when they can.
+                tier.sort_by_key(|m| shown.contains(m));
+                order.extend(tier);
+            }
+            // Without a compatible stage family, an exclusive resident the
+            // stage's enemies do not use keeps the introduction randomised.
+            let mut spare = eligible(g, &candidates(false, false), &reserved);
+            rng.shuffle(&mut spare);
+            order.extend(spare);
+            for pick in order {
+                choice.insert(gen.to_string(), pick.clone());
+                let group = [gen.to_string()];
+                if commit_group(
+                    &self.table,
+                    &mut self.plans,
+                    &mut rewards,
+                    &tiers,
+                    &choice,
+                    &group,
+                ) {
+                    let preview = enemies.contains(&pick);
+                    shown.insert(pick.clone());
+                    if !preview {
+                        reserved.insert(pick.clone());
+                    }
+                    if pick != orig {
+                        names.insert(orig.to_string(), pick.clone());
+                    }
+                    self.log.push(format!(
+                        "stage {entry}: intro {gen} {} {pick}",
+                        if preview {
+                            "previews"
+                        } else {
+                            "uses exclusive"
+                        }
+                    ));
+                    break;
+                }
+                choice.remove(gen);
+            }
+            if !choice.contains_key(gen) {
+                self.log
+                    .push(format!("stage {entry}: retain native intro {gen}"));
+            }
+        }
+        // Introduction cards follow their models when retail text exists.
+        let picks = sites
+            .iter()
+            .filter(|(_, orig)| carded(orig))
+            .map(|&(gen, orig)| (orig, choice.get(gen).map_or(orig, String::as_str)))
+            .collect::<Vec<_>>();
+        let cards = match self.card_bases.get(&entry) {
+            Some(&base) if !picks.is_empty() => boss::intro::intro_cards(entry, &picks, base)?,
+            _ => BTreeMap::new(),
+        };
+        if !cards.is_empty() {
+            self.card_stages.insert(entry);
+            self.stats
+                .trace
+                .push(format!("intro-cards {entry} {picks:?}"));
         }
         // A model pool belongs to the stage, not to an individual generator.
         // Sum the largest authored party count for every user of that model,
@@ -1642,6 +1750,8 @@ impl Randomiser {
                 )?;
             }
             if let Some(intro) = intro {
+                let mut names = names.clone();
+                names.extend(cards);
                 if !names.is_empty() {
                     let more =
                         lua_names::rename_in_pack(&dst, &[intro.script.to_string()], &names)?;

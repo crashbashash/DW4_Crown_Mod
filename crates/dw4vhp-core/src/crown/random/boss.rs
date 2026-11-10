@@ -5,8 +5,8 @@ use serde_json::json;
 #[path = "boss_intro.rs"]
 pub(in crate::crown) mod intro;
 
-pub(super) struct Arena {
-    pub(super) entry: usize,
+pub(in crate::crown) struct Arena {
+    pub(in crate::crown) entry: usize,
     pub(super) model: &'static str,
     pub(super) generator: &'static str,
     pub(super) intro: &'static str,
@@ -14,7 +14,7 @@ pub(super) struct Arena {
     pub(super) name: &'static str,
 }
 
-pub(super) const ARENAS: &[Arena] = &[
+pub(in crate::crown) const ARENAS: &[Arena] = &[
     Arena {
         entry: 187,
         floors: &[179, 187],
