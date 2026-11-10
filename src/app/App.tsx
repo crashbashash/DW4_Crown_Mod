@@ -67,6 +67,7 @@ function AppInner() {
   }, []);
   const disc = useDisc(backend, { fourPlayerSpawns, crownDrops, crownMod }, applyDetectedOptions);
   const replaceDiscStatus = disc.replaceStatus;
+  const renameInput = disc.renameInput;
   const wide = useMediaQuery("(min-width: 900px)");
 
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -107,14 +108,20 @@ function AppInner() {
       }),
     );
     ups.push(
-      backend.onPatchDone(() => {
+      backend.onPatchDone((outcome) => {
+        const updated = pendingModUpdate.current;
+        pendingModUpdate.current = null;
+        // An updated image named after its seed was renamed to the new seed.
+        const path = updated && outcome.renamed ? outcome.renamed : null;
+        if (updated && path !== null) {
+          renameInput(updated.path, path);
+          outputRef.current = path;
+        }
         setPatchProgress(100);
         setDonePopup(outputRef.current ?? "");
         setBusy(false);
-        const updated = pendingModUpdate.current;
-        pendingModUpdate.current = null;
         if (updated) {
-          void backend.analyze(updated.path, updated.selection).catch((error: unknown): DiscStatus => ({
+          void backend.analyze(path ?? updated.path, updated.selection).catch((error: unknown): DiscStatus => ({
             kind: "unknown", text: String(error), size: 0, outputSize: 0, copies: null,
           })).then(status => {
             replaceDiscStatus(updated.status, status);
@@ -133,7 +140,7 @@ function AppInner() {
     return () => {
       for (const up of ups) void up.then((unlisten) => unlisten());
     };
-  }, [backend, replaceDiscStatus]);
+  }, [backend, replaceDiscStatus, renameInput]);
 
   // An ISO dropped onto the window is a chosen disc.
   useEffect(() => {

@@ -105,6 +105,9 @@ pub struct PatchDonePayload {
     md5: String,
     bytes: u64,
     summary: PlanSummaryPayload,
+    /// The image's new path when an in-place update renamed it to its new seed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    renamed: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -419,6 +422,7 @@ pub async fn start_patch(
                         md5: outcome.md5,
                         bytes: outcome.bytes,
                         summary: PlanSummaryPayload::of(&outcome.summary),
+                        renamed: None,
                     },
                 );
             }
@@ -451,12 +455,21 @@ pub async fn update_mod(selection: PatchSelection, app: AppHandle) -> Result<(),
         });
         match result {
             Ok(outcome) => {
+                let renamed = rename_to_seed(&input, &plan);
+                if let Some(path) = &renamed {
+                    let state = app.state::<AppState>();
+                    let mut stored = state.input.lock().expect("input lock");
+                    if stored.as_deref() == Some(input.as_path()) {
+                        *stored = Some(path.clone());
+                    }
+                }
                 let _ = app.emit(
                     "patch-done",
                     PatchDonePayload {
                         md5: outcome.md5,
                         bytes: outcome.bytes,
                         summary: PlanSummaryPayload::of(&outcome.summary),
+                        renamed: renamed.map(|path| path.display().to_string()),
                     },
                 );
             }
@@ -468,6 +481,45 @@ pub async fn update_mod(selection: PatchSelection, app: AppHandle) -> Result<(),
     .await
     .map_err(|e| format!("update worker failed: {e}"))?;
     Ok(())
+}
+
+/// The image's name with its `[Seed N]` tag following `seed`, or removed when
+/// the image no longer has random enemies. `None` when the name has no tag or
+/// already matches.
+fn seeded_path(path: &std::path::Path, seed: Option<u32>) -> Option<std::path::PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let stem_end = name.rfind('.').filter(|&dot| dot > 0).unwrap_or(name.len());
+    let (stem, extension) = name.split_at(stem_end);
+    let mut search = stem;
+    let (start, end) = loop {
+        let start = search.rfind(" [Seed ")?;
+        let digits = &search[start + " [Seed ".len()..];
+        let len = digits.bytes().take_while(u8::is_ascii_digit).count();
+        if len > 0 && digits[len..].starts_with(']') {
+            break (start, start + " [Seed ".len() + len + 1);
+        }
+        search = &search[..start];
+    };
+    let tag = seed
+        .map(|seed| format!(" [Seed {seed}]"))
+        .unwrap_or_default();
+    let renamed = format!("{}{tag}{}{extension}", &stem[..start], &stem[end..]);
+    (renamed != name).then(|| path.with_file_name(renamed))
+}
+
+/// Renames an updated image whose name carries a seed so the name matches the
+/// seed now inside it. An existing file at the new name is never replaced.
+fn rename_to_seed(path: &std::path::Path, plan: &PatchPlan) -> Option<std::path::PathBuf> {
+    let seed = match (plan.random_enemies, plan.enemy_seed) {
+        (false, _) => None,
+        (true, Some(seed)) => Some(seed),
+        (true, None) => return None,
+    };
+    let target = seeded_path(path, seed)?;
+    if target.try_exists().unwrap_or(true) {
+        return None;
+    }
+    std::fs::rename(path, &target).ok().map(|()| target)
 }
 
 fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
@@ -515,6 +567,54 @@ mod tests {
                 .ends_with(OUTPUT_MARKER));
             assert_ne!(output, input);
         }
+    }
+
+    #[test]
+    fn an_updated_image_name_follows_its_new_seed() {
+        use std::path::{Path, PathBuf};
+        let renamed =
+            |name: &str, seed| seeded_path(Path::new("/games").join(name).as_path(), seed);
+        let at = |name: &str| Some(PathBuf::from("/games").join(name));
+        assert_eq!(
+            renamed("game [CrownMod] [Seed 1234].iso", Some(99)),
+            at("game [CrownMod] [Seed 99].iso")
+        );
+        assert_eq!(
+            renamed("game [Seed 1234] (copy).rvz", Some(7)),
+            at("game [Seed 7] (copy).rvz")
+        );
+        assert_eq!(
+            renamed("game [CrownMod] [Seed 1234].iso", None),
+            at("game [CrownMod].iso")
+        );
+        assert_eq!(
+            renamed("game [Seed 1] [Seed x].iso", Some(2)),
+            at("game [Seed 2] [Seed x].iso")
+        );
+        assert_eq!(renamed("game [Seed 5]", Some(6)), at("game [Seed 6]"));
+        assert_eq!(renamed("game [CrownMod] [Seed 1234].iso", Some(1234)), None);
+        assert_eq!(renamed("game [CrownMod].iso", Some(1)), None);
+        assert_eq!(renamed("game [Seed ].iso", Some(1)), None);
+    }
+
+    #[test]
+    fn renaming_to_the_new_seed_never_replaces_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("game [CrownMod] [Seed 1].iso");
+        std::fs::write(&input, b"image").unwrap();
+        let plan = |seed| PatchPlan {
+            random_enemies: true,
+            enemy_seed: Some(seed),
+            ..PatchPlan::default()
+        };
+        let taken = dir.path().join("game [CrownMod] [Seed 2].iso");
+        std::fs::write(&taken, b"other").unwrap();
+        assert_eq!(rename_to_seed(&input, &plan(2)), None);
+        assert_eq!(std::fs::read(&taken).unwrap(), b"other");
+        let target = dir.path().join("game [CrownMod] [Seed 3].iso");
+        assert_eq!(rename_to_seed(&input, &plan(3)), Some(target.clone()));
+        assert!(!input.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), b"image");
     }
 
     #[test]

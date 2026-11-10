@@ -1,6 +1,7 @@
 import { DEFAULT_PATCH_SELECTION, type PatchSelection } from "../bindings/PatchSelection";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { DiscStatus, PatchOutcome } from "../bindings";
 import { MockBackend } from "../ipc/mock";
 import { App } from "./App";
 
@@ -451,6 +452,42 @@ test("a loaded Crown Mod image shows its enemy seed and loads it into Settings",
   expect((await screen.findByRole("dialog")).textContent).toContain("seed 4242");
   await user.click(screen.getByRole("button", { name: "Update image" }));
   await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 4242 })));
+});
+
+test("updating an image named after its seed follows the file renamed to the new seed", async () => {
+  const modded = (seed: number): DiscStatus => ({
+    kind: "refused", reason: "already-modded", text: "Crown Mod", size: 0, outputSize: 0, copies: null,
+    discInfo: { console: "PS2", region: "USA", modded: true, modVersion: "0.11.2" },
+    modMetadata: {
+      version: "0.11.2",
+      options: { fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false, randomEnemies: true, enemySeed: seed },
+      recovery: { formatVersion: 1 },
+    },
+  });
+  const analyze = vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce(modded(1234)).mockResolvedValue(modded(55));
+  let done: ((outcome: PatchOutcome) => void) | null = null;
+  vi.spyOn(MockBackend.prototype, "onPatchDone").mockImplementation(async (handler) => {
+    done = handler;
+    return () => {};
+  });
+  const update = vi.spyOn(MockBackend.prototype, "updateMod").mockImplementation(async () => {
+    done?.({ md5: "", bytes: 0, summary: { rowsChanged: 0, liveRows: 0, attackPinned: 0, hpCapped: 0, critPinned: 0, practiceRows: 0, collapsedRows: 0, elfStep: false, serialStep: false }, renamed: "/mock/game [CrownMod] [Seed 55].iso" });
+  });
+  renderCrownModApp();
+  const user = (await import("@testing-library/user-event")).default;
+  await user.type(screen.getByLabelText("disc path"), "/mock/game [[CrownMod] [[Seed 1234].iso");
+  await user.tab();
+  await screen.findByRole("button", { name: "Update ISO" });
+  const field = screen.getByLabelText("Enemy seed") as HTMLInputElement;
+  await waitFor(() => expect(field.value).toBe("1234"));
+  await user.clear(field);
+  await user.type(field, "55");
+  await user.click(screen.getByRole("button", { name: "Update ISO" }));
+  await user.click(await screen.findByRole("button", { name: "Update image" }));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 55 })));
+  expect((await screen.findByRole("dialog", { name: "Ready to play" })).textContent).toContain("/mock/game [CrownMod] [Seed 55].iso");
+  await waitFor(() => expect(analyze).toHaveBeenLastCalledWith("/mock/game [CrownMod] [Seed 55].iso", expect.anything()));
+  expect((screen.getByLabelText("disc path") as HTMLInputElement).value).toBe("/mock/game [CrownMod] [Seed 55].iso");
 });
 
 test("settings refresh output size in the background and only the latest choice enables patching", async () => {

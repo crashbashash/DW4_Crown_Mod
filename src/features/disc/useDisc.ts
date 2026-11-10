@@ -17,6 +17,10 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
   const [extension, setExtension] = useState("iso");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const pathEpoch = useRef(0);
+  const selectionRef = useRef(selection);
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
   const inputPath = selection?.path ?? null;
   const moddedSelection = analysis?.selection === selection && analysis?.status.reason === "already-modded";
   const current = moddedSelection || (analysis?.selection === selection && analysis?.fourPlayerSpawns === fourPlayerSpawns && analysis?.crownDrops === crownDrops && analysis?.crownMod === crownMod);
@@ -64,6 +68,16 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
     setAnalysis(previous => previous?.status === expected ? { ...previous, status } : previous);
   }, []);
 
+  /** Follow a file the app renamed, keeping its verdict instead of analysing it again. */
+  const renameInput = useCallback((from: string, to: string) => {
+    const current = selectionRef.current;
+    if (current?.path !== from) return;
+    const renamed = { path: to, epoch: current.epoch };
+    selectionRef.current = renamed;
+    setSelection(renamed);
+    setAnalysis(previous => previous?.selection === current ? { ...previous, selection: renamed } : previous);
+  }, []);
+
   const identifiedStatus = analysis?.selection === selection ? analysis?.status ?? null : null;
-  return { replaceStatus, identifiedStatus, inputPath, outputPath, extension, status, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath };
+  return { replaceStatus, identifiedStatus, inputPath, outputPath, extension, status, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath, renameInput };
 }
