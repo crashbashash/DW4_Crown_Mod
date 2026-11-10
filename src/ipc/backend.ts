@@ -20,7 +20,7 @@ export interface Backend {
   outputExists(output: string): Promise<boolean>;
   planSummary(): Promise<PlanSummary | null>;
   startPatch(output: string, overwrite: boolean, selection?: PatchSelection): Promise<void>;
-  updateMod(selection: PatchSelection, original: string | null): Promise<void>;
+  updateMod(selection: PatchSelection): Promise<void>;
   onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void>;
   onPatchDone(handler: (o: PatchOutcome) => void): Promise<() => void>;
   onPatchFailed(handler: (message: string) => void): Promise<() => void>;

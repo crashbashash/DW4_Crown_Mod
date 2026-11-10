@@ -82,7 +82,9 @@ main.app-main {
 .update-notes h3 { font-size: 14px; margin: 0 0 8px; color: var(--accent); }
 .release-notes { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 13px; }
 .activity-progress { margin-top: 22px; }
-.activity-progress-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+.activity-progress-label { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; margin-bottom: 8px; color: var(--muted); }
+.activity-progress-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-progress-value { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
 .activity-progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 180ms ease-out; }
 .activity-progress-track { height: 7px; overflow: hidden; border-radius: 4px; background: var(--raised); }
 .activity-progress-indicator { display: block; width: 35%; height: 100%; border-radius: inherit; background-color: var(--accent); animation: activity-sweep 1.5s ease-in-out infinite; }

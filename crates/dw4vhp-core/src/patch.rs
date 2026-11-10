@@ -189,31 +189,38 @@ fn patch_container(
         .tempdir_in(parent)?;
     let (plain_in, plain_out) = (work.path().join("in.iso"), work.path().join("out.iso"));
     let part = part_path(output);
+    // Boundaries for unpack, inner patch, pack, round trip and comparison;
+    // random enemy planning makes the inner patch most of the work.
+    let [unpacked, patched, packed, rechecked, compared] = if plan.random_enemies {
+        [500, 8000, 9000, 9500, 9800]
+    } else {
+        [1500, 6500, 8500, 9200, 9800]
+    };
     let result = (|| {
         progress(Progress {
-            phase: Phase::Copying,
+            phase: Phase::Unpacking,
             done: 0,
             total: 10000,
         });
         container::unpack(format, input, &plain_in, &mut |d, t| {
-            progress(scaled(Phase::Copying, d, t, 0, 1500))
+            progress(scaled(Phase::Unpacking, d, t, 0, unpacked))
         })?;
         let inner = PatchOptions { overwrite: true };
         let outcome = patch_file_internal(&plain_in, &plain_out, plan, &inner, None, &mut |p| {
-            progress(scaled(p.phase, p.done, p.total, 1500, 6500))
+            progress(scaled(p.phase, p.done, p.total, unpacked, patched))
         })?;
         std::fs::remove_file(&plain_in)?;
         container::pack(format, &plain_out, &part, &mut |d, t| {
-            progress(scaled(Phase::Writing, d, t, 6500, 8500))
+            progress(scaled(Phase::Packing, d, t, patched, packed))
         })?;
 
         // Round trip: the packed file must expand to the image that was patched.
         let check = work.path().join("check.iso");
         container::unpack(format, &part, &check, &mut |d, t| {
-            progress(scaled(Phase::Verifying, d, t, 8500, 9200))
+            progress(scaled(Phase::Verifying, d, t, packed, rechecked))
         })?;
         if !same_image(&plain_out, &check, &mut |d, t| {
-            progress(scaled(Phase::Verifying, d, t, 9200, 9800))
+            progress(scaled(Phase::Verifying, d, t, rechecked, compared))
         })? {
             return Err(Error::VerificationFailed(
                 "the packed disc does not match the patched image".into(),
@@ -222,7 +229,7 @@ fn patch_container(
         std::fs::rename(&part, output)?;
         Ok(PatchOutcome {
             md5: md5_hex_with_progress(output, &mut |d, t| {
-                progress(scaled(Phase::Hashing, d, t, 9800, 10000))
+                progress(scaled(Phase::Hashing, d, t, compared, 10000))
             })?,
             bytes: std::fs::metadata(output)?.len(),
             summary: outcome.summary,
@@ -279,12 +286,14 @@ fn patch_file_internal(
     // Safety: the mapping is read-only and `input` is never written.
     let mmap = unsafe { Mmap::map(&file)? };
 
+    // Random enemy planning takes most of a randomised build's time.
+    let inspected = if plan.random_enemies { 7500 } else { 1000 };
     let (report, crowns) = match layout {
         Some(layout) => (inspect_bytes(&mmap[..], layout)?, None),
         None => {
             let (report, crowns) =
-                inspect_retail_planned_for_plan_with_progress(&mmap, plan, &mut |d, t| {
-                    progress(scaled(Phase::Inspecting, d, t, 0, 1000))
+                inspect_retail_planned_for_plan_with_progress(&mmap, plan, &mut |phase, d, t| {
+                    progress(scaled(phase, d, t, 0, inspected))
                 })?;
             (report, Some(crowns))
         }
@@ -349,15 +358,23 @@ fn patch_file_internal(
         &regions,
         &write_opts,
         &mut |p| {
+            // Shares of the remaining work, out of 90.
             let (start, end) = match p.phase {
-                Phase::Inspecting => (1000, 1000),
-                Phase::Copying => (1000, 4000),
-                Phase::Extending => (4000, 6500),
-                Phase::Writing => (6500, 7000),
-                Phase::Verifying => (7000, 9000),
-                Phase::Hashing => (9000, 10000),
+                Phase::Copying => (0, 30),
+                Phase::Extending => (30, 55),
+                Phase::Writing => (55, 60),
+                Phase::Verifying => (60, 80),
+                Phase::Hashing => (80, 90),
+                // The writer reports no other phases.
+                _ => (0, 0),
             };
-            progress(scaled(p.phase, p.done, p.total, start, end));
+            let at = |share: u64| inspected + (10000 - inspected) * share / 90;
+            // The writer's own pre-copy checks are not a second disc inspection.
+            let phase = match p.phase {
+                Phase::Inspecting => Phase::Copying,
+                phase => phase,
+            };
+            progress(scaled(phase, p.done, p.total, at(start), at(end)));
         },
         &verify,
         extension,

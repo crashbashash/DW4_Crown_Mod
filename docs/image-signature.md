@@ -73,8 +73,10 @@ these rules. DigiAtlas uses the same format without depending on the patcher.
 ## Detection and older images
 
 Crown Mod checks the marker before reading/scanning enemy tables and offers
-to update an already-modded image with its recorded version and options. An absent marker means **unknown**, not
-clean: the existing game-data/crown scan remains the fallback for older builds.
+to update an already-modded image with its recorded version and options when it
+carries a change manifest (Crown Mod v0.11.1 onwards). An absent marker means **unknown**, not
+clean: the existing game-data/crown scan remains the fallback for older builds,
+which are refused as already modded.
 A recognized but corrupt/unsupported record is refused rather than treated as a
 clean image. Old builds are not retrospectively assigned a version.
 
@@ -114,11 +116,10 @@ and any container round trip, the updater checks the selected file has not
 changed and replaces it at the same path. Temporary files are cleaned on failure.
 The selected file remains intact until the final rename.
 
-Older signed or scan-detected images lack original-byte manifests. Their first
-update asks for the player's original disc, validates that it is a clean copy of
-the same platform/release, and rebuilds from that. It then replaces the selected
-modded image in place and includes a manifest for future updates. Older unknown
-feature settings start disabled in the dialog; no version is invented.
+Images without an original-byte manifest (scan-detected builds from before
+v0.11.1, or a signature without a `recovery` descriptor) cannot be updated. The
+app refuses them like any other modded disc and asks for a clean, original disc
+image; the updater refuses them without touching the selected file.
 
 The write is included in the normal temporary-output verification and final
 checksum before atomic installation. The low-level explicit-layout fixture seam

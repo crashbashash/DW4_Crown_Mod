@@ -118,7 +118,7 @@ export class MockBackend implements Backend {
     });
   }
 
-  async updateMod(selection: PatchSelection, _original: string | null): Promise<void> {
+  async updateMod(selection: PatchSelection): Promise<void> {
     await this.startPatch("/mock/game.iso", true, selection);
   }
 

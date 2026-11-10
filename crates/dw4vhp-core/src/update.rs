@@ -114,6 +114,13 @@ pub fn identify(path: &Path) -> Result<(crate::release::Release, Option<Value>)>
         Ok((release, metadata))
     })
 }
+/// Images from Crown Mod v0.11.1 onwards embed the original bytes they change;
+/// only those can be updated.
+pub fn updatable(metadata: Option<&Value>) -> bool {
+    metadata.is_some_and(|m| m["recovery"].is_object())
+}
+pub const NOT_UPDATABLE: &str = "only images made with Crown Mod v0.11.1 or later can be updated; patch a clean, original disc image instead";
+
 pub(crate) fn restore(
     iso: &[u8],
     metadata: &Value,
@@ -123,7 +130,7 @@ pub(crate) fn restore(
     let descriptor = &metadata["recovery"];
     if descriptor["formatVersion"] != 1 {
         return Err(bad(
-            "this image needs its original disc image for its first update",
+            "this image's update data needs a newer version of Crown Mod",
         ));
     }
     let number = |key: &str| {
@@ -212,13 +219,22 @@ pub(crate) fn restore(
 /// Verify a private rebuild, then replace the selected image at the same path.
 pub fn update_image(
     path: &Path,
-    original: Option<&Path>,
     plan: &PatchPlan,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<PatchOutcome> {
     let target = fs::canonicalize(path)?;
+    // Boundaries after hashing the selection, unpacking it, restoring the
+    // original, patching, packing, the packed round trip and its comparison,
+    // then hashing the packed image and rechecking the selection. Random enemy
+    // planning makes the patch most of the work.
+    let [hashed, unpacked, restored, patched, compressed, rechecked, compared, summed, unchanged] =
+        if plan.random_enemies {
+            [200, 400, 1000, 8800, 9200, 9400, 9550, 9650, 9950]
+        } else {
+            [500, 1000, 2500, 7500, 8500, 9000, 9400, 9500, 9900]
+        };
     let before = crate::writer::md5_hex_with_progress(&target, &mut |d, t| {
-        progress(scaled(Phase::Inspecting, d, t, 0, 500))
+        progress(scaled(Phase::Inspecting, d, t, 0, hashed))
     })?;
     let format = container::detect(&target)?;
     let work = tempfile::Builder::new()
@@ -230,54 +246,34 @@ pub fn update_image(
     } else {
         let raw = work.path().join("selected.iso");
         container::unpack(format, &target, &raw, &mut |d, t| {
-            progress(scaled(Phase::Inspecting, d, t, 500, 1000))
+            progress(scaled(Phase::Unpacking, d, t, hashed, unpacked))
         })?;
         raw
     };
-    progress(scaled(Phase::Inspecting, 1, 1, 500, 1000));
+    progress(scaled(Phase::Restoring, 0, 1, unpacked, restored));
     let previous = (|raw: &Path| {
         let file = File::open(raw)?;
         // Safety: selected image is opened read-only.
         let iso = unsafe { Mmap::map(&file)? };
         let metadata = crate::signature::from_image(&iso)?;
-        if let Some(ref metadata) = metadata {
-            let release = crate::release::detect(&iso)?;
-            if metadata["release"] != release.serial()
-                || metadata["platform"] != if release.is_gamecube() { "gc" } else { "ps2" }
-            {
-                return Err(bad("signature release does not match disc"));
-            }
-            if !metadata["recovery"].is_null() {
-                restore(&iso, metadata, &baseline, &mut |d, t| {
-                    progress(scaled(Phase::Inspecting, d, t, 1000, 2500))
-                })?;
-                return Ok((release, metadata.clone()));
-            }
-        } else if !matches!(
-            crate::disc::inspect_retail_bytes(&iso),
-            Err(Error::AlreadyModded { .. })
-        ) {
-            return Err(bad("select a Crown Mod image to update"));
-        }
+        let Some(metadata) = metadata.filter(|m| updatable(Some(m))) else {
+            return Err(bad(NOT_UPDATABLE));
+        };
         let release = crate::release::detect(&iso)?;
-        let original =
-            original.ok_or_else(|| bad("choose the original disc image for this older build"))?;
-        logical(original, |raw| {
-            let report = crate::disc::inspect_retail(raw)?;
-            if report.release != Some(release) {
-                return Err(bad(
-                    "the original disc must match the selected image's platform and release",
-                ));
-            }
-            fs::copy(raw, &baseline)?;
-            Ok(())
+        if metadata["release"] != release.serial()
+            || metadata["platform"] != if release.is_gamecube() { "gc" } else { "ps2" }
+        {
+            return Err(bad("signature release does not match disc"));
+        }
+        restore(&iso, &metadata, &baseline, &mut |d, t| {
+            progress(scaled(Phase::Restoring, d, t, unpacked, restored))
         })?;
-        Ok((release, metadata.unwrap_or(Value::Null)))
+        Ok((release, metadata))
     })(&raw_selected)?;
     if format != Format::Raw {
         fs::remove_file(raw_selected)?;
     }
-    progress(scaled(Phase::Inspecting, 1, 1, 1000, 2500));
+    progress(scaled(Phase::Restoring, 1, 1, unpacked, restored));
     {
         let file = File::open(&baseline)?;
         // Safety: the private base is complete and read-only during detection.
@@ -303,32 +299,34 @@ pub fn update_image(
         &raw_out,
         &plan,
         &PatchOptions { overwrite: false },
-        &mut |p| progress(scaled(p.phase, p.done, p.total, 2500, 7500)),
+        &mut |p| progress(scaled(p.phase, p.done, p.total, restored, patched)),
     )?;
     let staged = if format == Format::Raw {
         raw_out
     } else {
         let packed = work.path().join(format!("rebuilt.{}", format.extension()));
         container::pack(format, &raw_out, &packed, &mut |d, t| {
-            progress(scaled(Phase::Writing, d, t, 7500, 8500))
+            progress(scaled(Phase::Packing, d, t, patched, compressed))
         })?;
         let check = work.path().join("check.iso");
         container::unpack(format, &packed, &check, &mut |d, t| {
-            progress(scaled(Phase::Verifying, d, t, 8500, 9000))
+            progress(scaled(Phase::Verifying, d, t, compressed, rechecked))
         })?;
         if !crate::patch::same_image(&raw_out, &check, &mut |d, t| {
-            progress(scaled(Phase::Verifying, d, t, 9000, 9500))
+            progress(scaled(Phase::Verifying, d, t, rechecked, compared))
         })? {
             return Err(bad("packed image verification failed"));
         }
         outcome.bytes = fs::metadata(&packed)?.len();
-        outcome.md5 = crate::writer::md5_hex_with_progress(&packed, &mut |_, _| {})?;
+        outcome.md5 = crate::writer::md5_hex_with_progress(&packed, &mut |d, t| {
+            progress(scaled(Phase::Hashing, d, t, compared, summed))
+        })?;
         packed
     };
     OpenOptions::new().write(true).open(&staged)?.sync_all()?;
     fs::set_permissions(&staged, fs::metadata(&target)?.permissions())?;
     if crate::writer::md5_hex_with_progress(&target, &mut |d, t| {
-        progress(scaled(Phase::Verifying, d, t, 9500, 9900))
+        progress(scaled(Phase::Verifying, d, t, summed, unchanged))
     })? != before
     {
         return Err(bad(
@@ -336,7 +334,7 @@ pub fn update_image(
         ));
     }
     fs::rename(staged, &target)?;
-    progress(scaled(Phase::Verifying, 1, 1, 9900, 10000));
+    progress(scaled(Phase::Verifying, 1, 1, unchanged, 10000));
     Ok(outcome)
 }
 #[cfg(test)]

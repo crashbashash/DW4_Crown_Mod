@@ -1,5 +1,6 @@
 //! Compose resource edits, rebuild AFS and retain verified disc/recovery recipes.
 use super::*;
+use crate::writer::Phase;
 
 #[derive(Debug)]
 pub(crate) enum Piece {
@@ -57,6 +58,13 @@ pub(in crate::crown) fn filename_table(
     Ok(table)
 }
 
+// Estimated rebuild work out of REBUILD_TOTAL; boss shuffling takes the gap
+// between the two entry marks when it runs.
+const REBUILD_TOTAL: u64 = 1000;
+const REBUILD_SCANNED: u64 = 20;
+const REBUILD_ENTRIES_BEFORE_BOSSES: u64 = 680;
+const REBUILD_ENTRIES: u64 = 980;
+
 /// Rebuilds the archive at `iso[base..base + size]` with every crown model pack
 /// expanded and the river turret scripts updated. The shared rebuild also
 /// resolves area-local enemy reward tables through the disc's resource manifest.
@@ -73,8 +81,10 @@ pub(crate) fn rebuild_afs(
     random: Option<RandomOptions>,
     crown_mod: bool,
     final_table: Option<&crate::table::EnemyTable>,
+    progress: &mut dyn FnMut(Phase, u64, u64),
 ) -> Result<Rebuilt> {
     let _timing = crate::profiling::measure("archive.rebuild");
+    progress(Phase::Building, 0, REBUILD_TOTAL);
     let afs = iso
         .get(base..base + size)
         .ok_or_else(|| bad("NDMW.AFS outside image"))?;
@@ -111,6 +121,37 @@ pub(crate) fn rebuild_afs(
         }
         None => None,
     };
+    progress(Phase::Building, REBUILD_SCANNED, REBUILD_TOTAL);
+    // Stage planning dominates randomised builds and costs roughly the same
+    // per stage, so it drives progress. Without it, archive entries do.
+    let stage_count = random
+        .as_ref()
+        .map_or(0, |r| (0..count).filter(|&i| r.is_stage(i)).count());
+    let entries_end = if random.as_ref().is_some_and(|r| r.opts.random_bosses) {
+        REBUILD_ENTRIES_BEFORE_BOSSES
+    } else {
+        REBUILD_ENTRIES
+    };
+    let mut stages_done = 0;
+    let mut reported = None;
+    let mut report_entry = |entries_done: usize, stages_done: usize| {
+        let (phase, done, total) = if stage_count > 0 {
+            let phase = Phase::RandomisingEnemies {
+                area: (stages_done + 1).min(stage_count) as u32,
+                areas: stage_count as u32,
+            };
+            (phase, stages_done, stage_count)
+        } else {
+            (Phase::Building, entries_done, count)
+        };
+        let span = entries_end - REBUILD_SCANNED;
+        let done = REBUILD_SCANNED + span * done as u64 / total as u64;
+        if reported != Some((phase, done)) {
+            reported = Some((phase, done));
+            progress(phase, done, REBUILD_TOTAL);
+        }
+    };
+    report_entry(0, 0);
     let mut prefix = afs[..first].to_vec();
     let mut pieces = Vec::new();
     let mut cursor = first;
@@ -303,8 +344,11 @@ pub(crate) fn rebuild_afs(
                     _ => materialize(data, &edits)?,
                 };
                 let bytes = if r.is_stage(i) {
-                    r.stage(i, current, afs, &entries)
-                        .map_err(|e| bad(&format!("randomise entry {i}: {e}")))?
+                    let bytes = r
+                        .stage(i, current, afs, &entries)
+                        .map_err(|e| bad(&format!("randomise entry {i}: {e}")))?;
+                    stages_done += 1;
+                    bytes
                 } else {
                     r.retarget(i, &current)
                         .map_err(|e| bad(&format!("randomise entry {i}: {e}")))?
@@ -318,9 +362,20 @@ pub(crate) fn rebuild_afs(
             _ => edits,
         };
         entry_edits.push(edits);
+        report_entry(i + 1, stages_done);
     }
     if let Some(r) = random.as_mut().filter(|r| r.opts.random_bosses) {
-        r.randomise_bosses(iso, afs, &entries, &mut entry_edits, crown_mod)?;
+        r.randomise_bosses(
+            iso,
+            afs,
+            &entries,
+            &mut entry_edits,
+            crown_mod,
+            &mut |phase, d, t| {
+                let span = REBUILD_ENTRIES - entries_end;
+                progress(phase, entries_end + span * d / t.max(1), REBUILD_TOTAL)
+            },
+        )?;
         #[cfg(feature = "devtools")]
         if let Some(roster) = std::env::var_os("DW4_BOSS_TEST_ROSTER") {
             std::fs::write(
@@ -554,6 +609,7 @@ pub(crate) fn rebuild_afs(
             }
         }
     }
+    progress(Phase::Building, REBUILD_TOTAL, REBUILD_TOTAL);
     Ok(Rebuilt {
         pieces,
         length: cursor,
@@ -663,6 +719,7 @@ impl CrownPlan {
             Some(options),
             crown_mod,
             None,
+            &mut |_, _, _| {},
         )?
         .random
         .ok_or_else(|| bad("no randomiser picks"))
@@ -704,6 +761,33 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
+        Self::build_with_balance_and_progress(
+            iso,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+            graft,
+            random,
+            crown_mod,
+            final_table,
+            &mut |_, _, _| {},
+        )
+    }
+    /// [`CrownPlan::build_with_balance`], reporting archive rebuild progress.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_with_balance_and_progress(
+        iso: &[u8],
+        four_player_spawns: bool,
+        crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
+        graft: Option<&graft::Spec>,
+        random: Option<RandomOptions>,
+        crown_mod: bool,
+        final_table: Option<&crate::table::EnemyTable>,
+        progress: &mut dyn FnMut(Phase, u64, u64),
+    ) -> Result<Self> {
         need(
             random.as_ref().is_none_or(|r| !r.picks_only),
             "picks-only randomiser analysis cannot build an image",
@@ -731,6 +815,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            progress,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
@@ -827,6 +912,31 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
     ) -> Result<Self> {
+        Self::build_gcm_with_balance_and_progress(
+            disc,
+            four_player_spawns,
+            crown_drops,
+            random_crown_colours,
+            colour_seed,
+            random,
+            crown_mod,
+            final_table,
+            &mut |_, _, _| {},
+        )
+    }
+    /// [`CrownPlan::build_gcm_with_balance`], reporting archive rebuild progress.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_gcm_with_balance_and_progress(
+        disc: &[u8],
+        four_player_spawns: bool,
+        crown_drops: bool,
+        random_crown_colours: bool,
+        colour_seed: u32,
+        random: Option<RandomOptions>,
+        crown_mod: bool,
+        final_table: Option<&crate::table::EnemyTable>,
+        progress: &mut dyn FnMut(Phase, u64, u64),
+    ) -> Result<Self> {
         need(
             random.as_ref().is_none_or(|r| !r.picks_only),
             "picks-only randomiser analysis cannot build an image",
@@ -853,6 +963,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            progress,
         )?;
         let append_offset = disc.len();
         need(

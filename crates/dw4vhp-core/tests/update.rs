@@ -42,7 +42,7 @@ fn check_in_place_update(key: &str) {
     patch_file(original, &target, &base, &opts, &mut |_| {}).unwrap();
     assert!(metadata(&target).unwrap().unwrap()["recovery"].is_object());
     let mut progress = Vec::new();
-    update_image(&target, None, &all, &mut |p| progress.push(p)).unwrap();
+    update_image(&target, &all, &mut |p| progress.push(p)).unwrap();
     assert!(progress.windows(2).all(|p| p[0].done <= p[1].done));
     assert!(progress.iter().all(|p| p.total == 10000));
     assert_eq!(progress.last().unwrap().done, 10000);
@@ -64,53 +64,28 @@ fn check_in_place_update(key: &str) {
         crown_colour_seed: None,
         ..all.clone()
     };
-    update_image(&target, None, &keep_seed, &mut |_| {}).unwrap();
+    update_image(&target, &keep_seed, &mut |_| {}).unwrap();
     assert_eq!(
         hash(&target),
         hash(&expected),
         "repeated update must not stack or grow"
     );
-    update_image(&target, None, &base, &mut |_| {}).unwrap();
+    update_image(&target, &base, &mut |_| {}).unwrap();
     patch_file(original, &expected, &base, &opts, &mut |_| {}).unwrap();
     assert_eq!(
         hash(&target),
         hash(&expected),
         "removing features must restore executable hooks and resources"
     );
-    // Simulate a signed build from before recovery manifests were introduced.
-    let mut legacy = metadata(&target).unwrap().unwrap();
-    legacy.as_object_mut().unwrap().remove("recovery");
-    use std::io::{Seek, SeekFrom, Write};
-    let mut file = fs::OpenOptions::new().write(true).open(&target).unwrap();
-    file.seek(SeekFrom::End(-2048)).unwrap();
-    file.write_all(&dw4vhp_core::signature::encode(&legacy).unwrap())
-        .unwrap();
-    drop(file);
-    let before = hash(&target);
-    assert!(update_image(&target, Some(&target), &base, &mut |_| {}).is_err());
-    assert_eq!(hash(&target), before, "a modded original must be refused");
-    assert!(update_image(&target, None, &base, &mut |_| {}).is_err());
-    assert_eq!(
-        hash(&target),
-        before,
-        "failed update must preserve selected file"
-    );
-    update_image(&target, Some(original), &base, &mut |_| {}).unwrap();
-    assert_eq!(hash(&target), hash(&expected));
-    // Removing the identification sector exercises legacy table-scan detection.
-    let file = fs::OpenOptions::new().write(true).open(&target).unwrap();
-    file.set_len(file.metadata().unwrap().len() - 2048).unwrap();
-    drop(file);
-    assert!(metadata(&target).unwrap().is_none());
-    update_image(&target, Some(original), &base, &mut |_| {}).unwrap();
-    assert_eq!(hash(&target), hash(&expected), "unsigned legacy migration");
+    use std::io::{Read, Seek, SeekFrom, Write};
     // A modified untouched byte must fail recovery without replacing the file.
+    let pristine = work.path().join("pristine.iso");
+    fs::copy(&target, &pristine).unwrap();
     let mut file = fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(&target)
         .unwrap();
-    use std::io::Read;
     file.seek(SeekFrom::Start(0x1000)).unwrap();
     let mut byte = [0];
     file.read_exact(&mut byte).unwrap();
@@ -119,18 +94,39 @@ fn check_in_place_update(key: &str) {
     file.write_all(&byte).unwrap();
     drop(file);
     let damaged_hash = hash(&target);
-    assert!(update_image(&target, None, &base, &mut |_| {}).is_err());
+    assert!(update_image(&target, &base, &mut |_| {}).is_err());
     assert_eq!(
         hash(&target),
         damaged_hash,
         "failed recovery preserves the selected file"
     );
+    fs::rename(&pristine, &target).unwrap();
+    // A signed image without recovery data is refused, not migrated.
+    let mut legacy = metadata(&target).unwrap().unwrap();
+    legacy.as_object_mut().unwrap().remove("recovery");
+    let mut file = fs::OpenOptions::new().write(true).open(&target).unwrap();
+    file.seek(SeekFrom::End(-2048)).unwrap();
+    file.write_all(&dw4vhp_core::signature::encode(&legacy).unwrap())
+        .unwrap();
+    drop(file);
+    let before = hash(&target);
+    let error = update_image(&target, &base, &mut |_| {}).unwrap_err();
+    assert!(error.to_string().contains("v0.11.1"), "{error}");
+    assert_eq!(hash(&target), before, "a refused update preserves the file");
+    // So is an unsigned image from before Crown Mod v0.11.1.
+    let file = fs::OpenOptions::new().write(true).open(&target).unwrap();
+    file.set_len(file.metadata().unwrap().len() - 2048).unwrap();
+    drop(file);
+    assert!(metadata(&target).unwrap().is_none());
+    let before = hash(&target);
+    assert!(update_image(&target, &base, &mut |_| {}).is_err());
+    assert_eq!(hash(&target), before, "a refused update preserves the file");
     assert_eq!(
         hash(original),
         original_hash,
         "original disc must remain unchanged"
     );
-    eprintln!("PASS: {key}: add, repeat, remove, failed update preserves input, signed and unsigned legacy migration, seed preservation, damaged recovery refusal, original unchanged");
+    eprintln!("PASS: {key}: add, repeat, remove, seed preservation, damaged recovery refusal, pre-v0.11.1 images refused unchanged, original unchanged");
 }
 
 #[test]
@@ -179,10 +175,7 @@ fn compressed_image_is_replaced_in_its_original_format() {
     let opts = PatchOptions { overwrite: false };
     patch_file(original, &selected, &all, &opts, &mut |_| {}).unwrap();
     let mut progress = Vec::new();
-    update_image(&selected, None, &PatchPlan::default(), &mut |p| {
-        progress.push(p)
-    })
-    .unwrap();
+    update_image(&selected, &PatchPlan::default(), &mut |p| progress.push(p)).unwrap();
     assert!(progress.windows(2).all(|pair| pair[0].done <= pair[1].done));
     assert!(progress.iter().all(|p| p.total == 10000));
     assert_eq!(progress.last().unwrap().done, 10000);

@@ -102,9 +102,8 @@ version appear under Disc. Choose which optional features to keep, add or remove
 then click **Update ISO** and confirm. The app verifies the rebuilt game
 before replacing the selected modded file.
 
-Images created before Crown Mod v0.11.1 need the matching original disc for their
-first update. After that, the updated image includes everything needed for future
-updates.
+Only images created with Crown Mod v0.11.1 or later can be updated. For an older
+image, patch a clean, original disc image instead.
 
 ## Roadmap
 

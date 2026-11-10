@@ -8,6 +8,7 @@ import { useDisc } from "../features/disc/useDisc";
 import { DoneDialog } from "../features/output/DoneDialog";
 import { OverwriteDialog } from "../features/output/OverwriteDialog";
 import { PatchingDialog } from "../features/output/PatchingDialog";
+import { progressStatus } from "../features/output/progressStatus";
 import { OutputPanel } from "../features/output/OutputPanel";
 import { SettingsFiles } from "../features/settings/SettingsFiles";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
@@ -78,6 +79,9 @@ function AppInner() {
   const [overwritePath, setOverwritePath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [patchProgress, setPatchProgress] = useState(0);
+  const [patchStatus, setPatchStatus] = useState<string | undefined>(undefined);
+  const [updatingMod, setUpdatingMod] = useState(false);
+  const furthestProgress = useRef(0);
   const [patchError, setPatchError] = useState<string | null>(null);
   const [donePopup, setDonePopup] = useState<string | null>(null);
   const outputRef = useRef<string | null>(null);
@@ -87,11 +91,17 @@ function AppInner() {
   useEffect(() => {
     const ups: Promise<() => void>[] = [];
     ups.push(
-      backend.onPatchProgress(({ done, total }) => {
+      backend.onPatchProgress((event) => {
+        const { done, total } = event;
         setBusy(true);
         if (total > 0 && Number.isFinite(done) && Number.isFinite(total)) {
           // Only the verified terminal event completes the operation.
           const percentage = Math.min(99, Math.max(0, Math.floor(done / total * 100)));
+          // A stale event moves neither the bar nor the step text.
+          if (percentage >= furthestProgress.current) {
+            furthestProgress.current = percentage;
+            setPatchStatus(progressStatus(event));
+          }
           setPatchProgress(previous => Math.max(previous, percentage));
         }
       }),
@@ -177,10 +187,17 @@ function AppInner() {
     setEnemySeed(settings.enemySeed === null ? "" : String(settings.enemySeed));
   };
 
+  const resetProgress = () => {
+    furthestProgress.current = 0;
+    setPatchProgress(0);
+    setPatchStatus(undefined);
+  };
+
   const runPatch = async (output: string, overwrite: boolean) => {
     outputRef.current = output;
+    setUpdatingMod(false);
     setBusy(true);
-    setPatchProgress(0);
+    resetProgress();
     setPatchError(null);
     try {
       await backend.startPatch(output, overwrite, selection);
@@ -194,7 +211,7 @@ function AppInner() {
     if (!canPatch || disc.outputPath === null || busy) return;
     const output = withOutputExtension(disc.outputPath, disc.extension);
     disc.setOutputPath(output);
-    setPatchProgress(0);
+    resetProgress();
     setBusy(true);
     try {
       if (await backend.outputExists(output)) {
@@ -212,19 +229,15 @@ function AppInner() {
   const updateMod = async () => {
     const status = discError;
     if (!canPatch || !status || !disc.inputPath || busy) return;
+    setUpdatingMod(true);
     setBusy(true);
-    setPatchProgress(0);
+    resetProgress();
     setPatchError(null);
     try {
-      const original = status.modMetadata?.recovery ? null : await backend.chooseIso();
-      if (!status.modMetadata?.recovery && original === null) {
-        setBusy(false);
-        return;
-      }
       outputRef.current = disc.inputPath;
       setDismissedDiscStatus(status);
       pendingModUpdate.current = { path: disc.inputPath, status, selection: { ...DEFAULT_PATCH_SELECTION, crownMod, fourPlayerSpawns, crownDrops } };
-      await backend.updateMod(selection, original);
+      await backend.updateMod(selection);
     } catch (error) {
       pendingModUpdate.current = null;
       setBusy(false);
@@ -312,7 +325,7 @@ function AppInner() {
           <UpdateCenter blocked={busy || settingsBusy || disc.checking || overwritePath !== null || donePopup !== null || patchError !== null || discError !== null} onBusyChange={setUpdating} />
         </div>
       </div>
-      {busy ? <PatchingDialog progress={patchProgress} /> : disc.analyzing && <AnalyzingDialog />}
+      {busy ? <PatchingDialog progress={patchProgress} status={patchStatus} updating={updatingMod} /> : disc.analyzing && <AnalyzingDialog />}
       {!busy && !disc.analyzing && discError !== null && (
         discError.reason === "already-modded" ? (
           <UpdateModDialog status={discError} path={disc.inputPath ?? ""} onCancel={() => setDismissedDiscStatus(discError)} onConfirm={() => void updateMod()} />

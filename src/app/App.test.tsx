@@ -203,7 +203,7 @@ describe("patch finished popup", () => {
 });
 
  test("a modded-disc popup can be dismissed and a clean selection recovers", async () => {
-   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "This disc is already modded. Choose an original copy.", size: 0, outputSize: 0, copies: null });
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "This disc is already modded. Choose an original copy.", size: 0, outputSize: 0, copies: null, modMetadata: { version: "0.11.1", options: { fourPlayerSpawns: false, betterLoot: false, randomCrownColours: false }, recovery: { formatVersion: 1 } } });
    renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/modded.iso");
@@ -312,6 +312,13 @@ test.each(["success", "failure"] as const)("patching uses only the modal until %
     expect(screen.getByText(`${expected}%`)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe(message);
   }
+  // The step line follows the latest event that moved the bar, and the stale
+  // writing event above did not replace it.
+  expect(bar.textContent).toContain("Verifying your new game…");
+  act(() => send("patch-progress", { phase: "randomisingEnemies", done: 9950, total: 10000, area: 37, areas: 74 }));
+  expect(bar.textContent).toContain("Randomising enemies: area 37 of 74…");
+  expect(bar.getAttribute("aria-valuetext")).toBe("99%, Randomising enemies: area 37 of 74…");
+  expect(screen.getByRole("status").textContent).toBe(message);
   await act(async () => {
     send(ending === "success" ? "patch-done" : "patch-failed", ending === "success" ? outcome : "Please choose another destination.");
     finish();
@@ -443,7 +450,7 @@ test("a loaded Crown Mod image shows its enemy seed and loads it into Settings",
   await user.click(screen.getByRole("button", { name: "Update ISO" }));
   expect((await screen.findByRole("dialog")).textContent).toContain("seed 4242");
   await user.click(screen.getByRole("button", { name: "Update image" }));
-  await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 4242 }), null));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, randomEnemies: true, enemySeed: 4242 })));
 });
 
 test("settings refresh output size in the background and only the latest choice enables patching", async () => {
@@ -507,23 +514,24 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.click(screen.getByRole("button", {name: "Update ISO"}));
    expect((await screen.findByRole("dialog")).textContent).toContain("v0.10.0");
    await user.click(screen.getByRole("button", { name: "Update image" }));
-   await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, crownDrops: true, randomCrownColours: true }), null));
+   await waitFor(() => expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true, crownDrops: true, randomCrownColours: true })));
    expect(picker).not.toHaveBeenCalled();
    expect((await screen.findByRole("dialog")).textContent).toContain("/mock/modded.iso");
  });
 
- test("older mod asks for the original and cancelling does not update", async () => {
-   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", reason: "already-modded", text: "older mod", size: 0, outputSize: 0, copies: null });
+ test("a modded image without update data is refused without offering an update", async () => {
+   const text = "This disc is already modded and can't be updated. Only images made with Crown Mod v0.11.1 or later can be updated. Choose a clean, original disc image.";
+   vi.spyOn(MockBackend.prototype, "analyze").mockResolvedValueOnce({ kind: "refused", text, size: 0, outputSize: 0, copies: null, discInfo: { console: "PS2", region: "USA", modded: true, modVersion: null } });
    const update = vi.spyOn(MockBackend.prototype, "updateMod");
-   vi.spyOn(MockBackend.prototype, "chooseIso").mockResolvedValue(null);
    renderCrownModApp();
    const user = (await import("@testing-library/user-event")).default;
    await user.type(screen.getByLabelText("disc path"), "/mock/older.iso");
    await user.tab();
-   await user.click(await screen.findByRole("button", {name: "Update ISO"}));
-   await screen.findByRole("dialog");
-   await user.click(screen.getByRole("button", { name: "Update image" }));
-   await screen.findByRole("button", { name: "Update image" });
+   expect((await screen.findByRole("dialog", { name: "Unable to open disc" })).textContent).toContain("v0.11.1");
+   expect(screen.queryByRole("button", { name: "Update ISO", hidden: true })).toBeNull();
+   await user.click(screen.getByRole("button", { name: "OK" }));
+   expect(screen.queryByRole("button", { name: "Update ISO" })).toBeNull();
+   expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
    expect(update).not.toHaveBeenCalled();
  });
 
@@ -556,8 +564,10 @@ test("a failed background size refresh still opens the disc-error popup", async 
    await user.tab();
    await user.click(await screen.findByRole("button", {name: "Update ISO"}));
    await user.click(await screen.findByRole("button", {name: "Update image"}));
-   expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true }), null);
+   expect(update).toHaveBeenCalledWith(patchSelection({ crownMod: true }));
    expect(patch).not.toHaveBeenCalled();
+   expect(screen.getByRole("dialog", { name: "Updating your game" })).toBeTruthy();
+   expect(screen.queryByRole("dialog", { name: "Patching your game" })).toBeNull();
  });
 
 test("a clean disc still needs an explicit option, and Crown Drops follows Crown Mod", async () => {
@@ -756,7 +766,7 @@ describe("optional boss randomisation", () => {
     expect(screen.getByRole("switch", { name: "Random bosses", checked: true })).toBeTruthy();
     await user.click(updateButton);
     await user.click(await screen.findByRole("button", { name: "Update image" }));
-    expect(update).toHaveBeenCalledWith(patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 }), null);
+    expect(update).toHaveBeenCalledWith(patchSelection({ randomEnemies: true, randomBosses: true, enemySeed: 1520 }));
   });
 
   test("an imported boss setting remains usable and exportable on Japanese GameCube", async () => {

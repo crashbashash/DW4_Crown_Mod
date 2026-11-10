@@ -35,19 +35,22 @@ fn main() {
         &plan,
         &PatchOptions { overwrite: false },
         &mut |p| {
-            if phase != Some(p.phase) {
+            // Phases with counters are timed together, e.g. every enemy area.
+            let name = format!("{:?}", p.phase);
+            let name = name.split(' ').next().unwrap_or_default().to_string();
+            if phase.as_ref() != Some(&name) {
                 let now = Instant::now();
-                if let Some(previous) = phase {
-                    *phases.entry(format!("{previous:?}")).or_default() += now - phase_start;
+                if let Some(previous) = phase.take() {
+                    *phases.entry(previous).or_default() += now - phase_start;
                 }
-                eprintln!("{:.3}s {:?}", started.elapsed().as_secs_f64(), p.phase);
-                phase = Some(p.phase);
+                eprintln!("{:.3}s {name}", started.elapsed().as_secs_f64());
+                phase = Some(name);
                 phase_start = now;
             }
         },
     );
     if let Some(previous) = phase {
-        *phases.entry(format!("{previous:?}")).or_default() += phase_start.elapsed();
+        *phases.entry(previous).or_default() += phase_start.elapsed();
     }
     profiling::write(Path::new(&args[3])).unwrap();
     let outcome = outcome.expect("build and verification");

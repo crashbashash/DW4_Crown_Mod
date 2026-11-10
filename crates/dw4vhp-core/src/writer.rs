@@ -18,13 +18,32 @@ use std::path::{Path, PathBuf};
 /// patcher's memory use stays bounded.
 const CHUNK: usize = 8 * 1024 * 1024;
 
-/// Which stage of the write is under way.
+/// Which stage of the patch or update is under way.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum Phase {
     Inspecting,
+    /// Expanding a compressed image to a plain one.
+    Unpacking,
+    /// Recreating the original disc from a modded image's recovery data.
+    Restoring,
+    /// Rebuilding the game archive with the selected options.
+    Building,
+    /// Planning random enemies; `area` (1-based) of `areas` is in progress.
+    RandomisingEnemies {
+        area: u32,
+        areas: u32,
+    },
+    /// Shuffling dungeon bosses; 0 is Normal, 1 Hard and 2 Very Hard.
+    RandomisingBosses {
+        difficulty: u8,
+    },
+    /// Recording the original bytes that allow later updates.
+    Recording,
     Copying,
     Extending,
     Writing,
+    /// Compressing the finished image back to its original format.
+    Packing,
     Verifying,
     Hashing,
 }

@@ -4,6 +4,7 @@ use crate::iso9660::{self, IsoFile};
 use crate::layout::Layout;
 use crate::release::{self, Release};
 use crate::table::EnemyTable;
+use crate::writer::Phase;
 use md5::{Digest, Md5};
 use memmap2::Mmap;
 use std::fs::File;
@@ -204,17 +205,17 @@ pub(crate) fn inspect_retail_planned_for_plan(
     iso: &[u8],
     plan: &crate::plan::PatchPlan,
 ) -> Result<(DiscReport, crate::crown::CrownPlan)> {
-    inspect_retail_planned_for_plan_with_progress(iso, plan, &mut |_, _| {})
+    inspect_retail_planned_for_plan_with_progress(iso, plan, &mut |_, _, _| {})
 }
 
 pub(crate) fn inspect_retail_planned_for_plan_with_progress(
     iso: &[u8],
     plan: &crate::plan::PatchPlan,
-    progress: &mut dyn FnMut(u64, u64),
+    progress: &mut dyn FnMut(Phase, u64, u64),
 ) -> Result<(DiscReport, crate::crown::CrownPlan)> {
     let release = release::detect(iso)?;
     let mut report = inspect_bytes(iso, &release.layout_in(iso)?)?;
-    progress(100, 1000);
+    progress(Phase::Inspecting, 100, 1000);
     // All three retail releases carry identical tables. Copy counts alone do
     // not prove that an arbitrary/repacked table is safe to scale by row index.
     let fingerprints = [
@@ -242,8 +243,10 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
         None
     };
     let (final_table, _) = crate::patch::derive_patch(&report, plan);
+    // Rebuilding the archive, including any enemy planning, is most of the work.
+    let mut rebuild = |phase, d: u64, t: u64| progress(phase, 100 + 750 * d / t.max(1), 1000);
     let crowns = if release.is_gamecube() {
-        crate::crown::CrownPlan::build_gcm_with_balance(
+        crate::crown::CrownPlan::build_gcm_with_balance_and_progress(
             iso,
             plan.four_player_spawns,
             plan.crown_drops,
@@ -252,9 +255,10 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             random,
             plan.crown_mod,
             Some(&final_table),
+            &mut rebuild,
         )?
     } else {
-        crate::crown::CrownPlan::build_with_balance(
+        crate::crown::CrownPlan::build_with_balance_and_progress(
             iso,
             plan.four_player_spawns,
             plan.crown_drops,
@@ -264,9 +268,10 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             random,
             plan.crown_mod,
             Some(&final_table),
+            &mut rebuild,
         )?
     };
-    progress(200, 1000);
+    progress(Phase::Building, 850, 1000);
     report.output_size = crowns.output_size;
     report.release = Some(release);
     report.boot_elf = if release.is_gamecube() {
@@ -278,9 +283,9 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
     let (mut regions, _) =
         crate::patch::plan_regions(iso, &report, plan, &release.layout_in(iso)?)?;
     regions.extend(crowns.regions.clone());
-    progress(250, 1000);
+    progress(Phase::Recording, 860, 1000);
     let crowns = crowns.with_recovery(iso, release, plan, &regions, &mut |d, t| {
-        progress(250 + 750 * d / t.max(1), 1000)
+        progress(Phase::Recording, 860 + 140 * d / t.max(1), 1000)
     })?;
     report.output_size = crowns.output_size;
     Ok((report, crowns))

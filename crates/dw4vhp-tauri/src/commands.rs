@@ -113,6 +113,41 @@ pub struct ProgressPayload {
     phase: &'static str,
     done: u64,
     total: u64,
+    /// The enemy area being planned (1-based) and how many there are.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    area: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    areas: Option<u32>,
+    /// The boss difficulty being shuffled: "normal", "hard" or "veryHard".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    difficulty: Option<&'static str>,
+}
+
+impl From<dw4vhp_core::writer::Progress> for ProgressPayload {
+    fn from(p: dw4vhp_core::writer::Progress) -> Self {
+        use dw4vhp_core::writer::Phase;
+        let (area, areas, difficulty) = match p.phase {
+            Phase::RandomisingEnemies { area, areas } => (Some(area), Some(areas), None),
+            Phase::RandomisingBosses { difficulty } => (
+                None,
+                None,
+                Some(match difficulty {
+                    0 => "normal",
+                    1 => "hard",
+                    _ => "veryHard",
+                }),
+            ),
+            _ => (None, None, None),
+        };
+        Self {
+            phase: phase_name(p.phase),
+            done: p.done,
+            total: p.total,
+            area,
+            areas,
+            difficulty,
+        }
+    }
 }
 
 /// The native open dialog for the player's disc image. `None` when cancelled.
@@ -244,6 +279,33 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
     }
 }
 
+/// Adds a modded image's identity to its verdict. Only images with recovery
+/// data (Crown Mod v0.11.1 onwards) keep the already-modded reason that offers
+/// an in-place update; any other modded image is refused like a damaged disc.
+fn modded_verdict(
+    mut payload: DiscStatusPayload,
+    identity: Result<(dw4vhp_core::release::Release, Option<serde_json::Value>), Error>,
+) -> DiscStatusPayload {
+    let (release, metadata) = match identity {
+        Ok(identity) => identity,
+        Err(error) => return verdict(&Err(error)),
+    };
+    payload.disc_info = Some(disc_info(
+        release,
+        true,
+        metadata
+            .as_ref()
+            .and_then(|m| m["version"].as_str())
+            .map(str::to_owned),
+    ));
+    if !dw4vhp_core::update::updatable(metadata.as_ref()) {
+        payload.reason = None;
+        payload.text = "This disc is already modded and can't be updated. Only images made with Crown Mod v0.11.1 or later can be updated. Choose a clean, original disc image.".into();
+    }
+    payload.mod_metadata = metadata;
+    payload
+}
+
 /// Inspects the disc off the main thread, stores a clean report for later
 /// [`plan_summary`] and [`start_patch`] calls, and returns the verdict.
 #[tauri::command]
@@ -274,20 +336,7 @@ pub async fn analyze(
         })
         .await
         .map_err(|e| e.to_string())?;
-        match identity {
-            Ok((release, metadata)) => {
-                payload.disc_info = Some(disc_info(
-                    release,
-                    true,
-                    metadata
-                        .as_ref()
-                        .and_then(|m| m["version"].as_str())
-                        .map(str::to_owned),
-                ));
-                payload.mod_metadata = metadata;
-            }
-            Err(error) => payload = verdict(&Err(error)),
-        }
+        payload = modded_verdict(payload, identity);
     }
     let state = app.state::<AppState>();
     let mut input = state.input.lock().expect("input lock");
@@ -359,14 +408,7 @@ pub async fn start_patch(
         let mut progress = |p: dw4vhp_core::writer::Progress| {
             // The window may be closed mid-patch; a dropped listener is not
             // worth stopping the write for.
-            let _ = app.emit(
-                "patch-progress",
-                ProgressPayload {
-                    phase: phase_name(p.phase),
-                    done: p.done,
-                    total: p.total,
-                },
-            );
+            let _ = app.emit("patch-progress", ProgressPayload::from(p));
         };
         let outcome = patch_file(&input, &output, &plan, &opts, &mut progress);
         match outcome {
@@ -392,11 +434,7 @@ pub async fn start_patch(
 
 /// The selected modded image is replaced only after the new copy passes verification.
 #[tauri::command]
-pub async fn update_mod(
-    selection: PatchSelection,
-    original: Option<String>,
-    app: AppHandle,
-) -> Result<(), String> {
+pub async fn update_mod(selection: PatchSelection, app: AppHandle) -> Result<(), String> {
     let permit = app.state::<AppState>().begin_operation()?;
     let input = app
         .state::<AppState>()
@@ -408,19 +446,9 @@ pub async fn update_mod(
     let plan = selection.into_plan().map_err(str::to_owned)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _permit = permit;
-
-        let original = original.map(std::path::PathBuf::from);
-        let result =
-            dw4vhp_core::update::update_image(&input, original.as_deref(), &plan, &mut |p| {
-                let _ = app.emit(
-                    "patch-progress",
-                    ProgressPayload {
-                        phase: phase_name(p.phase),
-                        done: p.done,
-                        total: p.total,
-                    },
-                );
-            });
+        let result = dw4vhp_core::update::update_image(&input, &plan, &mut |p| {
+            let _ = app.emit("patch-progress", ProgressPayload::from(p));
+        });
         match result {
             Ok(outcome) => {
                 let _ = app.emit(
@@ -443,13 +471,19 @@ pub async fn update_mod(
 }
 
 fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
+    use dw4vhp_core::writer::Phase;
     match phase {
-        dw4vhp_core::writer::Phase::Inspecting => "inspecting",
-        dw4vhp_core::writer::Phase::Copying => "copying",
-        dw4vhp_core::writer::Phase::Writing => "writing",
-        dw4vhp_core::writer::Phase::Extending => "writing",
-        dw4vhp_core::writer::Phase::Verifying => "verifying",
-        dw4vhp_core::writer::Phase::Hashing => "verifying",
+        Phase::Inspecting => "inspecting",
+        Phase::Unpacking => "unpacking",
+        Phase::Restoring => "restoring",
+        Phase::Building => "building",
+        Phase::RandomisingEnemies { .. } => "randomisingEnemies",
+        Phase::RandomisingBosses { .. } => "randomisingBosses",
+        Phase::Recording => "recording",
+        Phase::Copying => "copying",
+        Phase::Writing | Phase::Extending => "writing",
+        Phase::Packing => "packing",
+        Phase::Verifying | Phase::Hashing => "verifying",
     }
 }
 
@@ -528,6 +562,27 @@ mod tests {
         assert_eq!(result.kind, "refused");
         assert_eq!(result.reason, Some("already-modded"));
         assert!(result.text.contains("Crown Mod v0.11.0") && result.text.contains("original"));
+    }
+    #[test]
+    fn only_images_with_recovery_data_offer_an_update() {
+        use dw4vhp_core::release::Release;
+        let modded = || {
+            verdict(&Err(Error::AlreadyModded {
+                rarity_nonzero: 600,
+            }))
+        };
+        let current = serde_json::json!({"version": "0.11.1", "recovery": {"formatVersion": 1}});
+        let result = modded_verdict(modded(), Ok((Release::Usa, Some(current))));
+        assert_eq!(result.reason, Some("already-modded"));
+        assert!(result.mod_metadata.is_some());
+        let signed_without_recovery = serde_json::json!({"version": "0.11.0"});
+        for metadata in [None, Some(signed_without_recovery)] {
+            let result = modded_verdict(modded(), Ok((Release::Usa, metadata)));
+            assert_eq!(result.kind, "refused");
+            assert_eq!(result.reason, None);
+            assert!(result.text.contains("v0.11.1") && result.text.contains("original"));
+            assert!(result.disc_info.is_some_and(|info| info.modded));
+        }
     }
     #[test]
     fn invalid_disc_message_covers_both_supported_consoles() {

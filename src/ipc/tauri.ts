@@ -51,8 +51,8 @@ export class TauriBackend implements Backend {
     await invoke("start_patch", { output, overwrite, selection });
   }
 
-  async updateMod(selection: PatchSelection, original: string | null): Promise<void> {
-    await invoke("update_mod", { selection, original });
+  async updateMod(selection: PatchSelection): Promise<void> {
+    await invoke("update_mod", { selection });
   }
 
   async onPatchProgress(handler: (p: ProgressEvent) => void): Promise<() => void> {

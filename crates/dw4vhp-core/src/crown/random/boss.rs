@@ -286,7 +286,19 @@ impl Randomiser {
         entries: &[(usize, usize)],
         edits: &mut [Vec<Edit>],
         crown_mod: bool,
+        progress: &mut dyn FnMut(crate::writer::Phase, u64, u64),
     ) -> Result<()> {
+        // Each difficulty checks donors for, then applies, every arena.
+        let steps = 3 * 2 * ARENAS.len() as u64;
+        let mut step = 0;
+        let phase = |step: u64| crate::writer::Phase::RandomisingBosses {
+            difficulty: (step * 3 / steps).min(2) as u8,
+        };
+        progress(phase(0), 0, steps);
+        let mut tick = || {
+            step += 1;
+            progress(phase(step), step, steps);
+        };
         let message_bases = intro::message_bases(iso, afs, entries)?;
         let data = |entry: usize| {
             let (offset, size) = entries[entry];
@@ -379,6 +391,7 @@ impl Randomiser {
                     patrols,
                     compatible,
                 });
+                tick();
             }
             let choices = super::boss_plan::assign(
                 &slots,
@@ -496,6 +509,7 @@ impl Randomiser {
                 );
                 bosses.push(json!({"stage": arena.entry, "area": arena.name, "generator": arena.generator,
                     "original": arena.model, "boss": to, "changed": changed, "patrols": slot.patrols, "patrolFloors": arena.floors}));
+                tick();
             }
             let expected = slots
                 .iter()

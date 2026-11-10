@@ -35,7 +35,10 @@ fn build_boss_test_image() {
         &plan,
         &PatchOptions { overwrite: false },
         &mut |p| {
-            let update = (p.phase, p.done * 10 / p.total.max(1));
+            let update = (
+                std::mem::discriminant(&p.phase),
+                p.done * 10 / p.total.max(1),
+            );
             if last != Some(update) {
                 eprintln!("BUILD {:?}: {}/{}", p.phase, p.done, p.total);
                 last = Some(update);

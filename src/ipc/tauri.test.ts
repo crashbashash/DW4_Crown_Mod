@@ -32,8 +32,8 @@ describe("typed native requests", () => {
     expect(invoke).toHaveBeenLastCalledWith("analyze", { path: "clean.iso", selection: options });
     await backend.startPatch("out.iso", false, options);
     expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, selection: options });
-    await backend.updateMod(options, null);
-    expect(invoke).toHaveBeenLastCalledWith("update_mod", { selection: options, original: null });
+    await backend.updateMod(options);
+    expect(invoke).toHaveBeenLastCalledWith("update_mod", { selection: options });
   });
 });
 
