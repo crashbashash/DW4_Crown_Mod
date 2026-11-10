@@ -1658,3 +1658,147 @@ fn river_firing_bindings(p: &Pack<'_>, model: &str) -> Vec<serde_json::Value> {
     );
     result
 }
+
+/// `DW4_RETAIL_USA_ISO=... DW4_ENTRIES=621,649 DW4_DUMP=/tmp/dir cargo test --features devtools probe_boss_sites -- --ignored --nocapture`
+/// Each stage's difficulty generator packs, generators and resident enemies, with every
+/// stage Lua chunk written to `DW4_DUMP/<entry>/`.
+#[test]
+#[ignore]
+fn probe_boss_sites() {
+    let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+    let afs = boss::intro::archive(&iso).unwrap();
+    let n = u32at(afs, 4).unwrap() as usize;
+    let entries = (0..n)
+        .map(|e| {
+            (
+                u32at(afs, 8 + 8 * e).unwrap() as usize,
+                u32at(afs, 12 + 8 * e).unwrap() as usize,
+            )
+        })
+        .collect::<Vec<_>>();
+    let data = |e: usize| &afs[entries[e].0..entries[e].0 + entries[e].1];
+    let dump = std::path::PathBuf::from(std::env::var("DW4_DUMP").unwrap());
+    for e in std::env::var("DW4_ENTRIES")
+        .unwrap()
+        .split(',')
+        .map(|s| s.parse::<usize>().unwrap())
+    {
+        let p = Pack::parse(data(e)).unwrap();
+        let gens: Vec<usize> = (e + 1..=e + 7)
+            .filter(|&g| {
+                data(g).len() < 1_500_000
+                    && memchr::memmem::find(data(g), b"beGeneraterData\0").is_some()
+            })
+            .collect();
+        println!("STAGE {e} size {} gens {gens:?}", data(e).len());
+        for (id, index) in p.ids.iter().enumerate() {
+            let Some(index) = index else { continue };
+            let r = &p.objects[*index];
+            if p.classes[r.class].name == "beModelCtrlInfo" {
+                let kind = r
+                    .field(7)
+                    .map(|f| {
+                        String::from_utf8_lossy(&p.b[f.start + 4..f.end])
+                            .trim_end_matches('\0')
+                            .to_string()
+                    })
+                    .unwrap_or_default();
+                let count = p.val(p.val(id as u32, 6).unwrap(), 2).unwrap_or(0);
+                println!(
+                    "  MODEL {} {kind} pool {count}",
+                    String::from_utf8_lossy(graft::name_of(&p, r).unwrap_or_default())
+                );
+            }
+        }
+        for &g in &gens {
+            for gen in generators(&Pack::parse(data(g)).unwrap()).unwrap() {
+                println!(
+                    "  GEN pack {g} {} row {} family {:?} seq {:?} start {:?} most {} pop {} pos {:?}",
+                    gen.name,
+                    gen.row,
+                    family(gen.row),
+                    gen.entrance,
+                    gen.start,
+                    gen.most,
+                    gen.population,
+                    gen.pos
+                );
+            }
+        }
+        let dir = dump.join(e.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        for id in 0..p.ids.len() as u32 {
+            if p.class(id, "beLuaData").is_err() {
+                continue;
+            }
+            let Some(name) =
+                graft::name_of(&p, p.rec(id).unwrap()).and_then(|s| std::str::from_utf8(s).ok())
+            else {
+                continue;
+            };
+            if let Ok(chunk) = boss::script(&p, name) {
+                std::fs::write(dir.join(name), chunk).unwrap();
+            }
+        }
+    }
+}
+
+/// `DW4_RETAIL_USA_ISO=... cargo test --features devtools probe_manifest -- --ignored --nocapture`
+/// NDMW.IGB archive part, entry, file name and directory of every listed file.
+#[test]
+#[ignore]
+fn probe_manifest() {
+    let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+    let f = crate::iso9660::find_file(&iso, "NDMW.IGB").unwrap();
+    let at = f.lba as usize * 2048;
+    let manifest = Pack::parse(&iso[at..at + f.size as usize]).unwrap();
+    for id in 0..manifest.ids.len() as u32 {
+        if manifest.class(id, "igAdxAfsFile").is_err() || manifest.val(id, 3).unwrap() == NULL {
+            continue;
+        }
+        let path = manifest
+            .array(manifest.val(id, 3).unwrap())
+            .unwrap()
+            .into_iter()
+            .map(|node| {
+                String::from_utf8_lossy(
+                    graft::name_of(&manifest, manifest.rec(node).unwrap()).unwrap_or_default(),
+                )
+                .into_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        println!(
+            "FILE part {} entry {} {} {path}",
+            manifest.val(id, 4).unwrap(),
+            manifest.val(id, 5).unwrap(),
+            String::from_utf8_lossy(
+                graft::name_of(&manifest, manifest.rec(id).unwrap()).unwrap_or_default()
+            )
+        );
+    }
+}
+
+/// `DW4_RETAIL_USA_ISO=... cargo test --features devtools probe_boss_sequences -- --ignored --nocapture`
+/// Named sequences of every dungeon boss family in its arena pack.
+#[test]
+#[ignore]
+fn probe_boss_sequences() {
+    let iso = std::fs::read(std::env::var("DW4_RETAIL_USA_ISO").unwrap()).unwrap();
+    let afs = boss::intro::archive(&iso).unwrap();
+    let data = |e: usize| {
+        let (o, l) = (
+            u32at(afs, 8 + 8 * e).unwrap() as usize,
+            u32at(afs, 12 + 8 * e).unwrap() as usize,
+        );
+        &afs[o..o + l]
+    };
+    for arena in boss::ARENAS {
+        let p = Pack::parse(data(arena.entry)).unwrap();
+        println!(
+            "SEQ {} {:?}",
+            arena.model,
+            model_sequences(&p, arena.model).unwrap()
+        );
+    }
+}

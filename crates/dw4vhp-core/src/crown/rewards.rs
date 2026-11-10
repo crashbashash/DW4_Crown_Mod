@@ -53,6 +53,20 @@ impl StageRewards {
             free,
         }
     }
+    /// Unfilled rows still available for new variants.
+    pub fn spare(&self) -> usize {
+        self.free.len()
+    }
+    /// Give an original row the `combat` family's model and elemental flavour in
+    /// this stage's database, keeping its own stats and rewards. Callers ensure
+    /// that no other generator of the stage uses the row.
+    pub fn rebind(&mut self, combat: usize, row: usize) -> bool {
+        let variant = Variant {
+            combat,
+            reward: row,
+        };
+        *self.rows.entry(row).or_insert(variant) == variant
+    }
     pub fn assign(&mut self, combat: usize, reward: usize) -> Option<usize> {
         if combat == reward {
             return Some(combat);
@@ -262,9 +276,11 @@ impl Plan {
                 let models = model_list(&p, positions[0], table.len())?;
                 let mut model_bytes = bytes[models.clone()].to_vec();
                 for (&row, variant) in &request.rows {
+                    // Rebound boss rows keep their own stats; other variants
+                    // occupy unfilled rows.
                     need(
                         row < table.len()
-                            && table.hp[row] == 0
+                            && (table.hp[row] == 0 || row == variant.reward)
                             && variant.combat < table.len()
                             && variant.reward < table.len(),
                         "invalid local reward variant",

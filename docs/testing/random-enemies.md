@@ -66,6 +66,49 @@ returned afterwards. Later patrols of the previewed family spawned and moved on
 the Minotaurmon, Sukamon, Raremon and Tortamon floors. Raremon patrols were not
 reached at the three Goblin Pass generators visited. PS2 has data checks only.
 
+## Repeat boss fights (rules 29)
+
+Rules 29 adds the eleven repeat boss encounters to the Random bosses shuffle:
+Abyss of Grief (Blossomon), Grief Wasteland and Mangrove Forest (SkullGreymon
+and ShogunGekomon, five strength variants each, started by a random roll in
+`mata05.lua` and `gene131.lua`), Quest 1 (Mammothmon), the three Quest 4
+variants (Anomalocarimon), Quest 7 (ShogunGekomon) and the three Quest 8 variants
+(one to three sequential LordKnightmon). Only the four world bosses and the
+final-boss stages stay native. Each encounter is one slot in the per-difficulty
+inventory, so the shuffle now covers 20 encounters per difficulty. All of an
+encounter's generators change together. Quest 1's `SQ_WALKIN` uses the same
+reviewed activation fallback as Cliff Dungeon B3. Every replacement must provide
+`SQ_DDMG`, which Mangrove's orb timeout sends to the boss by name.
+
+Mangrove Forest has no unfilled stat rows left after patrol planning. When a stage
+cannot supply a new row, a boss row used only by that encounter (on that
+difficulty, across all of the stage's packs) is rebound in the stage's own
+database: it keeps its stats and EXP and takes the replacement's model and bounded
+elemental resistances. Encounters with neither keep their native boss.
+
+PS2 USA seed 1520 (vanilla balance) changed all 60 boss slots. The full-image
+audit checked every slot's patrol exclusion against the written MODEL databases,
+93 replaced boss generators (15 on rebound rows), 1,554 localized stat cases,
+the 27 dungeon cards, 60 victory callbacks, the absence of any stage script still
+addressing the original boss, health meters following the replacement, the 18
+world-boss generator packs and byte-for-byte recovery. GameCube USA seed 1520 passed the
+same audit with the same totals. On retail data, 151 of 160
+site/family combinations fit; the rest are patrol-resident MR04/MR05 in Quest 8
+and ShogunGekomon lacking a walk-in fallback.
+
+Live checks on that image used Hard, one player and a level-999 save, with
+healing, teleports and enemy HP zeroed before ordinary attacks. Mangrove Forest
+(both waves, then Anomalocarimon), Abyss of Grief (LordKnightmon), Grief
+Wasteland (MR05), Quest 1 (Blossomon walking in), Quest 7 (Diaboromon) and all
+three rooms of Quest 8 Very Hard (ShogunGekomon) spawned, fought and set their
+native defeat flags (371, 66, 368, 115, 187, then 208, 250, 251 and the quest
+clear flag 452), with control restored and no logged guest memory faults. Quest
+4's replacement spawned from its native trigger, but the test harness did not
+complete that fight. Quests were reached through the developer stage menu;
+redirecting a world gate straight into a quest stage crashes the game without
+quest context and is not a valid test route. GameCube, Europe, Japan, Normal and
+Very Hard were not tested live.
+
 ## Optional dungeon bosses
 
 The app’s **Random bosses** setting appears under Random enemies and starts

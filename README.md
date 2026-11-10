@@ -17,7 +17,7 @@ Open the app and choose your own copy of the game to create a new, modded copy.
 
 1. [Download the app](#download) for Windows or Linux.
 2. Open it and choose your game disc image (`.iso`, or `.ciso` / `.rvz` for GameCube).
-3. Select at least one option in Settings. Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards. Under Random enemies, optionally enable **Random bosses** on any supported PS2 or GameCube disc; the four world bosses remain fixed.
+3. Select at least one option in Settings. Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards. Under Random enemies, optionally enable **Random bosses** on any supported PS2 or GameCube disc; every boss except the four world bosses is shuffled.
 4. Click **Patch ISO**.
 5. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
 
@@ -37,7 +37,7 @@ The same randomiser seed reproduces enemy choices within the same rules version.
 
 - **Optional random enemies.** Normal, Hard and Very Hard get separate seeded rosters. Aim for four distinct replacement families per stage and difficulty, spreading ordinary groups across compatible replacements and keeping native encounters where required. Load only the current difficulty's resources. River banks and train-side encounters use ranged families; enemies boarding the train stay native. Preserve each original spawn’s combat stats and EXP, with elemental resistance differences limited to ±100 points. Works with the original balance or Crown Mod.
 
-- **Optional random bosses.** Enable this under Random enemies on any supported PS2 or GameCube disc. Shuffle dungeon bosses while keeping the four world bosses fixed, preserving encounter frequencies, key drops and progression. Replacements avoid boss families already in patrols on any floor of the dungeon, and intro text follows the selected boss.
+- **Optional random bosses.** Enable this under Random enemies on any supported PS2 or GameCube disc. Shuffle dungeon bosses, overworld rematches and quest bosses while keeping the four world bosses fixed, preserving encounter frequencies, key drops and progression. Replacements avoid boss families already in patrols on any floor of the dungeon or quest, and dungeon intro text follows the selected boss.
 
 - **Optional random crown colours.** Every enemy and boss gets a cosmetic crown
   in a random colour. Works with or without Crown Mod. This changes the icon only; combat stats and drops

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Random bosses now also shuffles the repeat boss fights: Blossomon in Abyss of Grief, SkullGreymon in Grief Wasteland, ShogunGekomon in Mangrove Forest, and the Quest 1, 4, 7 and 8 bosses. Only the four world bosses stay fixed.
+- Enemy introductions preview a family that patrols their stage.
+- Updating an image named after its seed renames it to the new seed.
+
 ## v0.19.0
 
 - Tortamon can now appear as a random enemy, except in Mangrove Forest.

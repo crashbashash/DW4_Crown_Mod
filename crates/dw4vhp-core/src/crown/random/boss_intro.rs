@@ -723,7 +723,7 @@ pub(in crate::crown::random) fn verify_image(
             continue;
         }
         let p = Pack::parse(bytes)?;
-        for arena in ARENAS {
+        for arena in sites() {
             let prefix = format!("[0.{}]|", arena.entry);
             for r in &p.objects {
                 if p.classes[r.class].name != "igNamedObject" {
@@ -756,6 +756,8 @@ pub(in crate::crown::random) fn verify_image(
         }
     }
     let mut checked = 0;
+    let mut renamed = 0;
+    let mut cards = 0;
     let mut localized = 0;
     for (tier, report) in roster["tiers"]
         .as_array()
@@ -763,7 +765,7 @@ pub(in crate::crown::random) fn verify_image(
         .iter()
         .enumerate()
     {
-        for arena in ARENAS {
+        for arena in sites() {
             let boss = report["bosses"]
                 .as_array()
                 .and_then(|bosses| {
@@ -784,14 +786,40 @@ pub(in crate::crown::random) fn verify_image(
             let (old_at, old_size) = old_entries[arena.entry];
             let native = Pack::parse(&original[old_at..old_at + old_size])?;
             let current = Pack::parse(bytes)?;
-            let replaced_command = match arena.entry {
-                210 => Some("SQ_WALKIN"),
-                296 => Some("SQ_SWON"),
-                _ => None,
-            };
             if boss != arena.model {
+                // Waits, cleanup and health meters must address the replacement.
+                let native_names = [arena.model.to_string(), format!("{}/I<0>", arena.model)];
+                for id in 0..current.ids.len() as u32 {
+                    if current.class(id, "beLuaData").is_err() {
+                        continue;
+                    }
+                    let Some(name) = graft::name_of(&current, current.rec(id)?)
+                        .and_then(|s| std::str::from_utf8(s).ok())
+                    else {
+                        continue;
+                    };
+                    need(
+                        !lua_names::constants(script(&current, name)?)?
+                            .iter()
+                            .any(|c| native_names.iter().any(|n| c.text == n.as_bytes())),
+                        "a stage script still addresses the original boss",
+                    )?;
+                }
+                let meter = |p: &Pack, model: &str| -> Result<bool> {
+                    Ok(lua_names::constants(script(p, arena.intro)?)?
+                        .iter()
+                        .any(|c| c.text == format!("{model}/I<0>").as_bytes()))
+                };
+                // Vine Tunnel's three MR04 have no health meter.
+                need(
+                    !meter(&native, arena.model)? || meter(&current, boss)?,
+                    "encounter health meter does not follow the replacement",
+                )?;
+                renamed += 1;
                 let sequences = model_sequences(&current, boss)?;
-                if replaced_command.is_some_and(|command| !sequences.contains(command))
+                if arena
+                    .command
+                    .is_some_and(|command| !sequences.contains(command))
                     && sequences.contains("SQ_ENTR")
                 {
                     let constants = lua_names::constants(script(&current, arena.intro)?)?;
@@ -824,7 +852,8 @@ pub(in crate::crown::random) fn verify_image(
                         (format!("{}/I<0>", arena.model), format!("{boss}/I<0>")),
                     ]),
                 )?
-                .ok_or_else(|| bad("missing boss victory model reference"))?
+                // Overworld and quest victory callbacks can be empty.
+                .unwrap_or_else(|| death.to_vec())
             };
             need(
                 script(&current, &format!("ded_{boss}.lua"))? == expected_death,
@@ -834,6 +863,10 @@ pub(in crate::crown::random) fn verify_image(
                 script(&current, &format!("ded_{}.lua", arena.model))? == expected_death,
                 "original arena victory callback alias was removed or changed",
             )?;
+            checked += 1;
+            if !arena.card() {
+                continue;
+            }
             let (_, area) = file(written, "AREA.AFS")?;
             let rows = message_indexes(bytes, arena)?;
             let donor = ARENAS.iter().position(|a| a.model == boss).unwrap();
@@ -875,17 +908,18 @@ pub(in crate::crown::random) fn verify_image(
                     }
                 }
             }
-            checked += 1;
+            cards += 1;
         }
     }
     need(
-        checked == ARENAS.len() * 3,
+        checked == sites().count() * 3 && cards == ARENAS.len() * 3,
         "missing boss intro verification",
     )?;
     eprintln!(
-        "BOSS INTRO IMAGE: {checked} boss cards match the final roster across all difficulties and all seven language packs"
+        "BOSS INTRO IMAGE: {cards} boss cards match the final roster across all difficulties and all seven language packs"
     );
     eprintln!("BOSS VICTORY IMAGE: {checked} death callbacks preserve the destination's complete flag, door and reward bytecode");
+    eprintln!("BOSS SCRIPTS IMAGE: {renamed} replaced encounters have no stage script addressing the original boss, and their health meters follow the replacement");
     eprintln!("BOSS LOCALIZED IMAGE: {localized} language/difficulty cards; original messages, database memory and resource IDs preserved; native AFS layout verified");
     Ok(())
 }

@@ -2,7 +2,7 @@
 //! stage's model pack, then points each regular generator at one of the models the stage now
 //! carries. Local rows inherit the original encounter's combat stats and rewards, with
 //! bounded elemental differences from the selected family. An optional second pass shuffles
-//! supported dungeon bosses after patrol planning. Other bosses, generators that stage
+//! every boss except the world bosses after patrol planning. Generators that stage
 //! scripts wait on by name, and kill-count stages are left as shipped; cutscenes that wait on
 //! an intro enemy by name get their name constants renamed to the model now spawned.
 //! Model-specific entrances stay native; normal activations and reviewed script groups
@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, env};
 
 /// Bumped whenever a change alters what a seed produces, so a seed is only comparable
 /// between images with the same rules version.
-pub const RULES_VERSION: u32 = 28;
+pub const RULES_VERSION: u32 = 29;
 /// New models tried per stage by the shipped patch.
 pub const DONORS: usize = 4;
 
@@ -27,7 +27,7 @@ const MANGROVE_WAVES: &[(&str, &str)] = &[("GENE-139", "e_otama"), ("GENE-131", 
 
 pub struct Options {
     pub seed: u64,
-    /// Also shuffle compatible dungeon bosses after patrol planning.
+    /// Also shuffle compatible bosses (all but the world bosses) after patrol planning.
     pub random_bosses: bool,
     /// How many new models to try to copy into each stage.
     pub donors: usize,
@@ -277,7 +277,8 @@ fn scripted_models(p: &Pack, entry: usize) -> Result<BTreeSet<&'static str>> {
             if constants.iter().any(|c| c.text == model.as_bytes()) {
                 // Mangrove's wave wait and cleanup are explicitly retargeted
                 // below. They must not pin the wave or unrelated patrol families.
-                // ShogunGekomon and the scene's NPCs retain their native scripts.
+                // The scene's NPCs retain their native scripts; the boss pass
+                // retargets ShogunGekomon's.
                 if entry == 686
                     && matches!(
                         (name, model),
@@ -790,11 +791,11 @@ impl Randomiser {
         }
     }
 
-    /// Analysis may skip byte work after the choices, except in boss arenas:
-    /// boss replacement copies into the finished arena pack.
+    /// Analysis may skip byte work after the choices, except in boss stages:
+    /// boss replacement copies into the finished stage pack.
     fn skip_bytes(&self, entry: usize) -> bool {
         self.opts.picks_only
-            && !(self.opts.random_bosses && boss::ARENAS.iter().any(|a| a.entry == entry))
+            && !(self.opts.random_bosses && boss::sites().any(|a| a.entry == entry))
     }
 
     fn finish_stage(&self, entry: usize, mut dst: Vec<u8>) -> Result<Vec<u8>> {

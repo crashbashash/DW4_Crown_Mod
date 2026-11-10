@@ -50,7 +50,10 @@ fn build_boss_test_image() {
     assert_eq!(signed["options"]["crownMod"], false);
     assert_eq!(signed["options"]["randomEnemies"], true);
     assert_eq!(signed["options"]["randomBosses"], true);
-    assert_eq!(signed["randomEnemies"]["bosses"]["encounters"], 9);
+    assert_eq!(
+        signed["randomEnemies"]["bosses"]["encounters"],
+        sites().count()
+    );
     let info = json!({"md5": outcome.md5, "bytes": outcome.bytes, "signature": signed});
     std::fs::write(
         output.with_extension("iso.audit.json"),
@@ -127,23 +130,28 @@ fn probe_boss_image_compatibility() {
         let len = u32at(afs, 12 + 8 * e).unwrap() as usize;
         &afs[at..at + len]
     };
-    for arena in ARENAS {
+    for arena in sites() {
         for donor in ARENAS {
             if arena.model == donor.model {
                 continue;
             }
+            let count = match arena.entry {
+                319 => 3,
+                _ if arena.alternatives => 1,
+                _ => arena.generators.len(),
+            };
             let result = prepare_model(
                 data(arena.entry),
                 data(donor.entry),
                 arena,
                 donor.model,
-                if arena.entry == 319 { 3 } else { 1 },
+                count,
             );
             eprintln!(
                 "BOSS FIT {} <- {}: {:?}",
                 arena.entry,
                 donor.model,
-                result.as_ref().map(|b| b.len())
+                result.as_ref().map(|b| b.len()).map_err(|e| e.to_string())
             );
         }
     }
@@ -254,7 +262,7 @@ fn verify_dungeon_patrols(source: &[u8], written: &[u8], roster: &serde_json::Va
     let area = file(written, "AREA.AFS");
     let mut verified = 0;
     for (tier, report) in roster["tiers"].as_array().unwrap().iter().enumerate() {
-        for arena in ARENAS {
+        for arena in sites() {
             let selection = report["bosses"]
                 .as_array()
                 .unwrap()
@@ -305,7 +313,7 @@ fn verify_dungeon_patrols(source: &[u8], written: &[u8], roster: &serde_json::Va
                 assert_eq!(models.len(), 1);
                 let pack = gens[[1, 0, 2][tier]];
                 for g in generators(&Pack::parse(entry(output, pack)).unwrap()).unwrap() {
-                    if floor == arena.entry && g.name == arena.generator {
+                    if floor == arena.entry && arena.generators.contains(&g.name.as_str()) {
                         continue;
                     }
                     if let Some(&model) = models[0].get(g.row as usize) {
@@ -328,7 +336,7 @@ fn verify_dungeon_patrols(source: &[u8], written: &[u8], roster: &serde_json::Va
                 .collect::<BTreeSet<_>>();
             assert_eq!(
                 actual, claimed,
-                "dungeon patrol roster {} tier {tier}",
+                "boss patrol roster {} tier {tier}",
                 arena.entry
             );
             if selection["changed"] == true {
@@ -337,9 +345,9 @@ fn verify_dungeon_patrols(source: &[u8], written: &[u8], roster: &serde_json::Va
             verified += 1;
         }
     }
-    assert_eq!(verified, 27);
+    assert_eq!(verified, 3 * sites().count());
     eprintln!(
-        "BOSS DUNGEON PATROLS: all 27 choices checked against every floor's written MODEL database"
+        "BOSS PATROLS: all {verified} choices checked against every floor's written MODEL database"
     );
 }
 
@@ -421,8 +429,9 @@ fn verify_boss_test_image_stats_and_rosters() {
         }
     }
     let mut boss_rows = 0;
+    let mut rebound_rows = 0;
     let mut block_checks = 0;
-    for arena in ARENAS {
+    for arena in sites() {
         let packs = (arena.entry + 1..=arena.entry + 7)
             .filter(|&index| {
                 let raw = entry(original_afs, index);
@@ -442,93 +451,111 @@ fn verify_boss_test_image_stats_and_rosters() {
             let patrols = selected["patrols"].as_array().unwrap();
             let original_pack = Pack::parse(entry(original_afs, pack)).unwrap();
             let output_pack = Pack::parse(entry(output_afs, pack)).unwrap();
-            let id = original_pack
-                .named("beGeneraterData", arena.generator)
-                .unwrap();
-            let old_row = original_pack.val(id, graft::GENERATOR_ROW).unwrap();
-            let new_row = output_pack.val(id, graft::GENERATOR_ROW).unwrap() as usize;
-            let expected_generator = original_pack
-                .rec(id)
-                .unwrap()
-                .patch(original_pack.b, &[(graft::GENERATOR_ROW, new_row as u32)])
-                .unwrap();
-            assert_eq!(
-                expected_generator,
-                output_pack.b[output_pack.rec(id).unwrap().range.clone()],
-                "boss generator callbacks, drops or counts changed: {} tier {difficulty}",
-                arena.entry
-            );
-            let mut queue = vec![id];
-            let mut seen = BTreeSet::new();
-            while let Some(dependency) = queue.pop() {
-                if !seen.insert(dependency) {
-                    continue;
-                }
-                let (original_range, output_range) =
-                    if original_pack.ids[dependency as usize].is_some() {
-                        let record = original_pack.rec(dependency).unwrap();
-                        for (field, _) in graft::ref_slots(&original_pack, record) {
-                            let target = record.val(original_pack.b, field).unwrap();
-                            if target != NULL {
-                                queue.push(target);
-                            }
-                        }
-                        // Generator item/player lists contain object IDs. The
-                        // adjacent position/rotation lists contain raw vectors
-                        // and floats and must never be interpreted as IDs.
-                        let class = &original_pack.classes[record.class].name;
-                        if class.starts_with("beGenerater") && class.ends_with("List") {
-                            queue.extend(
-                                original_pack
-                                    .array(dependency)
-                                    .unwrap()
-                                    .into_iter()
-                                    .filter(|&v| v != NULL),
-                            );
-                        }
-                        (
-                            record.range.clone(),
-                            output_pack.rec(dependency).unwrap().range.clone(),
-                        )
-                    } else {
-                        (
-                            original_pack.memory[dependency as usize].clone().unwrap(),
-                            output_pack.memory[dependency as usize].clone().unwrap(),
-                        )
-                    };
-                if dependency == id {
-                    continue;
-                }
+            for name in arena.generators {
+                let id = original_pack.named("beGeneraterData", name).unwrap();
+                let old_row = original_pack.val(id, graft::GENERATOR_ROW).unwrap();
+                let new_row = output_pack.val(id, graft::GENERATOR_ROW).unwrap() as usize;
+                let expected_generator = original_pack
+                    .rec(id)
+                    .unwrap()
+                    .patch(original_pack.b, &[(graft::GENERATOR_ROW, new_row as u32)])
+                    .unwrap();
                 assert_eq!(
-                    original_pack.b[original_range], output_pack.b[output_range],
-                    "boss drop/callback dependency changed: {} tier {difficulty} ID {dependency}",
+                    expected_generator,
+                    output_pack.b[output_pack.rec(id).unwrap().range.clone()],
+                    "boss generator callbacks, drops or counts changed: {} tier {difficulty}",
                     arena.entry
                 );
-            }
-            if to == arena.model {
-                if !metadata["options"]["randomBosses"]
-                    .as_bool()
-                    .unwrap_or(false)
-                {
-                    assert_eq!(family(new_row as u32), Some(arena.model));
+                let mut queue = vec![id];
+                let mut seen = BTreeSet::new();
+                while let Some(dependency) = queue.pop() {
+                    if !seen.insert(dependency) {
+                        continue;
+                    }
+                    let (original_range, output_range) =
+                        if original_pack.ids[dependency as usize].is_some() {
+                            let record = original_pack.rec(dependency).unwrap();
+                            for (field, _) in graft::ref_slots(&original_pack, record) {
+                                let target = record.val(original_pack.b, field).unwrap();
+                                if target != NULL {
+                                    queue.push(target);
+                                }
+                            }
+                            // Generator item/player lists contain object IDs. The
+                            // adjacent position/rotation lists contain raw vectors
+                            // and floats and must never be interpreted as IDs.
+                            let class = &original_pack.classes[record.class].name;
+                            if class.starts_with("beGenerater") && class.ends_with("List") {
+                                queue.extend(
+                                    original_pack
+                                        .array(dependency)
+                                        .unwrap()
+                                        .into_iter()
+                                        .filter(|&v| v != NULL),
+                                );
+                            }
+                            (
+                                record.range.clone(),
+                                output_pack.rec(dependency).unwrap().range.clone(),
+                            )
+                        } else {
+                            (
+                                original_pack.memory[dependency as usize].clone().unwrap(),
+                                output_pack.memory[dependency as usize].clone().unwrap(),
+                            )
+                        };
+                    if dependency == id {
+                        continue;
+                    }
+                    assert_eq!(
+                        original_pack.b[original_range], output_pack.b[output_range],
+                        "boss drop/callback dependency changed: {} tier {difficulty} ID {dependency}",
+                        arena.entry
+                    );
                 }
-                assert_eq!(old_row as usize, new_row);
-                continue;
+                if to == arena.model {
+                    if !metadata["options"]["randomBosses"]
+                        .as_bool()
+                        .unwrap_or(false)
+                    {
+                        assert_eq!(family(new_row as u32), Some(arena.model));
+                    }
+                    assert_eq!(old_row as usize, new_row);
+                    continue;
+                }
+                assert!(!patrols.iter().any(|m| m.as_str() == Some(to)));
+                if new_row == old_row as usize {
+                    // A rebound boss row must belong to this encounter alone.
+                    for &other in &packs {
+                        let p = Pack::parse(entry(output_afs, other)).unwrap();
+                        for g in generators(&p).unwrap() {
+                            if other == pack && arena.generators.contains(&g.name.as_str()) {
+                                continue;
+                            }
+                            assert_ne!(
+                                g.row as usize, new_row,
+                                "rebound boss row is shared: {} {}",
+                                arena.entry, g.name
+                            );
+                        }
+                    }
+                    rebound_rows += 1;
+                } else {
+                    assert_eq!(
+                        before.hp[new_row], 0,
+                        "boss variants must use unfilled rows"
+                    );
+                }
+                let combat = nearest_row(&before, old_row, to).unwrap();
+                request.rows.insert(
+                    new_row,
+                    super::super::rewards::Variant {
+                        combat: combat as usize,
+                        reward: old_row as usize,
+                    },
+                );
+                boss_rows += 1;
             }
-            assert!(!patrols.iter().any(|m| m.as_str() == Some(to)));
-            assert_eq!(
-                before.hp[new_row], 0,
-                "boss variants must use unfilled rows"
-            );
-            let combat = nearest_row(&before, old_row, to).unwrap();
-            request.rows.insert(
-                new_row,
-                super::super::rewards::Variant {
-                    combat: combat as usize,
-                    reward: old_row as usize,
-                },
-            );
-            boss_rows += 1;
         }
         if request.rows.is_empty() {
             continue;
@@ -583,9 +610,9 @@ fn verify_boss_test_image_stats_and_rosters() {
             .map(|b| b["boss"].as_str().unwrap())
             .collect::<BTreeSet<_>>();
         assert_eq!(original, selected);
-        assert_eq!(bosses.len(), 9);
+        assert_eq!(bosses.len(), sites().count());
     }
-    eprintln!("BOSS VERIFY: {} native stat rows match selected balance; {boss_rows} boss swaps; {block_checks} localized stat checks; {protected_packs} fixed world-boss generator packs", live.len());
+    eprintln!("BOSS VERIFY: {} native stat rows match selected balance; {boss_rows} boss generator swaps ({rebound_rows} on rebound exclusive rows); {block_checks} localized stat checks; {protected_packs} fixed world-boss generator packs", live.len());
     let temp = tempfile::tempdir().unwrap();
     let restored = temp.path().join("restored.iso");
     crate::update::restore(&written, &metadata, &restored, &mut |_, _| {}).unwrap();

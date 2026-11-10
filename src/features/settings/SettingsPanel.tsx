@@ -109,7 +109,7 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
             <span className="setting-copy">
               <span className="setting-title" id={`${id}-random-bosses-label`}>Random bosses</span>
               <span className="setting-description" id={`${id}-random-bosses-description`}>
-                Shuffle dungeon bosses while keeping the four world bosses fixed.
+                Shuffle every boss except the four world bosses.
               </span>
             </span>
             <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>

@@ -1,4 +1,6 @@
-//! Optional dungeon boss shuffle, applied after the final patrol selections.
+//! Optional boss shuffle, applied after the final patrol selections. It covers
+//! the dungeon arenas and the repeat overworld and quest fights; the world
+//! bosses are not part of it.
 use super::*;
 use serde_json::json;
 
@@ -8,86 +10,251 @@ pub(in crate::crown) mod intro;
 pub(in crate::crown) struct Arena {
     pub(in crate::crown) entry: usize,
     pub(super) model: &'static str,
-    pub(super) generator: &'static str,
+    /// The generators that spawn this encounter. They change together.
+    pub(super) generators: &'static [&'static str],
+    /// The stage script starts only one of `generators` (a randomly chosen
+    /// strength variant), rather than possibly having several alive at once.
+    pub(super) alternatives: bool,
+    /// The script that starts the encounter. In dungeon arenas it also shows
+    /// the boss's information card.
     pub(super) intro: &'static str,
+    /// A reviewed command `intro` sends the boss that a replacement may lack.
+    /// It is then mapped to the replacement's activation.
+    pub(super) command: Option<&'static str>,
+    /// Floors whose patrol families a replacement must not duplicate.
     pub(super) floors: &'static [usize],
     pub(super) name: &'static str,
 }
 
+impl Arena {
+    /// Dungeon arenas show the boss's information card; the repeat fights do not.
+    pub(super) fn card(&self) -> bool {
+        ARENAS.iter().any(|a| a.entry == self.entry)
+    }
+}
+
+/// Dungeon boss arenas, in card-bank order. Each is also the import source of its family.
 pub(in crate::crown) const ARENAS: &[Arena] = &[
     Arena {
         entry: 187,
         floors: &[179, 187],
         model: "e_blosso",
-        generator: "GENE-08",
+        generators: &["GENE-08"],
+        alternatives: false,
         intro: "matg08.lua",
+        command: None,
         name: "Humid Cave B2",
     },
     Arena {
         entry: 210,
         floors: &[195, 203, 210],
         model: "e_mammos",
-        generator: "GENE-12",
+        generators: &["GENE-12"],
+        alternatives: false,
         intro: "matg11.lua",
+        command: Some("SQ_WALKIN"),
         name: "Cliff Dungeon B3",
     },
     Arena {
         entry: 241,
         floors: &[233, 241],
         model: "e_skulgrey",
-        generator: "GENE-13",
+        generators: &["GENE-13"],
+        alternatives: false,
         intro: "matg12.lua",
+        command: None,
         name: "Sand Labyrinth B2",
     },
     Arena {
         entry: 265,
         floors: &[249, 257, 265],
         model: "e_anomalo",
-        generator: "GENE-15",
+        generators: &["GENE-15"],
+        alternatives: false,
         intro: "matg15.lua",
+        command: None,
         name: "Ancient Ruins B3",
     },
     Arena {
         entry: 296,
         floors: &[288, 296],
         model: "e_tonogeko",
-        generator: "GENE-11",
+        generators: &["GENE-11"],
+        alternatives: false,
         intro: "matg10.lua",
+        command: Some("SQ_SWON"),
         name: "Geko Path B2",
     },
     Arena {
         entry: 319,
         floors: &[304, 312, 319],
         model: "e_mecha4",
-        generator: "GENE-19",
+        generators: &["GENE-19"],
+        alternatives: false,
         intro: "matg19.lua",
+        command: None,
         name: "Vine Tunnel B3",
     },
     Arena {
         entry: 349,
         floors: &[327, 335, 342, 349],
         model: "e_diabolo",
-        generator: "GENE-24",
+        generators: &["GENE-24"],
+        alternatives: false,
         intro: "matg24.lua",
+        command: None,
         name: "Vein B4",
     },
     Arena {
         entry: 394,
         floors: &[379, 387, 394],
         model: "e_mecha5",
-        generator: "GENE-23",
+        generators: &["GENE-23"],
+        alternatives: false,
         intro: "matg23.lua",
+        command: None,
         name: "Mecha Nest B3",
     },
     Arena {
         entry: 425,
         floors: &[402, 410, 417, 425],
         model: "e_ldknight",
-        generator: "GENE-21",
+        generators: &["GENE-21"],
+        alternatives: false,
         intro: "matg21.lua",
+        command: None,
         name: "Electro Mine B4",
     },
 ];
+
+/// Repeat fights against dungeon bosses: overworld rematches and quest bosses.
+/// They have no information card. Quest stages with separate difficulty
+/// variants (`e`, `h`, `v`) are separate encounters.
+pub(in crate::crown) const REPEATS: &[Arena] = &[
+    Arena {
+        entry: 621,
+        floors: &[621],
+        model: "e_blosso",
+        generators: &["GENE-38"],
+        alternatives: false,
+        intro: "mate01.lua",
+        command: None,
+        name: "Abyss of Grief",
+    },
+    Arena {
+        entry: 649,
+        floors: &[649],
+        model: "e_skulgrey",
+        generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"],
+        alternatives: true,
+        intro: "mata05.lua",
+        command: None,
+        name: "Grief Wasteland",
+    },
+    Arena {
+        entry: 686,
+        floors: &[686],
+        model: "e_tonogeko",
+        generators: &["GENE-s01", "GENE-s02", "GENE-s03", "GENE-s04", "GENE-s05"],
+        alternatives: true,
+        intro: "gene131.lua",
+        command: None,
+        name: "Mangrove Forest",
+    },
+    Arena {
+        entry: 441,
+        floors: &[433, 441],
+        model: "e_mammos",
+        generators: &["GENE-06"],
+        alternatives: false,
+        intro: "matg06.lua",
+        command: Some("SQ_WALKIN"),
+        name: "Quest 1, stage 2",
+    },
+    Arena {
+        entry: 510,
+        floors: &[486, 510],
+        model: "e_anomalo",
+        generators: &["GENE-11"],
+        alternatives: false,
+        intro: "matg11.lua",
+        command: None,
+        name: "Quest 4, stage 2 (Normal)",
+    },
+    Arena {
+        entry: 518,
+        floors: &[494, 518],
+        model: "e_anomalo",
+        generators: &["GENE-11"],
+        alternatives: false,
+        intro: "matg11.lua",
+        command: None,
+        name: "Quest 4, stage 2 (Hard)",
+    },
+    Arena {
+        entry: 526,
+        floors: &[502, 526],
+        model: "e_anomalo",
+        generators: &["GENE-11"],
+        alternatives: false,
+        intro: "matg11.lua",
+        command: None,
+        name: "Quest 4, stage 2 (Very Hard)",
+    },
+    Arena {
+        entry: 556,
+        floors: &[548, 556],
+        model: "e_tonogeko",
+        generators: &["GENE-22"],
+        alternatives: false,
+        intro: "matg15.lua",
+        command: None,
+        name: "Quest 7, stage 2",
+    },
+    Arena {
+        entry: 579,
+        floors: &[564, 572, 579],
+        model: "e_ldknight",
+        generators: &["GENE-22"],
+        alternatives: false,
+        intro: "matg22.lua",
+        command: None,
+        name: "Quest 8, stage 3 (Normal)",
+    },
+    Arena {
+        entry: 587,
+        floors: &[564, 572, 587],
+        model: "e_ldknight",
+        generators: &["GENE-22", "GENE-23"],
+        alternatives: false,
+        intro: "matg22.lua",
+        command: None,
+        name: "Quest 8, stage 3 (Hard)",
+    },
+    Arena {
+        entry: 595,
+        floors: &[564, 572, 595],
+        model: "e_ldknight",
+        generators: &["GENE-22", "GENE-23", "GENE-24"],
+        alternatives: false,
+        intro: "matg22.lua",
+        command: None,
+        name: "Quest 8, stage 3 (Very Hard)",
+    },
+];
+
+/// Every shuffled boss encounter: the dungeon arenas, then the repeat fights.
+pub(in crate::crown) fn sites() -> impl Iterator<Item = &'static Arena> {
+    ARENAS.iter().chain(REPEATS)
+}
+
+/// The import source of a boss family: its dungeon arena.
+pub(super) fn source(model: &str) -> Result<&'static Arena> {
+    ARENAS
+        .iter()
+        .find(|a| a.model == model)
+        .ok_or_else(|| bad("boss family has no source arena"))
+}
 
 pub(super) fn script<'a>(pack: &Pack<'a>, name: &str) -> Result<&'a [u8]> {
     let id = pack.named("beLuaData", name)?;
@@ -235,6 +402,11 @@ pub(super) fn prepare_model(
     // commands. Map only these reviewed boss commands when the donor lacks them;
     // door and camera sequences remain untouched.
     let sequences = model_sequences(&Pack::parse(&out)?, to)?;
+    // Timeout and cleanup scripts (Mangrove's orb timer) defeat the boss by name.
+    need(
+        sequences.contains("SQ_DDMG"),
+        "replacement boss lacks the scripted defeat sequence",
+    )?;
     let mut changes = BTreeMap::new();
     // Blossomon's SQ_NENTR configures normal-enemy death labels, while
     // SQ_ENTR selects its boss callback. Keep the reviewed fallback pool, but
@@ -244,11 +416,8 @@ pub(super) fn prepare_model(
     } else {
         "SQ_NENTR"
     };
-    if arena.entry == 210 && !sequences.contains("SQ_WALKIN") {
-        changes.insert("SQ_WALKIN".into(), activation.into());
-    }
-    if arena.entry == 296 && !sequences.contains("SQ_SWON") {
-        changes.insert("SQ_SWON".into(), activation.into());
+    if let Some(command) = arena.command.filter(|c| !sequences.contains(*c)) {
+        changes.insert(command.into(), activation.into());
     }
     if !changes.is_empty() {
         need(
@@ -279,6 +448,59 @@ struct Files {
 }
 
 impl Randomiser {
+    /// Unfilled stat rows the stage can still give new boss variants.
+    fn spare_rows<'a>(&self, entry: usize, data: &impl Fn(usize) -> &'a [u8]) -> Result<usize> {
+        if let Some(rewards) = self.rewards.get(&entry) {
+            return Ok(rewards.spare());
+        }
+        Ok(self.free_rows(entry, data)?.len())
+    }
+
+    /// Whether only `arena`'s generators in difficulty pack `boss_pack` use
+    /// `row` in the stage's final generator packs. All difficulties share the
+    /// stage's enemy database.
+    fn exclusive_row<'a>(
+        &self,
+        arena: &Arena,
+        boss_pack: usize,
+        row: u32,
+        data: &impl Fn(usize) -> &'a [u8],
+    ) -> Result<bool> {
+        let rewards = self.rewards.get(&arena.entry);
+        for &pack in &self.stages[&arena.entry].gens {
+            for g in generators(&Pack::parse(data(pack))?)? {
+                if pack == boss_pack && arena.generators.contains(&g.name.as_str()) {
+                    continue;
+                }
+                let current = rewards
+                    .and_then(|r| r.targets.get(&pack))
+                    .and_then(|t| t.get(&g.name))
+                    .or_else(|| self.plans.get(&pack).and_then(|p| p.rows.get(&g.name)))
+                    .copied()
+                    .unwrap_or(g.row);
+                if current == row {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn free_rows<'a>(&self, entry: usize, data: &impl Fn(usize) -> &'a [u8]) -> Result<Vec<usize>> {
+        let used = self.stages[&entry]
+            .gens
+            .iter()
+            .map(|&p| generators(&Pack::parse(data(p))?))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .map(|g| g.row as usize)
+            .collect::<BTreeSet<_>>();
+        Ok((0..self.table.len())
+            .filter(|r| self.table.hp[*r] == 0 && !used.contains(r))
+            .collect())
+    }
+
     pub(in crate::crown) fn randomise_bosses(
         &mut self,
         iso: &[u8],
@@ -288,8 +510,9 @@ impl Randomiser {
         crown_mod: bool,
         progress: &mut dyn FnMut(crate::writer::Phase, u64, u64),
     ) -> Result<()> {
-        // Each difficulty checks donors for, then applies, every arena.
-        let steps = 3 * 2 * ARENAS.len() as u64;
+        let count = sites().count();
+        // Each difficulty checks donors for, then applies, every encounter.
+        let steps = 3 * 2 * count as u64;
         let mut step = 0;
         let phase = |step: u64| crate::writer::Phase::RandomisingBosses {
             difficulty: (step * 3 / steps).min(2) as u8,
@@ -305,7 +528,7 @@ impl Randomiser {
             &afs[offset..offset + size]
         };
         let mut files = BTreeMap::new();
-        for arena in ARENAS {
+        for arena in sites() {
             let stage = self
                 .stages
                 .get(&arena.entry)
@@ -327,41 +550,61 @@ impl Randomiser {
                 .get(&(arena.entry - 1))
                 .cloned()
                 .unwrap_or([normal_sound.clone(), normal_sound.clone()]);
-            files.insert(
-                arena.entry,
-                Files {
-                    models: vec![normal, model_extra[0].clone(), model_extra[1].clone()],
-                    sounds: vec![normal_sound, sound_extra[0].clone(), sound_extra[1].clone()],
-                    packs: [stage.gens[1], stage.gens[0], stage.gens[2]],
-                },
-            );
+            need(
+                files
+                    .insert(
+                        arena.entry,
+                        Files {
+                            models: vec![normal, model_extra[0].clone(), model_extra[1].clone()],
+                            sounds: vec![
+                                normal_sound,
+                                sound_extra[0].clone(),
+                                sound_extra[1].clone(),
+                            ],
+                            packs: [stage.gens[1], stage.gens[0], stage.gens[2]],
+                        },
+                    )
+                    .is_none(),
+                "duplicate boss stage",
+            )?;
         }
         let mut report = Vec::new();
         for difficulty in 0..3 {
             let mut slots = Vec::new();
             let mut rejected = Vec::new();
-            for arena in ARENAS {
+            for arena in sites() {
                 let f = &files[&arena.entry];
                 let pack = f.packs[difficulty];
                 let native_generators = generators(&Pack::parse(data(pack))?)?;
-                let boss = native_generators
-                    .iter()
-                    .find(|g| g.name == arena.generator)
-                    .ok_or_else(|| bad("missing boss generator"))?;
-                need(
-                    family(boss.row) == Some(arena.model),
-                    "boss identity differs",
-                )?;
+                let mut most = 0;
+                let mut exclusive = true;
+                for name in arena.generators {
+                    let boss = native_generators
+                        .iter()
+                        .find(|g| g.name == *name)
+                        .ok_or_else(|| bad("missing boss generator"))?;
+                    need(
+                        family(boss.row) == Some(arena.model),
+                        "boss identity differs",
+                    )?;
+                    exclusive &= self.exclusive_row(arena, pack, boss.row, &data)?;
+                    let live = boss.most as usize;
+                    most = if arena.alternatives {
+                        most.max(live)
+                    } else {
+                        most + live
+                    };
+                }
                 let mut patrols = BTreeSet::new();
                 for &floor in arena.floors {
                     let stage = self
                         .stages
                         .get(&floor)
-                        .ok_or_else(|| bad("missing dungeon patrol stage"))?;
-                    need(stage.gens.len() == 3, "missing dungeon difficulty packs")?;
+                        .ok_or_else(|| bad("missing boss patrol stage"))?;
+                    need(stage.gens.len() == 3, "missing patrol difficulty packs")?;
                     let patrol_pack = stage.gens[[1, 0, 2][difficulty]];
                     for g in generators(&Pack::parse(data(patrol_pack))?)? {
-                        if floor == arena.entry && g.name == arena.generator {
+                        if floor == arena.entry && arena.generators.contains(&g.name.as_str()) {
                             continue;
                         }
                         if let Some(model) = family(
@@ -376,11 +619,26 @@ impl Randomiser {
                     }
                 }
                 let mut compatible = BTreeSet::new();
+                // Every replaced generator needs a local stat row: an unfilled
+                // row, or else its own row when no other generator uses it.
+                let rows =
+                    exclusive || self.spare_rows(arena.entry, &data)? >= arena.generators.len();
                 for donor in ARENAS {
                     if donor.model == arena.model || patrols.contains(donor.model) {
                         continue;
                     }
-                    match prepare_model(&f.models[difficulty], data(donor.entry), arena, donor.model, boss.most as usize) {
+                    let fit = if !rows {
+                        Err(bad("no local boss stat rows"))
+                    } else {
+                        prepare_model(
+                            &f.models[difficulty],
+                            data(donor.entry),
+                            arena,
+                            donor.model,
+                            most,
+                        )
+                    };
+                    match fit {
                         Ok(_) => { compatible.insert(donor.model.to_string()); }
                         Err(error) => rejected.push(json!({"stage": arena.entry, "donor": donor.model, "reason": error.to_string()})),
                     }
@@ -398,60 +656,84 @@ impl Randomiser {
                 &mut Rng::new(self.opts.seed, 0xB055_0000 + difficulty as u64),
             )?;
             let mut bosses = Vec::new();
-            for (arena, slot) in ARENAS.iter().zip(&slots) {
+            for (arena, slot) in sites().zip(&slots) {
                 let to = &choices[&slot.id];
                 let f = files.get_mut(&arena.entry).unwrap();
                 let pack = f.packs[difficulty];
-                let original = generators(&Pack::parse(data(pack))?)?
-                    .into_iter()
-                    .find(|g| g.name == arena.generator)
-                    .unwrap();
+                let native = generators(&Pack::parse(data(pack))?)?;
+                let originals = arena
+                    .generators
+                    .iter()
+                    .map(|name| native.iter().find(|g| g.name == *name).unwrap())
+                    .collect::<Vec<_>>();
+                let most = originals.iter().fold(0, |most, g| {
+                    if arena.alternatives {
+                        most.max(g.most as usize)
+                    } else {
+                        most + g.most as usize
+                    }
+                });
                 let changed = to != arena.model;
                 if changed {
                     need(
                         !slot.patrols.contains(to),
                         "boss duplicates a selected patrol",
                     )?;
-                    let donor = ARENAS.iter().find(|d| d.model == to).unwrap();
-                    let all_packs = self.stages[&arena.entry].gens.clone();
-                    let used = all_packs
-                        .iter()
-                        .map(|&p| generators(&Pack::parse(data(p))?))
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .flatten()
-                        .map(|g| g.row as usize)
-                        .collect::<BTreeSet<_>>();
-                    let free = (0..self.table.len())
-                        .filter(|r| self.table.hp[*r] == 0 && !used.contains(r))
-                        .collect();
-                    let rewards = self.rewards.entry(arena.entry).or_insert_with(|| {
-                        super::super::rewards::StageRewards::new(all_packs, free)
-                    });
-                    let combat = nearest_row(&self.table, original.row, to)
-                        .ok_or_else(|| bad("missing boss rarity"))?;
-                    let row = rewards
-                        .assign(combat as usize, original.row as usize)
-                        .ok_or_else(|| bad("no local boss stat row"))?;
+                    let donor = source(to)?;
+                    if !self.rewards.contains_key(&arena.entry) {
+                        let free = self.free_rows(arena.entry, &data)?;
+                        let all_packs = self.stages[&arena.entry].gens.clone();
+                        self.rewards.insert(
+                            arena.entry,
+                            super::super::rewards::StageRewards::new(all_packs, free),
+                        );
+                    }
+                    let mut exclusive = BTreeMap::new();
+                    for original in &originals {
+                        exclusive.insert(
+                            original.row,
+                            self.exclusive_row(arena, pack, original.row, &data)?,
+                        );
+                    }
+                    let rewards = self.rewards.get_mut(&arena.entry).unwrap();
+                    let mut rows = BTreeMap::new();
+                    let mut combats = BTreeMap::new();
+                    for original in &originals {
+                        let combat = nearest_row(&self.table, original.row, to)
+                            .ok_or_else(|| bad("missing boss rarity"))?;
+                        let row = match rewards.assign(combat as usize, original.row as usize) {
+                            Some(row) => row,
+                            None if exclusive[&original.row]
+                                && rewards.rebind(combat as usize, original.row as usize) =>
+                            {
+                                original.row as usize
+                            }
+                            None => return Err(bad("no local boss stat row")),
+                        };
+                        rows.insert(original.name.clone(), row as u32);
+                        combats.insert(original.name.clone(), combat);
+                    }
                     rewards
                         .targets
                         .entry(pack)
                         .or_default()
-                        .insert(arena.generator.to_string(), row as u32);
+                        .extend(rows.clone());
                     if !self.opts.picks_only {
                         let current = materialize(data(pack), &edits[pack])?;
                         let rt = Retarget {
-                            rows: BTreeMap::from([(arena.generator.to_string(), row as u32)]),
+                            rows: rows.clone(),
                             ..Default::default()
                         };
-                        let (generator_bytes, count) = graft::retarget_rows(&current, &rt)?;
-                        need(count == 1, "boss retarget count differs")?;
+                        let (generator_bytes, retargeted) = graft::retarget_rows(&current, &rt)?;
+                        need(retargeted == rows.len(), "boss retarget count differs")?;
                         let before = Pack::parse(&current)?;
                         let mut expected = current.clone();
-                        let field = before
-                            .rec(before.named("beGeneraterData", arena.generator)?)?
-                            .field(graft::GENERATOR_ROW)?;
-                        expected[field].copy_from_slice(&(row as u32).to_le_bytes());
+                        for (name, row) in &rows {
+                            let field = before
+                                .rec(before.named("beGeneraterData", name)?)?
+                                .field(graft::GENERATOR_ROW)?;
+                            expected[field].copy_from_slice(&row.to_le_bytes());
+                        }
                         need(
                             generator_bytes == expected,
                             "boss retarget changed native callbacks or counts",
@@ -461,11 +743,7 @@ impl Randomiser {
                             bytes: generator_bytes,
                         }];
                     }
-                    self.plans
-                        .entry(pack)
-                        .or_default()
-                        .rows
-                        .insert(arena.generator.to_string(), combat);
+                    self.plans.entry(pack).or_default().rows.extend(combats);
                     // Model preparation never alters the localized stat table;
                     // this shared reward plan applies vanilla encounter stats once.
                     if !self.opts.picks_only {
@@ -474,9 +752,12 @@ impl Randomiser {
                             data(donor.entry),
                             arena,
                             to,
-                            original.most as usize,
+                            most,
                         )?;
-                        model = intro::retarget(&model, arena, to, message_bases[&arena.entry])?;
+                        if arena.card() {
+                            model =
+                                intro::retarget(&model, arena, to, message_bases[&arena.entry])?;
+                        }
                         let companions = graft::companion_models(
                             &Pack::parse(data(donor.entry))?,
                             None,
@@ -501,13 +782,14 @@ impl Randomiser {
                 }
                 self.stats.trace.push(format!(
                     "boss {difficulty} {} {} {to}",
-                    arena.entry, arena.generator
+                    arena.entry,
+                    arena.generators.join(",")
                 ));
                 eprintln!(
                     "BOSS IMAGE tier {difficulty} {}: {} -> {to}",
                     arena.entry, arena.model
                 );
-                bosses.push(json!({"stage": arena.entry, "area": arena.name, "generator": arena.generator,
+                bosses.push(json!({"stage": arena.entry, "area": arena.name, "generators": arena.generators,
                     "original": arena.model, "boss": to, "changed": changed, "patrols": slot.patrols, "patrolFloors": arena.floors}));
                 tick();
             }
@@ -540,14 +822,14 @@ impl Randomiser {
             self.sounds.insert(entry - 1, f.sounds.pop().unwrap());
             self.extra.insert(entry - 1, [hard_sound, very_hard_sound]);
         }
-        let evidence = json!({"prototypeVersion": 3, "bossIntroText": true,
+        let evidence = json!({"prototypeVersion": 4, "bossIntroText": true,
             "introTextMode": "localizedUnicodeIndexes", "arenaVictoryAliases": true,
             "arenaHealthDisplay": true, "seed": self.opts.seed, "crownMod": crown_mod,
-            "scope": "nine dungeon boss encounters; extra overworld and quest bosses remain native",
+            "scope": "dungeon boss arenas and repeat overworld and quest boss encounters; world bosses remain native",
             "worldBossesFixed": true, "tiers": report});
         self.boss_report = Some(evidence);
         self.boss_summary = Some(json!({
-            "encounters": ARENAS.len(), "changed": changed,
+            "encounters": count, "changed": changed,
             "worldBossesFixed": true, "preserveEncounterCounts": true,
             "excludeSelectedPatrolFamilies": true, "bossIntroText": true,
         }));

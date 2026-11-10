@@ -37,7 +37,7 @@ fn build_optional_boss_image_through_app_selection() {
     assert_eq!(metadata["options"]["randomBosses"], bosses);
     assert_eq!(metadata["options"]["crownMod"], plan.crown_mod);
     if bosses {
-        assert_eq!(metadata["randomEnemies"]["bosses"]["encounters"], 9);
+        assert_eq!(metadata["randomEnemies"]["bosses"]["encounters"], 20);
     } else {
         assert!(metadata["randomEnemies"]["bosses"].is_null());
     }
