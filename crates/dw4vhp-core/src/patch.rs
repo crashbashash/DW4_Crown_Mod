@@ -273,7 +273,8 @@ fn patch_file_internal(
         && (plan.four_player_spawns
             || plan.crown_drops
             || plan.random_crown_colours
-            || plan.random_enemies)
+            || plan.random_enemies
+            || plan.solo_buttons)
     {
         return Err(Error::CrownData(
             "optional enemy resources require complete retail archives".into(),

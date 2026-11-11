@@ -255,6 +255,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             random,
             plan.crown_mod,
             Some(&final_table),
+            plan.solo_buttons,
             &mut rebuild,
         )?
     } else {
@@ -268,6 +269,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             random,
             plan.crown_mod,
             Some(&final_table),
+            plan.solo_buttons,
             &mut rebuild,
         )?
     };

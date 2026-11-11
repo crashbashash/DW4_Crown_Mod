@@ -52,6 +52,11 @@ The same randomiser seed reproduces enemy choices within the same rules version.
 - **Optional four-player enemy spawns.** Use four-player spawn counts and wave
   limits with a smaller party. Enemy stats and per-kill drop tables are unchanged
   by this option. Stage scripts still use the actual party size.
+
+- **Optional solo co-op buttons.** In single player, a pressed button of a
+  two-player pair (floor buttons that release when you step off, and timed wall
+  switches) stays down until you press its partner. Rooms whose number of
+  buttons already scales with the party size are unchanged.
 - **Crown Mod balance.** Enemy health and other stats are boosted when Crown Mod is selected. Attack values are
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.

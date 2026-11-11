@@ -20,6 +20,7 @@ fn build_optional_boss_image_through_app_selection() {
         random_enemies: true,
         random_bosses: bosses,
         enemy_seed: Some(1520),
+        solo_buttons: selected("DW4_APP_TEST_SOLO_BUTTONS"),
     };
     let mut plan = selection.into_plan().unwrap();
     if plan.random_crown_colours {

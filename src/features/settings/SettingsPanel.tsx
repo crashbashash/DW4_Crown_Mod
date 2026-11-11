@@ -3,7 +3,7 @@ import { Button, Switch } from "react-aria-components";
 import { newSeed, parseSeed } from "./seed";
 
 /** Optional patches start disabled. */
-export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, randomBosses, onRandomBossesChange, enemySeed, onEnemySeedChange, busy, fileActions }: {
+export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, randomBosses, onRandomBossesChange, enemySeed, onEnemySeedChange, soloButtons, onSoloButtonsChange, busy, fileActions }: {
   fileActions?: ReactNode;
   crownMod: boolean;
   onCrownModChange: (selected: boolean) => void;
@@ -20,6 +20,8 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
   /** The seed field's text; a valid seed is filled in when the option is switched on. */
   enemySeed: string;
   onEnemySeedChange: (text: string) => void;
+  soloButtons: boolean;
+  onSoloButtonsChange: (selected: boolean) => void;
   busy: boolean;
 }) {
   const id = useId();
@@ -65,6 +67,20 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
         <span className="setting-copy">
           <span className="setting-title" id={`${id}-four-player-spawns-label`}>4-player enemy spawns</span>
           <span className="setting-description" id={`${id}-four-player-spawns-description`}>Spawn the same number of enemies as four-player mode.</span>
+        </span>
+        <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      </Switch>
+      <Switch
+        className="setting-row"
+        isSelected={soloButtons}
+        onChange={onSoloButtonsChange}
+        isDisabled={busy}
+        aria-labelledby={`${id}-solo-buttons-label`}
+        aria-describedby={`${id}-solo-buttons-description`}
+      >
+        <span className="setting-copy">
+          <span className="setting-title" id={`${id}-solo-buttons-label`}>Solo co-op buttons</span>
+          <span className="setting-description" id={`${id}-solo-buttons-description`}>In single player, a pressed two-player button stays down until you press its partner.</span>
         </span>
         <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
       </Switch>

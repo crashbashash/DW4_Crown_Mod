@@ -16,6 +16,8 @@ pub struct PatchSelection {
     pub random_enemies: bool,
     pub random_bosses: bool,
     pub enemy_seed: Option<u32>,
+    /// Latch two-player button pairs in single player.
+    pub solo_buttons: bool,
 }
 
 impl PatchSelection {
@@ -24,6 +26,7 @@ impl PatchSelection {
             || self.four_player_spawns
             || self.random_crown_colours
             || self.random_enemies
+            || self.solo_buttons
     }
 
     /// Build the same balance plan as the desktop selection, rejecting empty
@@ -46,6 +49,7 @@ impl PatchSelection {
             random_enemies: self.random_enemies,
             random_bosses: self.random_bosses,
             enemy_seed: self.enemy_seed.filter(|_| self.random_enemies),
+            solo_buttons: self.solo_buttons,
             ..PatchPlan::default()
         })
     }
@@ -57,6 +61,7 @@ impl PatchSelection {
             crown_mod: self.crown_mod,
             four_player_spawns: self.four_player_spawns,
             crown_drops: self.crown_drops,
+            solo_buttons: self.solo_buttons,
             ..PatchPlan::default()
         }
     }
@@ -78,7 +83,7 @@ mod tests {
             json!({
                 "crownMod": false, "fourPlayerSpawns": false, "crownDrops": false,
                 "randomCrownColours": false, "randomEnemies": false,
-                "randomBosses": false, "enemySeed": null
+                "randomBosses": false, "enemySeed": null, "soloButtons": false
             })
         );
     }

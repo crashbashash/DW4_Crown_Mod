@@ -81,6 +81,7 @@ pub(crate) fn rebuild_afs(
     random: Option<RandomOptions>,
     crown_mod: bool,
     final_table: Option<&crate::table::EnemyTable>,
+    solo_buttons: bool,
     progress: &mut dyn FnMut(Phase, u64, u64),
 ) -> Result<Rebuilt> {
     let _timing = crate::profiling::measure("archive.rebuild");
@@ -413,46 +414,69 @@ pub(crate) fn rebuild_afs(
             }];
         }
     }
-    // Scripted spawns carry literal HP. Give it the final table's HP factor
-    // after every stage, boss and sound edit has settled.
-    if let Some(balanced) = final_table {
-        let authored =
-            crate::table::EnemyTable::read(iso, &crate::release::detect(iso)?.layout_in(iso)?)?;
+    // Final script edits, after every stage, boss and sound edit has settled:
+    // scripted spawns' literal HP gets the final table's HP factor, and solo
+    // button pairs latch.
+    let authored = match final_table {
+        Some(_) => Some(crate::table::EnemyTable::read(
+            iso,
+            &crate::release::detect(iso)?.layout_in(iso)?,
+        )?),
+        None => None,
+    };
+    let finish = |pack: &[u8],
+                  variants: Option<&BTreeMap<usize, rewards::Variant>>|
+     -> Result<Option<Vec<u8>>> {
+        let mut out = None;
+        if let (Some(balanced), Some(authored)) = (final_table, &authored) {
+            out = script_hp::rescale(pack, authored, balanced, variants)
+                .map_err(|e| bad(&format!("script HP: {e}")))?;
+        }
+        if solo_buttons {
+            let current = out.as_deref().unwrap_or(pack);
+            if let Some(bytes) =
+                buttons::latch(current).map_err(|e| bad(&format!("solo buttons: {e}")))?
+            {
+                out = Some(bytes);
+            }
+        }
+        Ok(out)
+    };
+    let candidate = |b: &[u8]| {
+        (final_table.is_some() && script_hp::candidate(b))
+            || (solo_buttons && buttons::candidate(b))
+    };
+    {
         let rewards = random.as_ref().map(|r| &r.rewards);
         let variants = |entry: usize| rewards.and_then(|r| r.get(&entry)).map(|s| &s.rows);
         for (i, edits) in entry_edits.iter_mut().enumerate() {
             let (off, len) = entries[i];
             let data = &afs[off..off + len];
-            if !script_hp::candidate(data) && !edits.iter().any(|e| script_hp::candidate(&e.bytes))
-            {
+            if !candidate(data) && !edits.iter().any(|e| candidate(&e.bytes)) {
                 continue;
             }
-            let rescaled = match edits.as_slice() {
-                [] => script_hp::rescale(data, &authored, balanced, variants(i)),
-                [e] if e.range == (0..len) => {
-                    script_hp::rescale(&e.bytes, &authored, balanced, variants(i))
-                }
-                _ => {
-                    script_hp::rescale(&materialize(data, edits)?, &authored, balanced, variants(i))
-                }
+            let finished = match edits.as_slice() {
+                [] => finish(data, variants(i)),
+                [e] if e.range == (0..len) => finish(&e.bytes, variants(i)),
+                _ => finish(&materialize(data, edits)?, variants(i)),
             }
-            .map_err(|e| bad(&format!("script HP in entry {i}: {e}")))?;
-            if let Some(bytes) = rescaled {
+            .map_err(|e| bad(&format!("entry {i}: {e}")))?;
+            if let Some(bytes) = finished {
                 *edits = vec![Edit {
                     range: 0..len,
                     bytes,
                 }];
             }
         }
-        if let Some(r) = random.as_mut() {
-            for (&entry, packs) in &mut r.extra {
-                for pack in packs {
-                    let variants = r.rewards.get(&entry).map(|s| &s.rows);
-                    if let Some(bytes) = script_hp::rescale(pack, &authored, balanced, variants)
-                        .map_err(|e| bad(&format!("script HP in entry {entry} variant: {e}")))?
-                    {
-                        *pack = bytes;
-                    }
+    }
+    if let Some(r) = random.as_mut() {
+        for (&entry, packs) in &mut r.extra {
+            for pack in packs {
+                let variants = r.rewards.get(&entry).map(|s| &s.rows);
+                if let Some(bytes) = finish(pack, variants)
+                    .map_err(|e| bad(&format!("entry {entry} variant: {e}")))?
+                {
+                    *pack = bytes;
                 }
             }
         }
@@ -796,6 +820,7 @@ impl CrownPlan {
             Some(options),
             crown_mod,
             None,
+            false,
             &mut |_, _, _| {},
         )?
         .random
@@ -848,6 +873,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -863,6 +889,7 @@ impl CrownPlan {
         random: Option<RandomOptions>,
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
+        solo_buttons: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -892,6 +919,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            solo_buttons,
             progress,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
@@ -1012,6 +1040,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -1026,6 +1055,7 @@ impl CrownPlan {
         random: Option<RandomOptions>,
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
+        solo_buttons: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -1054,6 +1084,7 @@ impl CrownPlan {
             random,
             crown_mod,
             final_table,
+            solo_buttons,
             progress,
         )?;
         let append_offset = disc.len();

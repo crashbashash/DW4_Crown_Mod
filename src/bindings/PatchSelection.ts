@@ -7,6 +7,7 @@ export interface PatchSelection {
   randomBosses: boolean;
   randomCrownColours: boolean;
   randomEnemies: boolean;
+  soloButtons: boolean;
 }
 
 export const DEFAULT_PATCH_SELECTION: Readonly<PatchSelection> = {
@@ -17,4 +18,5 @@ export const DEFAULT_PATCH_SELECTION: Readonly<PatchSelection> = {
   randomBosses: false,
   randomCrownColours: false,
   randomEnemies: false,
+  soloButtons: false,
 };

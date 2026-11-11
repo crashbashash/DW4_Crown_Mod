@@ -81,6 +81,9 @@ pub struct PatchPlan {
     pub random_bosses: bool,
     /// Optional reproducible enemy seed; normally chosen per patch and recorded in the image.
     pub enemy_seed: Option<u32>,
+    /// In single player, a pressed button of a two-player pair stays down
+    /// until its partner is pressed.
+    pub solo_buttons: bool,
     pub serial: Option<String>,
 }
 
@@ -109,6 +112,7 @@ impl Default for PatchPlan {
             random_enemies: false,
             random_bosses: false,
             enemy_seed: None,
+            solo_buttons: false,
             serial: None,
         }
     }

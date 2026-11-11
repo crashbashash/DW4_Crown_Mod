@@ -6,6 +6,7 @@
 - Enemy introductions preview a family that patrols their stage.
 - Updating an image named after its seed renames it to the new seed.
 - Added a "Support on Ko-fi" link to the app footer.
+- Added **Solo co-op buttons**: in single player, a pressed button of a two-player pair stays down until you press its partner. Rooms whose number of buttons scales with the party are unchanged.
 - Ancient Ruins B3's patrols now randomise; the boss intro's clean-up follows the replacements.
 - Fixed imported Tortamon taking damage while spinning; it now ignores hits during its spin like the native one.
 - Fixed the boss health bar staying on screen after defeating a randomised MR04 boss; MR04 now updates and closes the arena's bar.

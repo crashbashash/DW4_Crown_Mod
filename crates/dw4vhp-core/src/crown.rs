@@ -10,6 +10,7 @@ use crate::{error::Result, gcm, iso9660, region::WriteRegion};
 use std::{collections::BTreeMap, io::Write, ops::Range};
 
 mod archive;
+mod buttons;
 mod capacity;
 mod difficulty;
 mod drops;
