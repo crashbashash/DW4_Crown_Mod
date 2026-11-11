@@ -133,6 +133,7 @@ mod tests {
             random_bosses: true,
             enemy_seed: Some(u32::MAX),
             solo_buttons: true,
+            fix_death_softlock: true,
         };
         let encoded = encode(selection).unwrap();
         let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();

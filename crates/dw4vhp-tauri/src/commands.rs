@@ -326,7 +326,10 @@ pub async fn analyze(
     // input stored for the patch), so the worker gets a clone.
     let inspect_path = std::path::PathBuf::from(&path);
     let result = tauri::async_runtime::spawn_blocking(move || {
-        inspect_retail_for_plan(&inspect_path, &selection.analysis_plan())
+        inspect_retail_for_plan(&inspect_path, &selection.analysis_plan()).map(|mut report| {
+            report.output_size = selection.estimated_output_size(&report);
+            report
+        })
     })
     .await
     .map_err(|e| format!("analyze worker failed: {e}"))?;

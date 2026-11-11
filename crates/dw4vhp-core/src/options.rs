@@ -3,6 +3,7 @@
 //! A selection starts empty. This differs deliberately from the historical
 //! `PatchPlan::default()` balance preset; legacy image defaults are handled by
 //! image metadata readers rather than by the request contract.
+use crate::disc::DiscReport;
 use crate::plan::PatchPlan;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +19,8 @@ pub struct PatchSelection {
     pub enemy_seed: Option<u32>,
     /// Latch two-player button pairs in single player.
     pub solo_buttons: bool,
+    /// Skip the first-death tutorial in stages without its window.
+    pub fix_death_softlock: bool,
 }
 
 impl PatchSelection {
@@ -27,6 +30,7 @@ impl PatchSelection {
             || self.random_crown_colours
             || self.random_enemies
             || self.solo_buttons
+            || self.fix_death_softlock
     }
 
     /// Build the same balance plan as the desktop selection, rejecting empty
@@ -50,20 +54,42 @@ impl PatchSelection {
             random_bosses: self.random_bosses,
             enemy_seed: self.enemy_seed.filter(|_| self.random_enemies),
             solo_buttons: self.solo_buttons,
+            fix_death_softlock: self.fix_death_softlock,
             ..PatchPlan::default()
         })
     }
 
-    /// Analysis estimates the same three resource options as before. Enemy
-    /// planning and random cosmetic seeds are resolved by the patch worker.
+    /// Analysis inspects the resource options exactly. Enemy planning and
+    /// random cosmetic seeds are resolved by the patch worker.
     pub fn analysis_plan(self) -> PatchPlan {
         PatchPlan {
             crown_mod: self.crown_mod,
             four_player_spawns: self.four_player_spawns,
             crown_drops: self.crown_drops,
             solo_buttons: self.solo_buttons,
+            fix_death_softlock: self.fix_death_softlock,
             ..PatchPlan::default()
         }
+    }
+
+    /// The output size to show for `report`, which was inspected with
+    /// [`Self::analysis_plan`]. Enemy planning takes minutes, so its archive
+    /// growth (Hard/Very Hard stage variants, imports, boss language packs and
+    /// the relocated PS2 audio module) is a calibrated upper bound instead:
+    /// rules 29 measured +1.49–1.56 GB for random enemies and a further
+    /// ~40 MB for random bosses across seeds and all five releases.
+    pub fn estimated_output_size(&self, report: &DiscReport) -> u64 {
+        if !self.random_enemies {
+            return report.output_size;
+        }
+        let gamecube = report.release.is_some_and(|r| r.is_gamecube());
+        let enemies: u64 = if gamecube {
+            1_520_000_000
+        } else {
+            1_580_000_000
+        };
+        let bosses: u64 = if self.random_bosses { 45_000_000 } else { 0 };
+        report.output_size + enemies + bosses
     }
 }
 
@@ -83,7 +109,8 @@ mod tests {
             json!({
                 "crownMod": false, "fourPlayerSpawns": false, "crownDrops": false,
                 "randomCrownColours": false, "randomEnemies": false,
-                "randomBosses": false, "enemySeed": null, "soloButtons": false
+                "randomBosses": false, "enemySeed": null, "soloButtons": false,
+                "fixDeathSoftlock": false
             })
         );
     }

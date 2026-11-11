@@ -31,6 +31,7 @@ pub fn metadata(release: Release, plan: &PatchPlan) -> Value {
             "randomCrownColours": plan.random_crown_colours, "crownColourSeed": plan.crown_colour_seed,
             "randomEnemies": plan.random_enemies, "randomBosses": plan.random_bosses,
             "enemySeed": plan.enemy_seed, "soloButtons": plan.solo_buttons,
+            "fixDeathSoftlock": plan.fix_death_softlock,
             "crownRank": plan.crown_rank, "hpMultiplier": plan.hp_mult, "statMultipliers": plan.stat_mult,
             "criticalMultiplier": plan.crit_mult, "paralysisMultiplier": plan.para_mult,
             "excludeDestructibles": plan.exclude_destructibles, "excludeTripwire": plan.exclude_tripwire,

@@ -3,6 +3,7 @@ export interface PatchSelection {
   crownDrops: boolean;
   crownMod: boolean;
   enemySeed: number | null;
+  fixDeathSoftlock: boolean;
   fourPlayerSpawns: boolean;
   randomBosses: boolean;
   randomCrownColours: boolean;
@@ -14,6 +15,7 @@ export const DEFAULT_PATCH_SELECTION: Readonly<PatchSelection> = {
   crownDrops: false,
   crownMod: false,
   enemySeed: null,
+  fixDeathSoftlock: false,
   fourPlayerSpawns: false,
   randomBosses: false,
   randomCrownColours: false,

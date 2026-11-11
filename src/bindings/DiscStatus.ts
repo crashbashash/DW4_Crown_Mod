@@ -23,6 +23,7 @@ export interface DiscStatus {
       enemySeed?: number | null;
       /** Present on images built since solo co-op buttons were added. */
       soloButtons?: boolean;
+      fixDeathSoftlock?: boolean;
     };
     /** What the enemy randomiser did, when the image has random enemies. */
     randomEnemies?: {

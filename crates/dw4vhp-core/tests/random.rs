@@ -93,6 +93,7 @@ fn signed_patch_records_the_seed_and_reproduces() {
 
 /// Every supported release builds with random enemies, records its plan, and releases that
 /// share game data share a plan: the three PS2 discs agree, as do the two GameCube discs.
+/// The analysis estimate covers the built image without overstating it by more than 3%.
 /// Point the variables at the player's own images (CISO and RVZ are read directly).
 #[test]
 fn every_release_builds_and_records_its_plan() {
@@ -122,7 +123,7 @@ fn every_release_builds_and_records_its_plan() {
             enemy_seed: Some(1234),
             ..PatchPlan::default()
         };
-        patch_file(
+        let outcome = patch_file(
             &path,
             &out,
             &plan,
@@ -130,6 +131,23 @@ fn every_release_builds_and_records_its_plan() {
             &mut |_| {},
         )
         .unwrap();
+        if dw4vhp_core::container::detect(&path).unwrap() == dw4vhp_core::container::Format::Raw {
+            let selection = dw4vhp_core::options::PatchSelection {
+                crown_mod: true,
+                random_enemies: true,
+                enemy_seed: Some(1234),
+                ..Default::default()
+            };
+            let report =
+                dw4vhp_core::disc::inspect_retail_for_plan(&path, &selection.analysis_plan())
+                    .unwrap();
+            let estimate = selection.estimated_output_size(&report);
+            assert!(
+                outcome.bytes <= estimate && estimate * 100 <= outcome.bytes * 103,
+                "{variable}: estimate {estimate}, built {}",
+                outcome.bytes
+            );
+        }
         let signed = signature::read_raw(&out).unwrap().expect("signed image");
         let r = &signed["randomEnemies"];
         assert_eq!(signed["platform"], platform, "{variable}");

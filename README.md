@@ -19,7 +19,7 @@ Open the app and choose your own copy of the game to create a new, modded copy.
 
 1. [Download the app](#download) for Windows or Linux.
 2. Open it and choose your game disc image (`.iso`, or `.ciso` / `.rvz` for GameCube).
-3. Select at least one option in Settings. Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards. Under Random enemies, optionally enable **Random bosses** on any supported PS2 or GameCube disc; every boss except the four world bosses is shuffled.
+3. Select at least one option in Settings (grouped into Gameplay, Balance, Cosmetics and Bugfixes tabs). Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards. Under Random enemies, optionally enable **Random bosses** on any supported PS2 or GameCube disc; every boss except the four world bosses is shuffled.
 4. Click **Patch ISO**.
 5. Play the new patched file in your emulator. A `.ciso` or `.rvz` stays in the same format.
 
@@ -57,6 +57,11 @@ The same randomiser seed reproduces enemy choices within the same rules version.
   two-player pair (floor buttons that release when you step off, and timed wall
   switches) stays down until you press its partner. Rooms whose number of
   buttons already scales with the party size are unchanged.
+
+- **Bug fix: death softlock (on by default).** Dying before the first-death
+  tutorial has played, for example after entering Goblin Fortress early, froze
+  the game in vanilla. Stages that cannot show the tutorial now use the normal
+  game-over and return you to the Main Lobby.
 - **Crown Mod balance.** Enemy health and other stats are boosted when Crown Mod is selected. Attack values are
   already near the game's maximum, so most of the extra difficulty comes from health
   and the other stat boosts.

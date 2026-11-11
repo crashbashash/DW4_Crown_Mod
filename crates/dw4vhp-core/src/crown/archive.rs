@@ -82,6 +82,7 @@ pub(crate) fn rebuild_afs(
     crown_mod: bool,
     final_table: Option<&crate::table::EnemyTable>,
     solo_buttons: bool,
+    death_softlock: bool,
     progress: &mut dyn FnMut(Phase, u64, u64),
 ) -> Result<Rebuilt> {
     let _timing = crate::profiling::measure("archive.rebuild");
@@ -415,8 +416,8 @@ pub(crate) fn rebuild_afs(
         }
     }
     // Final script edits, after every stage, boss and sound edit has settled:
-    // scripted spawns' literal HP gets the final table's HP factor, and solo
-    // button pairs latch.
+    // scripted spawns' literal HP gets the final table's HP factor, solo
+    // button pairs latch and the first-death tutorial needs its window.
     let authored = match final_table {
         Some(_) => Some(crate::table::EnemyTable::read(
             iso,
@@ -440,11 +441,20 @@ pub(crate) fn rebuild_afs(
                 out = Some(bytes);
             }
         }
+        if death_softlock {
+            let current = out.as_deref().unwrap_or(pack);
+            if let Some(bytes) =
+                death::fix(current).map_err(|e| bad(&format!("death softlock: {e}")))?
+            {
+                out = Some(bytes);
+            }
+        }
         Ok(out)
     };
     let candidate = |b: &[u8]| {
         (final_table.is_some() && script_hp::candidate(b))
             || (solo_buttons && buttons::candidate(b))
+            || (death_softlock && memchr::memmem::find(b, b"SQ_GAMEOVER\0").is_some())
     };
     {
         let rewards = random.as_ref().map(|r| &r.rewards);
@@ -821,6 +831,7 @@ impl CrownPlan {
             crown_mod,
             None,
             false,
+            false,
             &mut |_, _, _| {},
         )?
         .random
@@ -874,6 +885,7 @@ impl CrownPlan {
             crown_mod,
             final_table,
             false,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -890,6 +902,7 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
         solo_buttons: bool,
+        death_softlock: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -920,6 +933,7 @@ impl CrownPlan {
             crown_mod,
             final_table,
             solo_buttons,
+            death_softlock,
             progress,
         )?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
@@ -1041,6 +1055,7 @@ impl CrownPlan {
             crown_mod,
             final_table,
             false,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -1056,6 +1071,7 @@ impl CrownPlan {
         crown_mod: bool,
         final_table: Option<&crate::table::EnemyTable>,
         solo_buttons: bool,
+        death_softlock: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -1085,6 +1101,7 @@ impl CrownPlan {
             crown_mod,
             final_table,
             solo_buttons,
+            death_softlock,
             progress,
         )?;
         let append_offset = disc.len();

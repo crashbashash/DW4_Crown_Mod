@@ -256,6 +256,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_mod,
             Some(&final_table),
             plan.solo_buttons,
+            plan.fix_death_softlock,
             &mut rebuild,
         )?
     } else {
@@ -270,6 +271,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             plan.crown_mod,
             Some(&final_table),
             plan.solo_buttons,
+            plan.fix_death_softlock,
             &mut rebuild,
         )?
     };

@@ -274,7 +274,8 @@ fn patch_file_internal(
             || plan.crown_drops
             || plan.random_crown_colours
             || plan.random_enemies
-            || plan.solo_buttons)
+            || plan.solo_buttons
+            || plan.fix_death_softlock)
     {
         return Err(Error::CrownData(
             "optional enemy resources require complete retail archives".into(),

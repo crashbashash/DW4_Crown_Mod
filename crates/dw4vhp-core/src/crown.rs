@@ -12,6 +12,7 @@ use std::{collections::BTreeMap, io::Write, ops::Range};
 mod archive;
 mod buttons;
 mod capacity;
+mod death;
 mod difficulty;
 mod drops;
 pub mod encounters;
