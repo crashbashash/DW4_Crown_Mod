@@ -181,11 +181,15 @@ fn every_scripted_spawn_and_quest_dependency_survives() {
             },
         )
         .unwrap();
-        for (e, models) in [
-            (265, vec!["e_mummy", "e_pharaoh", "e_mecha1", "e_mecha2"]),
-            (319, vec!["e_mecha4"]),
-            (394, vec!["e_mecha5"]),
-        ] {
+        // Ancient Ruins B3's intro only erases its patrols, so those follow
+        // their replacements (encounters::FAMILY_REMAPS).
+        for model in ["e_pharaoh", "e_mummy", "e_mecha1", "e_mecha2"] {
+            assert!(
+                !r.stages[&265].pinned_families.contains(model),
+                "265 {model}"
+            );
+        }
+        for (e, models) in [(319, vec!["e_mecha4"]), (394, vec!["e_mecha5"])] {
             for model in models {
                 assert!(
                     r.stages[&e].pinned_families.contains(model),

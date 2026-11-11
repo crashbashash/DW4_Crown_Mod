@@ -6,6 +6,7 @@
 - Enemy introductions preview a family that patrols their stage.
 - Updating an image named after its seed renames it to the new seed.
 - Added a "Support on Ko-fi" link to the app footer.
+- Ancient Ruins B3's patrols now randomise; the boss intro's clean-up follows the replacements.
 - Fixed imported Tortamon taking damage while spinning; it now ignores hits during its spin like the native one.
 - Fixed the boss health bar staying on screen after defeating a randomised MR04 boss; MR04 now updates and closes the arena's bar.
 - Fixed a randomised boss in Cliff Dungeon B3 or Geko Path B2 advancing on the player while the boss information card was still on screen.

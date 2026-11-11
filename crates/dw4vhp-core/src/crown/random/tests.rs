@@ -1616,3 +1616,87 @@ fn imported_tortamon_keeps_its_spin_guard() {
         );
     }
 }
+
+/// Ancient Ruins B3's intro erases its four patrol families by name; they now
+/// randomise with the erase following their replacements. Every seed must build,
+/// and a remaining Pharaohmon must keep at least one summon family.
+#[test]
+fn ancient_ruins_b3_patrols_randomise_with_their_erase_script() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let (base, size) = if crate::gcm::game_id(&iso).is_ok() {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        } else {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        };
+        let afs = &iso[base..base + size];
+        let entries: Vec<(usize, usize)> = (0..u32at(afs, 4).unwrap() as usize)
+            .map(|i| {
+                (
+                    u32at(afs, 8 + 8 * i).unwrap() as usize,
+                    u32at(afs, 12 + 8 * i).unwrap() as usize,
+                )
+            })
+            .collect();
+        let data = |i: usize| &afs[entries[i].0..entries[i].0 + entries[i].1];
+        let layout = crate::release::detect(&iso)
+            .unwrap()
+            .layout_in(&iso)
+            .unwrap();
+        let seeds: Vec<u32> = env::var("DW4_B3_SEEDS")
+            .map(|s| (1..=s.parse::<u32>().unwrap()).collect())
+            .unwrap_or_else(|_| vec![1, 2, 3, 1520, 1278675365]);
+        let mut changed = 0;
+        for seed in seeds {
+            let mut r = Randomiser::scan(
+                afs,
+                &entries,
+                EnemyTable::read(&iso, &layout).unwrap(),
+                Options {
+                    picks_only: false,
+                    seed: seed.into(),
+                    donors: DONORS,
+                    warp: None,
+                    only: Some(vec![265]),
+                    random_bosses: false,
+                },
+            )
+            .unwrap();
+            let stage = r.stages[&265].clone();
+            let initial = materialize(data(265), &expand(data(265)).unwrap()).unwrap();
+            r.stage(265, initial, afs, &entries)
+                .unwrap_or_else(|e| panic!("{variable} seed {seed}: {e}"));
+            for &pack in &stage.gens {
+                for g in generators(&Pack::parse(data(pack)).unwrap()).unwrap() {
+                    let Some(native) = family(g.row) else {
+                        continue;
+                    };
+                    if ["e_pharaoh", "e_mummy", "e_mecha1", "e_mecha2"].contains(&native) {
+                        if let Some(&row) = r.plans.get(&pack).and_then(|p| p.rows.get(&g.name)) {
+                            if family(row) != Some(native) {
+                                changed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            for line in r
+                .log
+                .iter()
+                .filter(|l| l.contains("stage 265") && l.contains("Pharaohmon"))
+            {
+                eprintln!("{variable} seed {seed}: {line}");
+            }
+        }
+        eprintln!("{variable}: {changed} B3 patrol generators changed family");
+        assert!(
+            changed > 0,
+            "{variable}: Ancient Ruins B3 patrols stayed native"
+        );
+    }
+}

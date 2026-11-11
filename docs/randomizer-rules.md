@@ -84,7 +84,7 @@ These generators keep their native enemy during patrol randomisation. With Rando
 | Humid Cave B2 (`dng101b2`) | 187 | `GENE-08` | Preserve the native Blossomon boss. Sukamon's introduction retargets its wait and freeze/unfreeze commands to the replacement, allowing the intro and ordinary patrols to randomize. |
 | Cliff Dungeon B3 (`dng102b3`) | 210 | `GENE-12` | Preserve the native Mammothmon encounter generator. |
 | Dungeon dng204b2 (`dng204b2`) | 241 | `GENE-13` | Preserve the native SkullGreymon boss. The Minotaurmon tutorial introduction retargets its wait and control commands. |
-| Dungeon dng205b3 (`dng205b3`) | 265 | `GENE-15` | Preserve the native scripted encounter; stage scripts also address several resident families. |
+| Dungeon dng205b3 (`dng205b3`) | 265 | `GENE-15` | Preserve the native scripted encounter. The boss intro erases the floor’s patrol families; those randomise with the erase following their replacements. |
 | Dungeon dng307b2 (`dng307b2`) | 296 | `GENE-11` | Preserve the native encounter generator. |
 | Dungeon dng308b3 (`dng308b3`) | 319 | `GENE-19` | MR04 is the native boss on this floor; preserve its scripted encounter. |
 | Dungeon dng309b4 (`dng309b4`) | 349 | `GENE-24` | Preserve the native scripted encounter generator. |
@@ -105,7 +105,7 @@ These generators keep their native enemy during patrol randomisation. With Rando
 
 ## Additional protections
 
-These fixed records are not the entire exclusion policy. Model-specific spawn sequences keep their original models; normal entrance/activation overrides require the same named sequence, with the reviewed Pharaohmon SQ_ENTR activation exception. Numenume River’s erase/freeze scripts follow all of its selected ranged families. Dry Land ruins’ erase scripts follow one exclusive replacement per original family. Family groups retain their native enemies together on that difficulty if local variant slots run out. Stage scripts that address an enemy family by native model name protect that family on the floor, except for explicitly reviewed exceptions. Boss families and native scripted encounters remain protected. Kill-count quests restrict replacements to their compatible resident families.
+These fixed records are not the entire exclusion policy. Model-specific spawn sequences keep their original models; normal entrance/activation overrides require the same named sequence, with the reviewed Pharaohmon SQ_ENTR activation exception. Numenume River’s erase/freeze scripts follow all of its selected ranged families. Dry Land ruins’ and Ancient Ruins B3’s erase scripts follow one exclusive replacement per original family; on Ancient Ruins B3, whose boss intro erases the floor’s patrols, Pharaohmon may also summon those replacement families. Family groups retain their native enemies together on that difficulty if local variant slots run out. Stage scripts that address an enemy family by native model name protect that family on the floor, except for explicitly reviewed exceptions. Boss families and native scripted encounters remain protected. Kill-count quests restrict replacements to their compatible resident families.
 
 Practice enemies are eligible, with original encounter stats and practice settings; lesson objects, callbacks and party-size branches remain intact. Practice models never supply donors to other stages. The developer world and final-boss stages are excluded from enemy randomization. Cosmetic crowns are independent of these enemy-replacement rules.
 

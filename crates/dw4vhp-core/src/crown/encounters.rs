@@ -48,7 +48,7 @@ pub(crate) const PROTECTIONS: &[EncounterProtection] = &[
     EncounterProtection { pack_entry: 187, name: "Humid Cave B2", stage: "dng101b2", generators: &["GENE-08"], reason: "Preserve the native Blossomon boss. Sukamon's introduction retargets its wait and freeze/unfreeze commands to the replacement, allowing the intro and ordinary patrols to randomize." },
     EncounterProtection { pack_entry: 210, name: "Cliff Dungeon B3", stage: "dng102b3", generators: &["GENE-12"], reason: "Preserve the native Mammothmon encounter generator." },
     EncounterProtection { pack_entry: 241, name: "Dungeon dng204b2", stage: "dng204b2", generators: &["GENE-13"], reason: "Preserve the native SkullGreymon boss. The Minotaurmon tutorial introduction retargets its wait and control commands." },
-    EncounterProtection { pack_entry: 265, name: "Dungeon dng205b3", stage: "dng205b3", generators: &["GENE-15"], reason: "Preserve the native scripted encounter; stage scripts also address several resident families." },
+    EncounterProtection { pack_entry: 265, name: "Dungeon dng205b3", stage: "dng205b3", generators: &["GENE-15"], reason: "Preserve the native scripted encounter. The boss intro erases the floor’s patrol families; those randomise with the erase following their replacements." },
     EncounterProtection { pack_entry: 296, name: "Dungeon dng307b2", stage: "dng307b2", generators: &["GENE-11"], reason: "Preserve the native encounter generator." },
     EncounterProtection { pack_entry: 319, name: "Dungeon dng308b3", stage: "dng308b3", generators: &["GENE-19"], reason: "MR04 is the native boss on this floor; preserve its scripted encounter." },
     EncounterProtection { pack_entry: 349, name: "Dungeon dng309b4", stage: "dng309b4", generators: &["GENE-24"], reason: "Preserve the native scripted encounter generator." },
@@ -137,6 +137,9 @@ pub(crate) struct FamilyRemap {
     pub entry: usize,
     pub models: &'static [&'static str],
     pub scripts: &'static [&'static str],
+    /// The scripts only erase the families when the boss intro starts, so
+    /// Pharaohmon may summon them too (summons are erased with the patrols).
+    pub shared_summons: bool,
 }
 
 pub(crate) const FAMILY_REMAPS: &[FamilyRemap] = &[
@@ -151,11 +154,20 @@ pub(crate) const FAMILY_REMAPS: &[FamilyRemap] = &[
             "matb12.lua",
             "matf00.lua",
         ],
+        shared_summons: false,
+    },
+    // Ancient Ruins B3: the boss intro erases the floor's four patrol families.
+    FamilyRemap {
+        entry: 265,
+        models: &["e_pharaoh", "e_mummy", "e_mecha1", "e_mecha2"],
+        scripts: &["matg15.lua"],
+        shared_summons: true,
     },
     FamilyRemap {
         entry: 649,
         models: &["e_mummy", "e_tyrano"],
         scripts: &["mata00.lua", "mata01.lua"],
+        shared_summons: false,
     },
 ];
 

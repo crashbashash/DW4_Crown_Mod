@@ -1624,7 +1624,7 @@ impl Randomiser {
             for model in demand.keys().map(String::as_str) {
                 if model == "e_pharaoh"
                     || !REGULAR.contains(&model)
-                    || reserved.contains(model)
+                    || (reserved.contains(model) && !family_remap.is_some_and(|r| r.shared_summons))
                     || stage.pinned_families.contains(model)
                     || !entrances.get(model).is_some_and(|s| {
                         s.contains("SQ_NENTR") || s.contains("SQ_ENTR") || s.contains("SQ_SWON")
