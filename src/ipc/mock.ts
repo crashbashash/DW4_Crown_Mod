@@ -12,6 +12,7 @@ import type { Backend } from "./backend";
 export class MockBackend implements Backend {
   async checkUpdates(): Promise<UpdateCheck> { return { currentVersion: packageInfo.version, update: null }; }
   async acceptUpdate(_version: string): Promise<"browser" | "installer"> { return "browser"; }
+  async openSupportPage(): Promise<void> {}
   /** The status the next `analyze` call returns, then resets. */
   seedStatus: DiscStatus | null = null;
   /** The message the next `startPatch` reports as patch-failed, then resets. */

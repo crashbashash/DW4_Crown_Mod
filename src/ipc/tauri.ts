@@ -15,6 +15,10 @@ export class TauriBackend implements Backend {
   async acceptUpdate(version: string): Promise<"browser" | "installer"> {
     return invoke("accept_update", { version });
   }
+
+  async openSupportPage(): Promise<void> {
+    return invoke("open_support_page");
+  }
   async importSettings(): Promise<PatchSelection | null> {
     return invoke("import_settings");
   }

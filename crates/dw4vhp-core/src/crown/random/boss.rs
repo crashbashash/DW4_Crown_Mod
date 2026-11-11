@@ -248,6 +248,34 @@ pub(in crate::crown) fn sites() -> impl Iterator<Item = &'static Arena> {
     ARENAS.iter().chain(REPEATS)
 }
 
+/// Vine Tunnel's MR04 is the only dungeon boss without a health bar, so its
+/// combat callback neither updates nor closes the bar every other arena opens.
+/// The final dungeon's MR04 uses the same callback plus those two calls.
+const BAR_CALLBACKS: &[(&str, usize)] = &[("e_mecha4", 786)];
+
+/// The import source of a boss family, with a combat callback that drives the
+/// boss health bar of the arenas it can replace.
+pub(super) fn donor_source<'a>(
+    model: &str,
+    data: &impl Fn(usize) -> &'a [u8],
+) -> Result<std::borrow::Cow<'a, [u8]>> {
+    let source = data(source(model)?.entry);
+    let Some(&(_, entry)) = BAR_CALLBACKS.iter().find(|(m, _)| *m == model) else {
+        return Ok(source.into());
+    };
+    let hit = format!("hit_{model}.lua");
+    let with_bar = Pack::parse(data(entry))?;
+    need(
+        !hud_names(&with_bar, model)?.is_empty(),
+        "boss health-bar callback missing",
+    )?;
+    let callback = script(&with_bar, &hit)?.to_vec();
+    let edits = lua_names::rewrite_in_pack(source, std::slice::from_ref(&hit), |_, _| {
+        Ok(callback.clone())
+    })?;
+    Ok(materialize(source, &edits)?.into())
+}
+
 /// The import source of a boss family: its dungeon arena.
 pub(super) fn source(model: &str) -> Result<&'static Arena> {
     ARENAS
@@ -416,13 +444,22 @@ pub(super) fn prepare_model(
     } else {
         "SQ_NENTR"
     };
+    // In dungeon arenas the command fires while the information card is still
+    // up and the players are locked. A replacement's activation there starts
+    // its normal behaviour (Lordknightmon advanced on the locked player), so
+    // it idles instead, like the bosses of the other arenas.
+    let (replacement, check) = if arena.card() {
+        ("SQ_WAIT", "boss lacks an idle sequence")
+    } else {
+        (activation, "boss lacks a portable activation")
+    };
     if let Some(command) = arena.command.filter(|c| !sequences.contains(*c)) {
-        changes.insert(command.into(), activation.into());
+        changes.insert(command.into(), replacement.into());
     }
     if !changes.is_empty() {
         need(
-            sequences.contains("SQ_NENTR"),
-            "boss lacks a portable activation",
+            sequences.contains("SQ_NENTR") && sequences.contains(replacement),
+            check,
         )?;
         let edits = lua_names::rename_in_pack(&out, &[arena.intro.to_string()], &changes)?;
         out = materialize(&out, &edits)?;
@@ -630,13 +667,9 @@ impl Randomiser {
                     let fit = if !rows {
                         Err(bad("no local boss stat rows"))
                     } else {
-                        prepare_model(
-                            &f.models[difficulty],
-                            data(donor.entry),
-                            arena,
-                            donor.model,
-                            most,
-                        )
+                        donor_source(donor.model, &data).and_then(|source| {
+                            prepare_model(&f.models[difficulty], &source, arena, donor.model, most)
+                        })
                     };
                     match fit {
                         Ok(_) => { compatible.insert(donor.model.to_string()); }
@@ -749,7 +782,7 @@ impl Randomiser {
                     if !self.opts.picks_only {
                         let mut model = prepare_model(
                             &f.models[difficulty],
-                            data(donor.entry),
+                            &donor_source(to, &data)?,
                             arena,
                             to,
                             most,

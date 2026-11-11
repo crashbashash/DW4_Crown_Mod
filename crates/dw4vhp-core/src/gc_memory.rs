@@ -42,6 +42,11 @@ fn word(bytes: &[u8], offset: usize) -> Result<u32> {
     ))
 }
 
+#[cfg(test)]
+pub(crate) fn map_address(iso: &[u8], address: u32, length: usize) -> Result<usize> {
+    map(iso, address, length)
+}
+
 fn map(iso: &[u8], address: u32, length: usize) -> Result<usize> {
     let dol = word(iso, 0x420)? as usize;
     for index in 0..7 {
@@ -615,7 +620,10 @@ pub(crate) fn regions_for_release(iso: &[u8], release: Release) -> Result<Vec<Wr
             offset: resize_at as u64,
             bytes: resize,
         },
-    ])
+    ]
+    .into_iter()
+    .chain(crate::anim_pool::gc_regions(iso, release, map)?)
+    .collect())
 }
 
 #[cfg(test)]
@@ -1392,7 +1400,8 @@ mod tests {
             let file = std::fs::File::open(path).unwrap();
             let iso = unsafe { memmap2::Mmap::map(&file).unwrap() };
             let edits = regions(&iso, &report(release)).unwrap();
-            assert_eq!(edits.len(), 7);
+            // Seven allocator-hook regions plus four animation-context-pool words.
+            assert_eq!(edits.len(), 11);
             assert_eq!(edits[0].bytes.len(), 4);
             assert_eq!(edits[1].bytes.len(), stub(0, 0).len());
             let mut ranges: Vec<_> = edits

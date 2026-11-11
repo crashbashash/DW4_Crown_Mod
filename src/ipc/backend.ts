@@ -11,6 +11,8 @@ import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bi
 export interface Backend {
   checkUpdates(): Promise<UpdateCheck>;
   acceptUpdate(version: string): Promise<"browser" | "installer">;
+  /** Opens the project's Ko-fi page in the browser. */
+  openSupportPage(): Promise<void>;
   importSettings(): Promise<PatchSelection | null>;
   exportSettings(selection: PatchSelection): Promise<boolean>;
   chooseIso(): Promise<string | null>;

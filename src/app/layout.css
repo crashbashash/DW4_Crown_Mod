@@ -74,7 +74,10 @@ main.app-main {
   .panel { padding: 16px; }
   .platforms { max-width: 90px; text-align: right; }
 }
-.footer-row { display: flex; align-items: center; justify-content: flex-end; }
+.footer-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.support-link { background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; padding: 4px 0; }
+.support-link span { color: #ff5e5b; }
+.support-link:hover:not(:disabled) { background: transparent; border-color: transparent; color: var(--fg); }
 .update-check { background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; padding: 4px 0; }
 .update-modal { width: min(100%, 600px); }
 .update-notes { max-height: min(40vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }

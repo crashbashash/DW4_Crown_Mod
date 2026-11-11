@@ -1,3 +1,4 @@
+mod anim_pool;
 pub mod container;
 pub mod crown;
 pub mod crown_colours;

@@ -1484,3 +1484,135 @@ fn salted_streams_do_not_overlap_for_small_or_large_seeds() {
         }
     }
 }
+
+#[test]
+fn replacement_mr04_drives_the_arena_health_bar() {
+    for variable in ["DW4_RETAIL_USA_ISO", "DW4_RETAIL_GC_USA_ISO"] {
+        let Some(path) = env::var_os(variable) else {
+            continue;
+        };
+        let iso = std::fs::read(path).unwrap();
+        let (at, size) = if variable == "DW4_RETAIL_USA_ISO" {
+            let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.lba as usize * 2048, f.size as usize)
+        } else {
+            let f = crate::gcm::find_file(&iso, "NDMW.AFS").unwrap();
+            (f.offset as usize, f.size as usize)
+        };
+        let afs = &iso[at..at + size];
+        let data = |e: usize| {
+            let o = u32at(afs, 8 + e * 8).unwrap() as usize;
+            let l = u32at(afs, 12 + e * 8).unwrap() as usize;
+            &afs[o..o + l]
+        };
+        let source = super::boss::donor_source("e_mecha4", &data).unwrap();
+        let mut checked = 0;
+        for arena in super::boss::sites() {
+            let native = Pack::parse(data(arena.entry)).unwrap();
+            let bar = super::boss::hud_names(&native, arena.model).unwrap();
+            if bar.is_empty() || arena.model == "e_mecha4" {
+                continue;
+            }
+            let Ok(out) =
+                super::boss::prepare_model(data(arena.entry), &source, arena, "e_mecha4", 1)
+            else {
+                continue;
+            };
+            let p = Pack::parse(&out).unwrap();
+            assert_eq!(
+                super::boss::hud_names(&p, "e_mecha4").unwrap(),
+                bar,
+                "{variable} {}: MR04 must update and close the arena's bar",
+                arena.name
+            );
+            let constants =
+                lua_names::constants(super::boss::script(&p, "hit_e_mecha4.lua").unwrap()).unwrap();
+            assert!(constants.iter().any(|c| c.text == b"SQ_CLOSE"));
+            checked += 1;
+        }
+        eprintln!("{variable}: MR04 drives the bar in {checked} arenas");
+        assert!(checked > 0);
+    }
+}
+
+#[test]
+fn card_arena_commands_idle_replacement_bosses() {
+    let Some(path) = env::var_os("DW4_RETAIL_USA_ISO") else {
+        return;
+    };
+    let iso = std::fs::read(path).unwrap();
+    let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+    let afs = &iso[f.lba as usize * 2048..f.lba as usize * 2048 + f.size as usize];
+    let data = |e: usize| {
+        let o = u32at(afs, 8 + e * 8).unwrap() as usize;
+        let l = u32at(afs, 12 + e * 8).unwrap() as usize;
+        &afs[o..o + l]
+    };
+    let mut checked = 0;
+    for arena in super::boss::sites().filter(|a| a.command.is_some()) {
+        for donor in super::boss::ARENAS
+            .iter()
+            .filter(|d| d.model != arena.model)
+        {
+            let source = super::boss::donor_source(donor.model, &data).unwrap();
+            let out =
+                match super::boss::prepare_model(data(arena.entry), &source, arena, donor.model, 1)
+                {
+                    Ok(out) => out,
+                    Err(e) => {
+                        eprintln!("SKIP {} {}: {e}", arena.name, donor.model);
+                        continue;
+                    }
+                };
+            let p = Pack::parse(&out).unwrap();
+            let constants =
+                lua_names::constants(super::boss::script(&p, arena.intro).unwrap()).unwrap();
+            let has = |s: &[u8]| constants.iter().any(|c| c.text == s);
+            let command = arena.command.unwrap().as_bytes();
+            if arena.card() {
+                assert!(
+                    !has(b"SQ_ENTR") && !has(b"SQ_NENTR"),
+                    "{} {}: no activation behind the card",
+                    arena.name,
+                    donor.model
+                );
+                assert!(
+                    has(command) || has(b"SQ_WAIT"),
+                    "{} {}",
+                    arena.name,
+                    donor.model
+                );
+            }
+            checked += 1;
+        }
+    }
+    eprintln!("checked {checked} command-arena replacements");
+    assert!(checked > 0);
+}
+
+#[test]
+fn imported_tortamon_keeps_its_spin_guard() {
+    let Some(path) = env::var_os("DW4_RETAIL_USA_ISO") else {
+        return;
+    };
+    let iso = std::fs::read(path).unwrap();
+    let f = crate::iso9660::find_file(&iso, "NDMW.AFS").unwrap();
+    let afs = &iso[f.lba as usize * 2048..f.lba as usize * 2048 + f.size as usize];
+    let data = |e: usize| {
+        let o = u32at(afs, 8 + e * 8).unwrap() as usize;
+        let l = u32at(afs, 12 + e * 8).unwrap() as usize;
+        &afs[o..o + l]
+    };
+    // SQ_ATCK3 calls rot_e_torta.lua ("swon"/"swof"), whose spinning list
+    // hit_e_torta.lua consults; without it a spinning import takes damage.
+    let (edits, _) = graft::graft(data(614), data(679), &["e_torta".to_string()]).unwrap();
+    let out = materialize(data(614), &edits).unwrap();
+    let (p, donor) = (Pack::parse(&out).unwrap(), Pack::parse(data(679)).unwrap());
+    for name in ["rot_e_torta.lua", "hit_e_torta.lua"] {
+        assert_eq!(
+            super::boss::script(&p, name).unwrap(),
+            super::boss::script(&donor, name).unwrap(),
+            "{name}"
+        );
+    }
+}

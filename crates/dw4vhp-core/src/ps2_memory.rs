@@ -14,7 +14,8 @@ use crate::{
 };
 use md5::{Digest, Md5};
 
-const RESERVE: u32 = 1024;
+/// RAM reserved after the original BSS for the hook code.
+const RESERVE: u32 = 4096;
 const GENERAL_LIMIT: u32 = 3 * 1024 * 1024;
 
 struct Native {
@@ -26,6 +27,11 @@ struct Native {
     info_hi: u32,
     libc_heap: u32,
     fingerprints: [&'static str; 4],
+    /// `igAllocator_ResolveEncodedIndex`: encoded pool index to allocator.
+    resolve: u32,
+    /// `igArenaMemoryPool` vfunc 84: usable size of an allocation (pool, pointer).
+    size_of: u32,
+    memcpy: u32,
 }
 
 fn native(release: Release) -> Option<Native> {
@@ -78,6 +84,11 @@ fn native(release: Release) -> Option<Native> {
         ),
         _ => return None,
     };
+    let (resolve, size_of) = match release {
+        Release::Usa => (0x2f0700, 0x31edb0),
+        Release::Europe => (0x2f07f0, 0x31eea0),
+        _ => (0x2f1dd0, 0x320480),
+    };
     Some(Native {
         site,
         create,
@@ -87,6 +98,9 @@ fn native(release: Release) -> Option<Native> {
         info_hi,
         libc_heap,
         fingerprints,
+        resolve,
+        size_of,
+        memcpy: 0x127098,
     })
 }
 
@@ -176,71 +190,296 @@ fn object_code(create: u32) -> Vec<u32> {
     c.finish(&[tail])
 }
 
-fn owner_code(owner: u32, operation: u32, original: [u32; 2]) -> Vec<u32> {
-    // Only the stage/general arenas participate. Resolve ownership before the
-    // native operation takes its locks. Preserve all four full EE argument
-    // registers, the caller's return address and the original stack layout.
-    let mut c = Code::new();
-    c.branch(4, 5, 0, 0);
-    c.emit(0); // new allocation: retain requested pool
-    c.emit(i(35, 4, 2, 180));
-    c.emit(i(9, 0, 3, 10));
-    c.branch(4, 2, 3, 1);
-    c.emit(0);
-    c.emit(i(9, 0, 3, 16));
-    c.branch(5, 2, 3, 0);
-    c.emit(0);
-    let lookup = c.words.len();
-    c.emit(i(9, 29, 29, (-80i32) as u32));
-    for (reg, off) in [(4, 0), (5, 16), (6, 32), (7, 48)] {
-        c.emit(i(31, 29, reg, off));
+/// Label-addressed MIPS assembler for the operation hook. Branch offsets
+/// include the architectural delay slot; `jal`/`j` targets are absolute.
+struct Asm {
+    base: u32,
+    w: Vec<u32>,
+    labels: std::collections::BTreeMap<&'static str, usize>,
+    fixups: Vec<(usize, &'static str, bool)>,
+}
+impl Asm {
+    fn new(base: u32) -> Self {
+        Self {
+            base,
+            w: Vec::new(),
+            labels: Default::default(),
+            fixups: Vec::new(),
+        }
     }
-    c.emit(i(63, 29, 31, 64));
-    c.emit(jump(owner, true));
-    c.emit(r(5, 0, 4, 0x2d));
-    c.branch(4, 2, 0, 2);
-    c.emit(0);
-    // An owner with another pool implementation must retain native behaviour.
-    c.emit(i(35, 2, 3, 0));
-    c.emit(i(35, 29, 1, 0));
-    c.emit(i(35, 1, 1, 0));
-    c.branch(5, 3, 1, 2);
-    c.emit(0);
-    c.emit(i(35, 2, 3, 180));
-    c.emit(i(9, 0, 1, 10));
-    c.branch(4, 3, 1, 3);
-    c.emit(0);
-    c.emit(i(9, 0, 1, 16));
-    c.branch(5, 3, 1, 2);
-    c.emit(0);
-    let replace = c.words.len();
-    c.emit(i(63, 29, 2, 0));
-    let restore = c.words.len();
-    for (reg, off) in [(4, 0), (5, 16), (6, 32), (7, 48)] {
-        c.emit(i(30, 29, reg, off));
+    fn e(&mut self, w: u32) {
+        self.w.push(w);
     }
-    c.emit(i(55, 29, 31, 64));
-    c.emit(i(9, 29, 29, 80));
-    let unchanged = c.words.len();
-    c.emit(original[0]);
-    c.emit(original[1]);
-    c.emit(jump(operation + 8, false));
-    c.emit(0);
-    c.finish(&[unchanged, lookup, restore, replace])
+    fn mark(&mut self, l: &'static str) {
+        assert!(self.labels.insert(l, self.w.len()).is_none(), "{l}");
+    }
+    /// Conditional branch (op 4 beq, 5 bne) to a label, then its delay slot.
+    fn b(&mut self, op: u32, rs: u32, rt: u32, l: &'static str, delay: u32) {
+        self.fixups.push((self.w.len(), l, false));
+        self.e(i(op, rs, rt, 0));
+        self.e(delay);
+    }
+    /// `jal`/`j` to a label inside this hook, then its delay slot.
+    fn call(&mut self, link: bool, l: &'static str, delay: u32) {
+        self.fixups.push((self.w.len(), l, true));
+        self.e(if link { 3 } else { 2 } << 26);
+        self.e(delay);
+    }
+    fn finish(mut self) -> Vec<u32> {
+        for (at, l, absolute) in self.fixups {
+            let to = self.labels[l];
+            self.w[at] |= if absolute {
+                (self.base + to as u32 * 4) >> 2
+            } else {
+                ((to as isize - at as isize - 1) as u32) & 65535
+            };
+        }
+        self.w
+    }
+}
+
+const SP: u32 = 29;
+const RA: u32 = 31;
+const V0: u32 = 2;
+const A: [u32; 4] = [4, 5, 6, 7];
+const T: [u32; 4] = [8, 9, 10, 11];
+fn mov(rd: u32, rs: u32) -> u32 {
+    r(rs, 0, rd, 0x2d)
+}
+
+/// The allocator operation hook, at `base`: `operation(pool, buffer, size,
+/// alignment)` allocates (null buffer), frees (size -1) or resizes.
+///
+/// - Existing buffers of the system (0), rendering (6), general (10) and stage
+///   (16) pools are first given to the general/stage arena that really owns
+///   them (buffers can be allocated elsewhere than their object's pool).
+/// - A failed fresh allocation from those pools is retried in the general
+///   arena, or the stage arena for a general request, when that arena has the
+///   same allocator implementation. Without this a full system pool returns
+///   null to callers that never check (the animation context constructor).
+/// - A failed resize allocates the new block the same way, copies at most the
+///   old usable size, then frees the old block; on failure the old block is
+///   left untouched and null is returned, as natively.
+/// - A guard keeps allocations made by the native operation itself (child
+///   arenas taking backing memory) on the native path, so a retry never
+///   re-enters an arena whose operation is in progress.
+/// - The pool table must exist with the stage entry before any lookup.
+fn operation_code(n: &Native, base: u32, table: u32, original: [u32; 2]) -> Vec<u32> {
+    let mut a = Asm::new(base);
+    let [t0, t1, t2, t3] = T;
+    let [a0, a1, a2, a3] = A;
+    // Entry: only the four arena pools participate.
+    a.e(i(35, a0, t2, 180));
+    a.b(4, t2, 0, "known", 0);
+    for id in [6, 10] {
+        a.e(i(9, 0, t3, id));
+        a.b(4, t2, t3, "known", 0);
+    }
+    a.e(i(9, 0, t3, 16));
+    a.b(5, t2, t3, "native", 0);
+    a.mark("known");
+    // Table ready (index 8 = stage pool 16), else native.
+    a.e(i(15, 0, t0, hi(table)));
+    a.e(i(35, t0, t0, table));
+    a.b(4, t0, 0, "native", 0);
+    a.e(i(35, t0, t1, 4));
+    a.e(i(11, t1, t1, 9)); // sltiu t1, count, 9
+    a.b(5, t1, 0, "native", 0);
+    a.e(i(9, 0, t3, 0xffff)); // t3 = -1
+    a.b(4, a1, 0, "fresh", 0);
+
+    // Existing buffer: resolve its owner, then free/resize.
+    a.e(i(9, SP, SP, (-112i32) as u32));
+    for (k, reg) in A.iter().enumerate() {
+        a.e(i(31, SP, *reg, k as u32 * 16)); // sq
+    }
+    a.e(i(63, SP, RA, 64));
+    a.e(jump(n.owner, true));
+    a.e(mov(a0, a1));
+    a.e(i(35, SP, a0, 0)); // requested pool (low word)
+    a.b(4, V0, 0, "keep", 0);
+    a.e(i(35, V0, t0, 0));
+    a.e(i(35, a0, t1, 0));
+    a.b(5, t0, t1, "keep", 0); // another implementation keeps native behaviour
+    a.e(i(35, V0, t0, 180));
+    a.e(i(9, 0, t1, 10));
+    a.b(4, t0, t1, "replace", 0);
+    a.e(i(9, 0, t1, 16));
+    a.b(5, t0, t1, "keep", 0);
+    a.mark("replace");
+    a.e(i(63, SP, V0, 0)); // sd: owner replaces the requested pool
+    a.mark("keep");
+    for (k, reg) in A.iter().enumerate() {
+        a.e(i(30, SP, *reg, k as u32 * 16)); // lq
+    }
+    a.e(i(9, 0, t3, 0xffff));
+    a.b(4, a2, t3, "tail", 0); // free
+    a.b(4, a2, 0, "tail", 0); // zero size
+    a.e(i(15, 0, t0, hi(base)));
+    a.mark("guard_check");
+    a.e(i(35, t0, t1, 0)); // patched below to the guard word
+    a.b(5, t1, 0, "tail", 0); // nested operation: native only
+    a.call(true, "guarded", 0);
+    a.b(5, V0, 0, "return", 0);
+    a.e(i(30, SP, a0, 0));
+    a.e(mov(a1, 0));
+    a.e(i(30, SP, a2, 32));
+    a.call(true, "fallback", i(30, SP, a3, 48));
+    a.b(4, V0, 0, "return", 0); // old block untouched
+    a.e(i(63, SP, V0, 80)); // new block
+    a.e(i(30, SP, a0, 0));
+    a.e(jump(n.size_of, true));
+    a.e(i(30, SP, a1, 16));
+    a.e(i(30, SP, a2, 32));
+    a.e(r(V0, a2, t0, 0x2b)); // t0 = usable < size
+    a.b(4, t0, 0, "copy", 0);
+    a.e(0);
+    a.e(mov(a2, V0));
+    a.mark("copy");
+    a.e(i(55, SP, a0, 80));
+    a.e(jump(n.memcpy, true));
+    a.e(i(30, SP, a1, 16));
+    a.e(i(30, SP, a0, 0));
+    a.e(i(30, SP, a1, 16));
+    a.e(i(9, 0, a2, 0xffff));
+    a.call(true, "guarded", i(30, SP, a3, 48));
+    a.e(i(55, SP, V0, 80));
+    a.mark("return");
+    a.e(i(55, SP, RA, 64));
+    a.e(r(RA, 0, 0, 8)); // jr ra
+    a.e(i(9, SP, SP, 112));
+    a.mark("tail");
+    a.e(i(55, SP, RA, 64));
+    a.call(false, "native", i(9, SP, SP, 112));
+
+    // Fresh allocation: zero size and free stay native.
+    a.mark("fresh");
+    a.b(4, a2, 0, "native", 0);
+    a.b(4, a2, t3, "native", 0);
+    a.e(i(15, 0, t0, hi(base)));
+    a.mark("guard_check2");
+    a.e(i(35, t0, t1, 0));
+    a.b(5, t1, 0, "native", 0);
+    a.call(false, "fallback", 0);
+
+    // fallback(pool, 0, size, alignment): native, then the other arena.
+    a.mark("fallback");
+    a.e(i(9, SP, SP, (-80i32) as u32));
+    for (k, reg) in A.iter().enumerate() {
+        a.e(i(31, SP, *reg, k as u32 * 16));
+    }
+    a.e(i(63, SP, RA, 64));
+    a.call(true, "guarded", 0);
+    a.b(5, V0, 0, "fallback_return", 0);
+    a.e(i(35, SP, t0, 0));
+    a.e(i(35, t0, t0, 180));
+    a.e(i(9, 0, t1, 10));
+    a.b(5, t0, t1, "resolve", i(9, 0, a0, 10)); // others borrow from general
+    a.e(i(9, 0, a0, 16)); // general borrows from stage
+    a.mark("resolve");
+    a.e(jump(n.resolve, true));
+    a.e(0);
+    a.b(4, V0, 0, "fallback_return", 0);
+    a.e(i(35, SP, t0, 0));
+    a.e(i(35, t0, t0, 0));
+    a.e(i(35, V0, t1, 0));
+    a.b(5, t0, t1, "fallback_fail", 0); // matching allocator implementation
+    a.e(mov(a0, V0));
+    a.e(i(30, SP, a1, 16));
+    a.e(i(30, SP, a2, 32));
+    a.call(true, "guarded", i(30, SP, a3, 48));
+    a.b(4, 0, 0, "fallback_return", 0);
+    a.mark("fallback_fail");
+    a.e(mov(V0, 0));
+    a.mark("fallback_return");
+    a.e(i(55, SP, RA, 64));
+    a.e(r(RA, 0, 0, 8));
+    a.e(i(9, SP, SP, 80));
+
+    // guarded(...): the native operation with the guard set.
+    a.mark("guarded");
+    a.e(i(9, SP, SP, (-16i32) as u32));
+    a.e(i(63, SP, RA, 0));
+    a.e(i(15, 0, t0, hi(base)));
+    a.mark("guard_set");
+    a.e(i(9, 0, t1, 1));
+    a.e(i(43, t0, t1, 0)); // sw t1, guard
+    a.call(true, "native", 0);
+    a.e(i(15, 0, t0, hi(base)));
+    a.mark("guard_clear");
+    a.e(i(43, t0, 0, 0)); // sw zero, guard
+    a.e(i(55, SP, RA, 0));
+    a.e(r(RA, 0, 0, 8));
+    a.e(i(9, SP, SP, 16));
+
+    // The native operation's displaced prologue.
+    a.mark("native");
+    a.e(original[0]);
+    a.e(original[1]);
+    a.e(jump(n.operation + 8, false));
+    a.e(0);
+    a.mark("guard");
+    a.e(0);
+    let guard = base + a.labels["guard"] as u32 * 4;
+    // Each guard access is `lui t0,hi(guard)` followed by an access at lo(guard).
+    for (l, at) in [
+        ("guard_check", 0),
+        ("guard_check2", 0),
+        ("guard_set", 1),
+        ("guard_clear", 0),
+    ] {
+        let k = a.labels[l];
+        a.w[k - 1] = i(15, 0, t0, hi(guard));
+        a.w[k + at] = (a.w[k + at] & !65535) | (guard & 65535);
+    }
+    a.finish()
+}
+
+/// The address of the pool-table pointer that `resolve` reads for even
+/// (pool-ID) indices: `lui at,H` at +0x0c and `lw v0,L(at)` at +0x30.
+fn table_pointer(iso: &[u8], at: impl Fn(u32) -> Result<usize>, resolve: u32) -> Result<u32> {
+    let lui = word(iso, at(resolve + 0x0c)?)?;
+    let lw = word(iso, at(resolve + 0x30)?)?;
+    need(lui >> 16 == 0x3c01 && lw >> 16 == 0x8c22)?;
+    Ok(((lui & 65535) << 16).wrapping_add(lw as i16 as i32 as u32))
+}
+
+/// The IOP module stored right after the boot ELF on every supported disc.
+/// Relocating it (the image appends a copy) frees its sectors for the ELF's
+/// hook code; the game loads modules by path.
+pub(crate) fn relocated_module(
+    iso: &[u8],
+    release: Release,
+) -> Result<Option<crate::iso9660::IsoFile>> {
+    if native(release).is_none() {
+        return Ok(None);
+    }
+    let boot = crate::iso9660::find_file(iso, release.serial())?;
+    let module = crate::iso9660::find_in_directory(iso, "MODULES", "CRI_ADXI.IRX")?;
+    need(module.lba == boot.lba + boot.size.div_ceil(2048))?;
+    Ok(Some(module))
 }
 
 #[cfg(test)]
 pub(crate) fn regions(iso: &[u8], report: &DiscReport) -> Result<Vec<WriteRegion>> {
     match report.release {
-        Some(release) => regions_for_release(iso, release, false),
+        Some(release) => regions_for_release(
+            iso,
+            release,
+            false,
+            relocated_module(iso, release)?.as_ref(),
+        ),
         None => Ok(Vec::new()),
     }
 }
 
+/// `module` is the relocated IOP module whose old sectors the ELF may grow into
+/// (see [`relocated_module`]); without it the hook must fit the ELF's last sector.
 pub(crate) fn regions_for_release(
     iso: &[u8],
     release: Release,
     difficulty: bool,
+    module: Option<&crate::iso9660::IsoFile>,
 ) -> Result<Vec<WriteRegion>> {
     let Some(n) = native(release) else {
         return Ok(vec![]);
@@ -308,7 +547,8 @@ pub(crate) fn regions_for_release(
         code.push(0);
     }
     let owner_offset = code.len() as u32 * 4;
-    code.extend(owner_code(n.owner, n.operation, original));
+    let table = table_pointer(iso, at, n.resolve)?;
+    code.extend(operation_code(&n, end + owner_offset, table, original));
     let mut code = encoded(&code);
     let (extra, routing) = if difficulty {
         crate::difficulty_io::mips_regions(iso, release, &elf, end + code.len() as u32)?
@@ -319,9 +559,19 @@ pub(crate) fn regions_for_release(
     need(code.len() <= RESERVE as usize)?;
     let code_file = boot.size.checked_add(15).ok_or_else(bad)? & !15;
     let new_size = code_file.checked_add(code.len() as u32).ok_or_else(bad)?;
-    need(new_size <= boot.size.div_ceil(2048) * 2048)?;
+    let sector_end = boot.size.div_ceil(2048) * 2048;
+    let room = match module {
+        Some(m) => {
+            need(m.lba == boot.lba + sector_end / 2048)?;
+            sector_end + m.size.div_ceil(2048) * 2048
+        }
+        None => sector_end,
+    };
+    need(new_size <= room)?;
+    // The ELF's own sector padding must be unused; a relocated module's old
+    // sectors are no longer referenced by the image.
     let padding_start = base + boot.size as usize;
-    let padding_end = base + new_size as usize;
+    let padding_end = base + new_size.min(sector_end) as usize;
     need(
         iso.get(padding_start..padding_end)
             .is_some_and(|v| v.iter().all(|b| *b == 0)),
@@ -381,6 +631,7 @@ pub(crate) fn regions_for_release(
         encoded(&[jump(end + owner_offset, false), 0]),
     );
     edits.extend(routing);
+    edits.extend(crate::anim_pool::ps2_regions(iso, release, &elf)?);
     Ok(edits)
 }
 
@@ -529,44 +780,385 @@ mod tests {
         }
     }
 
-    #[test]
-    fn existing_buffers_use_their_native_owner_with_ee_arguments_and_return_preserved() {
-        let main = 0x111000u32;
-        let general = 0x112000u32;
-        let foreign = 0x113000u32;
-        for (requested, owner, buffer, calls, expected) in [
-            (general, main, 0x160000u32, 1, main),
-            (main, general, 0x170000, 1, general),
-            (main, main, 0x160000, 1, main),
-            (general, 0, 0x160000, 1, general),
-            (general, foreign, 0x160000, 1, general),
-            (foreign, main, 0x160000, 0, foreign),
-            (main, main, 0, 0, main),
-        ] {
-            let mut c = Cpu::new();
-            c.low(4, requested.into());
-            c.low(5, buffer.into());
-            c.low(6, u64::MAX);
-            c.low(7, 16);
-            for (pool, id) in [(main, 16), (general, 10), (foreign, 20)] {
-                c.store(
-                    pool.into(),
-                    if pool == foreign { 0xabcdef } else { 0x531030 },
-                    4,
-                );
-                c.store(u64::from(pool) + 180, id, 4);
+    /// A small EE interpreter for the operation hook: real control flow with
+    /// delay slots, and the native operation and helpers modelled in Rust.
+    struct Ee {
+        regs: [u128; 32],
+        mem: BTreeMap<u32, u8>,
+        // pool address -> (id, vtable, free bytes)
+        pools: BTreeMap<u32, (u32, u32, u32)>,
+        // block -> (owning pool, size)
+        blocks: BTreeMap<u32, (u32, u32)>,
+        next: u32,
+        // (pool, buffer, size, guard set)
+        natives: Vec<(u32, u32, u32, bool)>,
+        copies: Vec<(u32, u32, u32)>,
+        owner_calls: usize,
+    }
+    const BASE: u32 = 0x58e000;
+    const TABLE: u32 = 0x586f58;
+    const RET: u32 = 0x1234560;
+    const VT: u32 = 0x531030;
+    impl Ee {
+        fn new(table_ready: bool) -> Self {
+            let mut e = Self {
+                regs: std::array::from_fn(|k| {
+                    ((0x5a5a_0000 + k as u128) << 64) | (0x900000 + k as u128 * 16)
+                }),
+                mem: BTreeMap::new(),
+                pools: BTreeMap::new(),
+                blocks: BTreeMap::new(),
+                next: 0x1000000,
+                natives: vec![],
+                copies: vec![],
+                owner_calls: 0,
+            };
+            e.regs[0] = 0;
+            e.regs[29] = 0x1fff000;
+            e.regs[31] = RET as u128;
+            for (addr, id, vt, free) in [
+                (0x591000u32, 0u32, VT, 64u32),
+                (0x592000, 6, VT, 64),
+                (0x596760, 10, VT, 100_000),
+                (0x596a48, 16, VT, 100_000),
+                (0x597000, 20, VT, 0),
+            ] {
+                e.pools.insert(addr, (id, vt, free));
+                e.w32(addr, vt);
+                e.w32(addr + 180, id);
             }
-            let before = c.regs;
-            let code = owner_code(0x2f04f0, 0x31f480, [0x27bdff00, 0x3c010058]);
-            assert_eq!(c.run(&code, 0x58d2e0, Some((0x2f04f0, owner))), 0x31f488);
-            assert_eq!(c.calls, calls);
-            assert_eq!(c.regs[4] as u64, u64::from(expected));
-            assert_eq!(c.regs[4] >> 64, before[4] >> 64);
-            for reg in [5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 28, 30, 31] {
-                assert_eq!(c.regs[reg], before[reg], "register {reg}");
+            if table_ready {
+                e.w32(TABLE, 0x591020);
+                e.w32(0x591020, 0x591030);
+                e.w32(0x591024, 12);
+            } else {
+                e.w32(TABLE, 0);
             }
-            assert_eq!(c.regs[29], before[29] - 256);
+            e
         }
+        fn w32(&mut self, a: u32, v: u32) {
+            for (k, b) in v.to_le_bytes().into_iter().enumerate() {
+                self.mem.insert(a + k as u32, b);
+            }
+        }
+        fn r(&self, a: u32, n: usize) -> u128 {
+            let mut b = [0u8; 16];
+            for (k, v) in b.iter_mut().take(n).enumerate() {
+                *v = *self
+                    .mem
+                    .get(&(a + k as u32))
+                    .unwrap_or_else(|| panic!("read {a:x}"));
+            }
+            u128::from_le_bytes(b)
+        }
+        fn st(&mut self, a: u32, v: u128, n: usize) {
+            for (k, b) in v.to_le_bytes().into_iter().take(n).enumerate() {
+                self.mem.insert(a + k as u32, b);
+            }
+        }
+        fn lo(&self, k: usize) -> u32 {
+            self.regs[k] as u32
+        }
+        fn set(&mut self, k: usize, v: u64) {
+            if k != 0 {
+                self.regs[k] = self.regs[k] & !u128::from(u64::MAX) | u128::from(v);
+            }
+        }
+        fn guard(&self, guard: u32) -> u32 {
+            self.r(guard, 4) as u32
+        }
+        /// The native operation, `guard` must be set while it runs.
+        fn native(&mut self, guard: u32) -> u32 {
+            let (pool, buffer, size) = (self.lo(4), self.lo(5), self.lo(6));
+            let guarded = self.guard(guard) == 1;
+            self.natives.push((pool, buffer, size, guarded));
+            let free = self.pools[&pool].2;
+            if buffer == 0 {
+                if size > free {
+                    return 0;
+                }
+                self.pools.get_mut(&pool).unwrap().2 -= size;
+                let b = self.next;
+                self.next += 0x1000;
+                self.blocks.insert(b, (pool, size));
+                b
+            } else if size == u32::MAX {
+                let (owner, n) = self.blocks.remove(&buffer).expect("double free");
+                assert_eq!(
+                    owner, pool,
+                    "freed through a pool that does not own the block"
+                );
+                self.pools.get_mut(&pool).unwrap().2 += n;
+                0
+            } else {
+                let (owner, n) = self.blocks[&buffer];
+                assert_eq!(
+                    owner, pool,
+                    "resized through a pool that does not own the block"
+                );
+                if size > n && size - n > free {
+                    return 0;
+                }
+                self.blocks.insert(buffer, (pool, size));
+                buffer
+            }
+        }
+        fn call(&mut self, target: u32, n: &Native) -> u32 {
+            match target {
+                t if t == n.owner => {
+                    self.owner_calls += 1;
+                    self.blocks.get(&self.lo(4)).map_or(0, |b| b.0)
+                }
+                t if t == n.resolve => {
+                    let id = self.lo(4);
+                    *self.pools.iter().find(|p| p.1 .0 == id).unwrap().0
+                }
+                t if t == n.size_of => self.blocks[&self.lo(5)].1,
+                t if t == n.memcpy => {
+                    self.copies.push((self.lo(4), self.lo(5), self.lo(6)));
+                    self.lo(4)
+                }
+                _ => panic!("unexpected call {target:x}"),
+            }
+        }
+        fn exec(&mut self, w: u32) {
+            let (rs, rt, rd) = (
+                ((w >> 21) & 31) as usize,
+                ((w >> 16) & 31) as usize,
+                ((w >> 11) & 31) as usize,
+            );
+            let a = (self.lo(rs)).wrapping_add(w as i16 as i32 as u32);
+            match w >> 26 {
+                9 => self.set(rt, u64::from(a) as i32 as i64 as u64),
+                11 => self.set(
+                    rt,
+                    u64::from((self.regs[rs] as u64) < (w as i16 as i64 as u64)),
+                ),
+                15 => self.set(rt, ((w & 65535) << 16) as i32 as i64 as u64),
+                35 => self.set(rt, self.r(a, 4) as u32 as i32 as i64 as u64),
+                43 => self.st(a, self.regs[rt], 4),
+                55 => self.set(rt, self.r(a, 8) as u64),
+                63 => self.st(a, self.regs[rt], 8),
+                30 => self.regs[rt] = self.r(a, 16),
+                31 => self.st(a, self.regs[rt], 16),
+                0 if w == 0 => {}
+                0 => match w & 63 {
+                    0x2d => self.set(
+                        rd,
+                        (self.regs[rs] as u64).wrapping_add(self.regs[rt] as u64),
+                    ),
+                    0x2b => self.set(
+                        rd,
+                        u64::from((self.regs[rs] as u64) < (self.regs[rt] as u64)),
+                    ),
+                    _ => panic!("instruction {w:08x}"),
+                },
+                _ => panic!("instruction {w:08x}"),
+            }
+        }
+        /// Runs the hook from its entry until it returns to the caller.
+        fn run(&mut self, code: &[u32], n: &Native) -> u32 {
+            let guard = BASE + (code.len() as u32 - 1) * 4;
+            for (k, w) in code.iter().enumerate() {
+                let at = BASE + k as u32 * 4;
+                if !self.mem.contains_key(&at) {
+                    self.w32(at, *w);
+                }
+            }
+            let mut pc = BASE;
+            for _ in 0..2000 {
+                if pc == RET {
+                    return self.lo(2);
+                }
+                if pc == n.operation + 8 {
+                    // The displaced prologue reserved 256 bytes; the native epilogue returns.
+                    let v = self.native(guard);
+                    self.set(2, u64::from(v));
+                    for k in [1, 3, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25] {
+                        self.regs[k] = u128::MAX - k as u128;
+                    }
+                    self.regs[29] += 256;
+                    pc = self.lo(31);
+                    continue;
+                }
+                let w = code[((pc - BASE) / 4) as usize];
+                let (rs, rt) = (((w >> 21) & 31) as usize, ((w >> 16) & 31) as usize);
+                let slot = |e: &mut Self| e.exec(code[((pc + 4 - BASE) / 4) as usize]);
+                match w >> 26 {
+                    4 | 5 => {
+                        let eq = self.regs[rs] as u64 == self.regs[rt] as u64;
+                        let take = (w >> 26 == 4) == eq;
+                        slot(self);
+                        pc = if take {
+                            pc + 4 + ((w as i16 as i32) << 2) as u32
+                        } else {
+                            pc + 8
+                        };
+                    }
+                    2 | 3 => {
+                        let target = (w & 0x03ff_ffff) << 2;
+                        if w >> 26 == 3 {
+                            self.set(31, u64::from(pc + 8));
+                        }
+                        slot(self);
+                        if (BASE..BASE + code.len() as u32 * 4).contains(&target)
+                            || target == n.operation + 8
+                        {
+                            pc = target;
+                        } else {
+                            let v = self.call(target, n);
+                            self.set(2, u64::from(v));
+                            for k in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25] {
+                                self.regs[k] = u128::MAX - k as u128;
+                            }
+                            pc = self.lo(31);
+                        }
+                    }
+                    0 if w & 63 == 8 => {
+                        let to = self.lo(rs);
+                        slot(self);
+                        pc = to;
+                    }
+                    _ => {
+                        self.exec(w);
+                        pc += 4;
+                    }
+                }
+            }
+            panic!("hook did not return");
+        }
+    }
+
+    fn hook() -> (Vec<u32>, Native) {
+        let n = native(Release::Usa).unwrap();
+        (operation_code(&n, BASE, TABLE, [0x27bdff00, 0x3c010058]), n)
+    }
+
+    fn op(e: &mut Ee, pool: u32, buffer: u32, size: u32) -> u32 {
+        let (code, n) = hook();
+        e.set(4, u64::from(pool));
+        e.set(5, u64::from(buffer));
+        e.set(6, u64::from(size) as i32 as i64 as u64);
+        e.set(7, 16);
+        let before = e.regs;
+        let v = e.run(&code, &n);
+        for k in [16, 17, 18, 19, 20, 21, 22, 23, 28, 29, 30, 31] {
+            assert_eq!(e.regs[k], before[k], "register {k}");
+        }
+        assert_eq!(
+            e.guard(BASE + (code.len() as u32 - 1) * 4),
+            0,
+            "guard left set"
+        );
+        v
+    }
+
+    #[test]
+    fn fresh_allocations_retry_in_the_general_or_stage_arena() {
+        let (system, render, general, stage, other) =
+            (0x591000, 0x592000, 0x596760, 0x596a48, 0x597000);
+        // Native success: one native call, nothing borrowed.
+        let mut e = Ee::new(true);
+        let b = op(&mut e, system, 0, 32);
+        assert_eq!(e.blocks[&b].0, system);
+        assert_eq!(e.natives.len(), 1);
+        // A full system or rendering pool borrows from the general arena,
+        // a full general arena from the stage arena.
+        for (pool, expected) in [
+            (system, general),
+            (render, general),
+            (general, stage),
+            (stage, general),
+        ] {
+            let mut e = Ee::new(true);
+            e.pools.get_mut(&pool).unwrap().2 = 0;
+            let b = op(&mut e, pool, 0, 4208);
+            assert_eq!(e.blocks[&b].0, expected, "{pool:x}");
+            assert_eq!(e.natives.len(), 2);
+            assert!(
+                e.natives.iter().all(|n| n.3),
+                "retried allocations run guarded"
+            );
+        }
+        // Unknown pools, zero size, a missing table or a mismatched
+        // implementation stay native.
+        let mut e = Ee::new(true);
+        assert_eq!(op(&mut e, other, 0, 64), 0);
+        assert_eq!(
+            e.natives,
+            vec![(other, 0, 64, false)],
+            "unknown pool: untouched native path"
+        );
+        let mut e = Ee::new(false);
+        e.pools.get_mut(&system).unwrap().2 = 0;
+        assert_eq!(op(&mut e, system, 0, 64), 0);
+        let mut e = Ee::new(true);
+        e.pools.get_mut(&system).unwrap().2 = 0;
+        e.w32(general, 0xabcdef);
+        assert_eq!(op(&mut e, system, 0, 64), 0);
+        assert_eq!(e.natives.len(), 1);
+    }
+
+    #[test]
+    fn nested_operations_never_retry() {
+        let (code, n) = hook();
+        let guard = BASE + (code.len() as u32 - 1) * 4;
+        let mut e = Ee::new(true);
+        e.pools.get_mut(&0x591000).unwrap().2 = 0;
+        e.w32(guard, 1);
+        e.set(4, 0x591000);
+        e.set(5, 0);
+        e.set(6, 64);
+        assert_eq!(e.run(&code, &n), 0);
+        assert_eq!(e.natives.len(), 1);
+    }
+
+    #[test]
+    fn frees_and_resizes_reach_the_owning_arena() {
+        let (system, general) = (0x591000, 0x596760);
+        // A system-pool buffer that was borrowed from the general arena.
+        let mut e = Ee::new(true);
+        e.pools.get_mut(&system).unwrap().2 = 0;
+        let b = op(&mut e, system, 0, 100);
+        assert_eq!(e.blocks[&b].0, general);
+        assert_eq!(op(&mut e, system, b, u32::MAX), 0); // freed in general (model asserts)
+        assert!(e.blocks.is_empty());
+        // A failed in-place resize migrates: new block, bounded copy, old freed.
+        let mut e = Ee::new(true);
+        let old = op(&mut e, system, 0, 48);
+        let new = op(&mut e, system, old, 400);
+        assert_eq!(e.blocks[&new].0, general);
+        // Native resize, fresh native, general retry, then the old block's free.
+        let resize: Vec<_> = e.natives[1..].iter().map(|n| (n.0, n.2, n.3)).collect();
+        assert_eq!(
+            resize,
+            vec![
+                (system, 400, true),
+                (system, 400, true),
+                (general, 400, true),
+                (system, u32::MAX, true)
+            ]
+        );
+        assert!(!e.blocks.contains_key(&old));
+        assert_eq!(e.copies, vec![(new, old, 48)]);
+        // Shrinking copies at most the new size.
+        let mut e = Ee::new(true);
+        e.pools.get_mut(&system).unwrap().2 = 1000;
+        let old = op(&mut e, system, 0, 900);
+        e.pools.get_mut(&system).unwrap().2 = 0;
+        e.blocks.get_mut(&old).unwrap().1 = 900;
+        // Model: growth fails in place, so force a migration with a larger size.
+        let new = op(&mut e, system, old, 1200);
+        assert_eq!(e.copies.last(), Some(&(new, old, 900)));
+        // If no arena can take the new size, the old block is untouched.
+        let mut e = Ee::new(true);
+        let old = op(&mut e, system, 0, 48);
+        for p in [system, general, 0x596a48] {
+            e.pools.get_mut(&p).unwrap().2 = 0;
+        }
+        assert_eq!(op(&mut e, system, old, 400), 0);
+        assert_eq!(e.blocks[&old], (system, 48));
+        assert!(e.copies.is_empty());
     }
 
     fn report(release: Release, boot: crate::iso9660::IsoFile) -> DiscReport {
@@ -610,7 +1202,9 @@ mod tests {
                 let ph = word(&iso, base + 28).unwrap() as usize;
                 word(&iso, base + ph + 20).unwrap()
             };
-            let stop = elf.iso_offset as usize + boot.size.div_ceil(2048) as usize * 2048;
+            // The hook grows into the relocated module's old sectors.
+            let module = relocated_module(&iso, release).unwrap().unwrap();
+            let stop = (module.lba as usize + module.size.div_ceil(2048) as usize) * 2048;
             let mut changed = iso[..stop].to_vec();
             for edit in &edits {
                 changed[edit.offset as usize..edit.offset as usize + edit.bytes.len()]
@@ -651,7 +1245,15 @@ mod tests {
             let mut bad_padding = iso[..stop].to_vec();
             bad_padding[elf.iso_offset as usize + boot.size as usize] = 1;
             assert!(regions(&bad_padding, &report).is_err());
-            eprintln!("verified PS2 {release:?} allocator hooks and 1 KiB reservation");
+            // USA has 720 bytes of sector padding: the hook needs the module's sectors there.
+            assert_eq!(
+                regions_for_release(&iso, release, false, None).is_err(),
+                release == Release::Usa
+            );
+            eprintln!(
+                "verified PS2 {release:?} allocator hooks ({} bytes) and 4 KiB reservation",
+                edits.iter().map(|e| e.bytes.len()).max().unwrap()
+            );
         }
     }
 }

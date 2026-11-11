@@ -63,6 +63,24 @@ pub struct IsoFile {
 /// there, and the boot ELF's serial is the only name that is ever rewritten.
 pub fn find_file(iso: &[u8], name: &str) -> Result<IsoFile> {
     let (directory_lba, directory_len) = root_directory(iso)?;
+    find_in(iso, directory_lba, directory_len, name)
+}
+
+/// Finds `directory/name` one level below the root, such as `MODULES/CRI_ADXI.IRX`.
+pub fn find_in_directory(iso: &[u8], directory: &str, name: &str) -> Result<IsoFile> {
+    let dir = find_file(iso, directory)?;
+    let flags = iso
+        .get(dir.record_offset as usize + 25)
+        .ok_or(Error::NotThisDisc)?;
+    if flags & 2 == 0 {
+        return Err(Error::FileNotFound {
+            name: directory.to_string(),
+        });
+    }
+    find_in(iso, dir.lba, dir.size, name)
+}
+
+fn find_in(iso: &[u8], directory_lba: u32, directory_len: u32, name: &str) -> Result<IsoFile> {
     let start = directory_lba as usize * SECTOR;
     let end = start + directory_len as usize;
     let wanted = without_version(name.as_bytes());

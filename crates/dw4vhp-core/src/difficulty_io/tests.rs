@@ -445,7 +445,15 @@ fn regional_routing_hooks_validate_and_fit_the_original_executables() {
         let edits = if release.is_gamecube() {
             gamecube_regions(&iso, release).unwrap()
         } else {
-            crate::ps2_memory::regions_for_release(&iso, release, true).unwrap()
+            crate::ps2_memory::regions_for_release(
+                &iso,
+                release,
+                true,
+                crate::ps2_memory::relocated_module(&iso, release)
+                    .unwrap()
+                    .as_ref(),
+            )
+            .unwrap()
         };
         assert!(edits.len() >= 3);
         for edit in &edits {

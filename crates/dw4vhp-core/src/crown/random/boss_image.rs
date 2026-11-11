@@ -94,10 +94,11 @@ fn boss_retirement_preserves_shared_draw_scenes() {
         let p = Pack::parse(&out).unwrap();
         if destination == 210 && to == "e_blosso" {
             let constants = lua_names::constants(script(&p, arena.intro).unwrap()).unwrap();
-            assert!(constants.iter().any(|c| c.text == b"SQ_ENTR"));
-            assert!(!constants
-                .iter()
-                .any(|c| c.text == b"SQ_NENTR" || c.text == b"SQ_WALKIN"));
+            // The walk-in fires behind the information card: the replacement idles.
+            assert!(constants.iter().any(|c| c.text == b"SQ_WAIT"));
+            assert!(!constants.iter().any(|c| {
+                c.text == b"SQ_ENTR" || c.text == b"SQ_NENTR" || c.text == b"SQ_WALKIN"
+            }));
         }
         assert!(
             graft::find_named(&p, "beLuaData", &format!("ded_{}.lua", arena.model))

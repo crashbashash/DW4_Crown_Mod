@@ -18,6 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             updates::check_updates,
             updates::accept_update,
+            updates::open_support_page,
             commands::choose_iso,
             commands::choose_output,
             settings::import_settings,
@@ -34,6 +35,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         updates::check_updates,
         updates::accept_update,
+        updates::open_support_page,
         commands::choose_iso,
         commands::choose_output,
         settings::import_settings,

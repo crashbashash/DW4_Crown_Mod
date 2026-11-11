@@ -43,6 +43,8 @@ test("update acceptance names only the offered version, never a webview-supplied
   expect(invoke).toHaveBeenLastCalledWith("check_updates");
   await backend.acceptUpdate("0.10.0");
   expect(invoke).toHaveBeenLastCalledWith("accept_update", { version: "0.10.0" });
+  await backend.openSupportPage();
+  expect(invoke).toHaveBeenLastCalledWith("open_support_page");
 });
 
 test("settings transport sends only the selection and treats cancellation as a normal result", async () => {

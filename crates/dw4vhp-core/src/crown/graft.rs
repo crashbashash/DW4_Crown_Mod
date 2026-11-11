@@ -14,11 +14,13 @@ const REGISTERED: [&str; 5] = [
 ];
 /// The scripts a model carries, named `<prefix><model>.lua`: damage handling (`hit_`), magic
 /// (`mag_`), summons and sequence calls (`cal_`), bind end (`bck_`), hooks (`hck_`), attack
-/// handling (`ahp_`, `aim_`), movement (`mch_`), shapes (`shp_`) and Machinedramon's whip
-/// triggers (`wh1_`, `wh2_`). The boss-only `ded_` and
-/// `wht_` scripts are left behind: no donor is a boss.
-pub(super) const MODEL_SCRIPTS: [&str; 12] = [
+/// handling (`ahp_`, `aim_`), movement (`mch_`), shapes (`shp_`), Machinedramon's whip
+/// triggers (`wh1_`, `wh2_`) and Tortamon's spin (`rot_`: its `swon`/`swof` sequence calls
+/// record the spinning actors that `hit_e_torta.lua` makes ignore hits). The boss-only `ded_`
+/// and `wht_` scripts are left behind: no donor is a boss.
+pub(super) const MODEL_SCRIPTS: [&str; 13] = [
     "hit_", "mag_", "cal_", "bck_", "hck_", "ahp_", "aim_", "mch_", "shp_", "wh1_", "wh2_", "bht_",
+    "rot_",
 ];
 /// Classes of the effect infos a stage registers by name for the attacks of its enemies
 /// (`x_026eblst01a`, `y_027emagc01a`, ...): the starter that delivers the attack and its

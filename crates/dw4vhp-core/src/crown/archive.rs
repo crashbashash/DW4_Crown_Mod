@@ -686,6 +686,32 @@ fn append_area(
     Ok((end, regions))
 }
 
+fn ps2_memory_module(iso: &[u8]) -> Result<Option<iso9660::IsoFile>> {
+    crate::ps2_memory::relocated_module(iso, crate::release::detect(iso)?)
+}
+
+/// Appends a copy of a PS2 file (sector-aligned) and points its directory
+/// record at the copy, freeing its original sectors.
+fn append_ps2_file(
+    start: usize,
+    file: &iso9660::IsoFile,
+    pieces: &mut Vec<Piece>,
+) -> Result<(usize, Vec<WriteRegion>)> {
+    let offset = a2048(start);
+    pieces.push(Piece::Bytes(vec![0; offset - start]));
+    let source = file.lba as usize * 2048;
+    pieces.push(Piece::Source(source..source + file.size as usize));
+    let sector =
+        u32::try_from(offset / 2048).map_err(|_| bad("relocated file exceeds format limit"))?;
+    Ok((
+        offset + file.size as usize,
+        vec![WriteRegion {
+            offset: file.record_offset + 2,
+            bytes: [sector.to_le_bytes(), sector.to_be_bytes()].concat(),
+        }],
+    ))
+}
+
 impl CrownPlan {
     pub fn build(iso: &[u8]) -> Result<Self> {
         Self::build_with_options(iso, false, false, false, 0, None, None)
@@ -829,6 +855,16 @@ impl CrownPlan {
         need(append_offset == iso.len(), "unexpected trailing ISO data")?;
         let (extended_size, area_regions) =
             append_area(iso, append_offset, cursor, area, &mut pieces)?;
+        // The PS2 allocator hooks need more code than the boot ELF's last
+        // sector holds: move the module stored after it to the end.
+        let module = match random {
+            Some(_) => ps2_memory_module(iso)?,
+            None => None,
+        };
+        let (extended_size, module_regions) = match &module {
+            Some(m) => append_ps2_file(extended_size, m, &mut pieces)?,
+            None => (extended_size, Vec::new()),
+        };
         let output_size = a2048(extended_size);
         need(
             output_size / 2048 <= u32::MAX as usize && cursor <= u32::MAX as usize,
@@ -852,10 +888,14 @@ impl CrownPlan {
         ];
         regions.extend(resource_regions);
         regions.extend(area_regions);
+        regions.extend(module_regions);
         if random.is_some() {
             let release = crate::release::detect(iso)?;
             regions.extend(crate::ps2_memory::regions_for_release(
-                iso, release, difficulty,
+                iso,
+                release,
+                difficulty,
+                module.as_ref(),
             )?);
         }
         for sector in 16..(iso.len() / 2048).min(64) {

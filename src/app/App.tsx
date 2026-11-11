@@ -15,6 +15,7 @@ import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { newSeed, parseSeed } from "../features/settings/seed";
 import { isSuggestedName, withOutputExtension, withSeed } from "../features/output/outputName";
 import { UpdateCenter } from "../features/updates/UpdateCenter";
+import { SupportLink } from "../components/SupportLink";
 import { MessageDialog } from "../components/MessageDialog";
 import { BackendProvider, useBackend } from "../ipc/context";
 import "./theme.css";
@@ -329,6 +330,7 @@ function AppInner() {
           </div>
         </main>
         <div className="workspace-footer footer-row">
+          <SupportLink />
           <UpdateCenter blocked={busy || settingsBusy || disc.checking || overwritePath !== null || donePopup !== null || patchError !== null || discError !== null} onBusyChange={setUpdating} />
         </div>
       </div>
