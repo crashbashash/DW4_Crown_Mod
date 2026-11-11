@@ -26,6 +26,7 @@ mod ranged_ai;
 mod reclaim;
 mod rewards;
 mod river_mix;
+mod script_hp;
 mod sound;
 mod split_models;
 pub use random::Options as RandomOptions;

@@ -35,7 +35,7 @@ pub const PRACTICE_MAP: [(usize, usize); 8] = [
 
 /// HP is an `i32` that must never go negative, so its clamp floor is 0.
 const HP_FLOOR: f64 = 0.0;
-const HP_CAP: f64 = 400_000.0;
+pub(crate) const HP_CAP: f64 = 400_000.0;
 const STAT_MIN: f64 = -32768.0;
 const STAT_MAX: f64 = 32767.0;
 const CHARGEN_FLOOR: f64 = 0.0;

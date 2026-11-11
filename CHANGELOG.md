@@ -11,6 +11,7 @@
 - Fixed the boss health bar staying on screen after defeating a randomised MR04 boss; MR04 now updates and closes the arena's bar.
 - Fixed a randomised boss in Cliff Dungeon B3 or Geko Path B2 advancing on the player while the boss information card was still on screen.
 - Fixed a GameCube crash ("Invalid write to 0x000000a9") when many enemies stayed alive at once, notably at the start of Mangrove Forest: animation decoder contexts now come from the general memory arena instead of the small system pool, as on PS2.
+- Fixed Pharaohmon's summoned Mummymon (and other summoned families) showing the crown but keeping retail HP. Script-spawned enemies take their HP from the script rather than the stat table, so Crown Mod now scales those values too. This also covers Daemon's return from its split form and the practice stage's sleeping Goburimon.
 - PS2 now has the same memory safety net as GameCube: a failed allocation or resize in a full system, rendering, general or stage pool is retried in another arena instead of returning nothing. To make room for this code, the PS2 audio module `MODULES/CRI_ADXI.IRX` moves to the end of the patched image.
 
 ## v0.19.0

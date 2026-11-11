@@ -413,6 +413,50 @@ pub(crate) fn rebuild_afs(
             }];
         }
     }
+    // Scripted spawns carry literal HP. Give it the final table's HP factor
+    // after every stage, boss and sound edit has settled.
+    if let Some(balanced) = final_table {
+        let authored =
+            crate::table::EnemyTable::read(iso, &crate::release::detect(iso)?.layout_in(iso)?)?;
+        let rewards = random.as_ref().map(|r| &r.rewards);
+        let variants = |entry: usize| rewards.and_then(|r| r.get(&entry)).map(|s| &s.rows);
+        for (i, edits) in entry_edits.iter_mut().enumerate() {
+            let (off, len) = entries[i];
+            let data = &afs[off..off + len];
+            if !script_hp::candidate(data) && !edits.iter().any(|e| script_hp::candidate(&e.bytes))
+            {
+                continue;
+            }
+            let rescaled = match edits.as_slice() {
+                [] => script_hp::rescale(data, &authored, balanced, variants(i)),
+                [e] if e.range == (0..len) => {
+                    script_hp::rescale(&e.bytes, &authored, balanced, variants(i))
+                }
+                _ => {
+                    script_hp::rescale(&materialize(data, edits)?, &authored, balanced, variants(i))
+                }
+            }
+            .map_err(|e| bad(&format!("script HP in entry {i}: {e}")))?;
+            if let Some(bytes) = rescaled {
+                *edits = vec![Edit {
+                    range: 0..len,
+                    bytes,
+                }];
+            }
+        }
+        if let Some(r) = random.as_mut() {
+            for (&entry, packs) in &mut r.extra {
+                for pack in packs {
+                    let variants = r.rewards.get(&entry).map(|s| &s.rows);
+                    if let Some(bytes) = script_hp::rescale(pack, &authored, balanced, variants)
+                        .map_err(|e| bad(&format!("script HP in entry {entry} variant: {e}")))?
+                    {
+                        *pack = bytes;
+                    }
+                }
+            }
+        }
+    }
     let rewards = random
         .as_ref()
         .map(|r| r.reward_plan(iso))
