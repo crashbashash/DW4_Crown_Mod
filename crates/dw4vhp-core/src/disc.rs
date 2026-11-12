@@ -201,7 +201,9 @@ pub(crate) fn inspect_retail_planned_with_options(
     )
 }
 
-pub(crate) fn inspect_retail_planned_for_plan(
+/// Inspect a retail image and build the archive plan `plan` patches with,
+/// exactly as [`crate::patch::patch_file`] does.
+pub fn inspect_retail_planned_for_plan(
     iso: &[u8],
     plan: &crate::plan::PatchPlan,
 ) -> Result<(DiscReport, crate::crown::CrownPlan)> {

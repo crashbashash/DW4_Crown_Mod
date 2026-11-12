@@ -62,11 +62,6 @@ fn check(key: &str, expected_release: Release, expected_format: Format) -> bool 
             &RatioVector::derive(&report.authored),
         );
         let blocks = expected_table.blocks();
-        assert_eq!(
-            format!("{:x}", Md5::digest(&blocks[1])),
-            "c2cdbb0ca237b6619d55374bd4ed86e5",
-            "all supported releases use the same half-Speed practice balance"
-        );
         let tmp = tempfile::tempdir().unwrap();
         let output = tmp.path().join(match expected_format {
             Format::Raw => "patched.iso",

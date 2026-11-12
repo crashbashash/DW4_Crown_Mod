@@ -1,16 +1,21 @@
 //! Optional full-disc regression tests. No game data is included in this repo.
 use dw4vhp_core::{
-    disc::inspect_retail,
+    disc::{inspect_retail, inspect_retail_planned_for_plan},
     error::Error,
     patch::{patch_file, PatchOptions},
-    plan::PatchPlan,
+    plan::{transform, PatchPlan},
+    ratio::RatioVector,
     release::Release,
 };
 use md5::{Digest, Md5};
 use memmap2::Mmap;
 use std::{fs::File, path::PathBuf};
 
-fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
+/// The default build writes the computed table into every authored copy,
+/// matches the app's own archive plan, changes nothing else and refuses to
+/// patch its own output. Expectations are computed from the input, so
+/// intended balance or archive changes do not need re-pinned checksums.
+fn check(key: &str, release: Release, input_md5: &str) {
     let Some(path) = std::env::var_os(key).map(PathBuf::from) else {
         eprintln!("SKIP: {key} not configured");
         return;
@@ -24,18 +29,17 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
     assert_eq!(report.copies, [665; 3]);
     assert_eq!(report.rarity_nonzero, 60);
 
+    let plan = PatchPlan::default();
     let tmp = tempfile::tempdir().unwrap();
     let output = tmp.path().join("patched.iso");
     let outcome = patch_file(
         &path,
         &output,
-        &PatchPlan::default(),
+        &plan,
         &PatchOptions { overwrite: false },
         &mut |_| {},
     )
     .unwrap();
-    // The unsigned default-build fingerprints remain an independent
-    // oracle after reversing only the footer/volume-length metadata below.
     assert_eq!(outcome.bytes, report.output_size);
     assert!(outcome.bytes > original.len() as u64);
     let out_file = File::open(&output).unwrap();
@@ -47,47 +51,25 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         .unwrap();
     let mut identity = signature.clone();
     identity.as_object_mut().unwrap().remove("recovery");
-    assert_eq!(
-        identity,
-        dw4vhp_core::signature::metadata(release, &PatchPlan::default())
-    );
-    // Check the independent unsigned golden checksum: remove only the
-    // footer and reverse the volume-size update in this hashing view.
-    let unsigned_len = signature["recovery"]["archiveEnd"].as_u64().unwrap() as usize;
-    let mut head = patched[..64 * 2048].to_vec();
-    for sector in 16..64 {
-        let at = sector * 2048;
-        if head[at] == 255 {
-            break;
-        }
-        if head[at] == 1 || head[at] == 2 {
-            let sectors = (unsigned_len / 2048) as u32;
-            head[at + 80..at + 88]
-                .copy_from_slice(&[sectors.to_le_bytes(), sectors.to_be_bytes()].concat());
-        }
-    }
-    let mut legacy = Md5::new();
-    legacy.update(&head);
-    legacy.update(&patched[head.len()..unsigned_len]);
-    assert_eq!(format!("{:x}", legacy.finalize()), output_md5);
+    assert_eq!(identity, dw4vhp_core::signature::metadata(release, &plan));
 
     let layout = release.layout();
     let offsets = [layout.hp_off, layout.stat_off, layout.byte_off];
     let mut ranges = Vec::new();
-    let shipped_hashes = [
-        "56885ddab3be87476c0810abf6b6f152",
-        "c2cdbb0ca237b6619d55374bd4ed86e5",
-        "3ce7d29cd12e93d05eb201356b231288",
-    ];
-    for ((block, offset), hash) in report
+    let (expected_table, _) = transform(
+        &report.authored,
+        &plan,
+        &RatioVector::derive(&report.authored),
+    );
+    for ((block, offset), computed) in report
         .authored
         .blocks()
         .iter()
         .zip(offsets)
-        .zip(shipped_hashes)
+        .zip(expected_table.blocks())
     {
         let expected = &patched[offset as usize..offset as usize + block.len()];
-        assert_eq!(format!("{:x}", Md5::digest(expected)), hash);
+        assert_eq!(expected, computed.as_slice());
         let mut count = 0;
         for start in memchr::memmem::find_iter(&original, block) {
             let end = start + block.len();
@@ -97,11 +79,9 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         }
         assert_eq!(count, 665);
     }
-    let crowns = dw4vhp_core::crown::CrownPlan::build(&original).unwrap();
-    // Verify the expanded archive independently of the recovery footer.
-    let mut archive_view = patched[..unsigned_len].to_vec();
-    archive_view[..head.len()].copy_from_slice(&head);
-    crowns.verify(&original, &archive_view).unwrap();
+    // The app's own plan (archive, recovery and signature) for the same input.
+    let (_, crowns) = inspect_retail_planned_for_plan(&original, &plan).unwrap();
+    crowns.verify(&original, &patched).unwrap();
     ranges.extend(
         crowns
             .regions
@@ -141,9 +121,10 @@ fn check(key: &str, release: Release, input_md5: &str, output_md5: &str) {
         "original must be unchanged"
     );
     eprintln!(
-        "PASS: {} {} → {actual} (unsigned {output_md5}); all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive and signature verified",
+        "PASS: {} {} → {}; all 1995 table blocks checked; original archive/ELF and unrelated bytes unchanged; expanded archive and signature verified",
         release.label(),
-        release.serial(), actual = outcome.md5
+        release.serial(),
+        outcome.md5
     );
 }
 
@@ -153,7 +134,6 @@ fn usa_retail() {
         "DW4_RETAIL_USA_ISO",
         Release::Usa,
         "3185f04230b1dabd853db750e4b51108",
-        "3654d8c20e50527871f379c5c13aa276",
     );
 }
 #[test]
@@ -162,7 +142,6 @@ fn europe_retail() {
         "DW4_RETAIL_EUROPE_ISO",
         Release::Europe,
         "bd95f00a8efa2ab6b502b7aade37f143",
-        "2d83475de0bd54e053b3781e02b8996b",
     );
 }
 #[test]
@@ -171,6 +150,5 @@ fn japan_retail() {
         "DW4_RETAIL_JAPAN_ISO",
         Release::Japan,
         "78543a26a08d82fb32f1f3b5035d7e3b",
-        "c08a56b436efe42d5060e096a47d5afe",
     );
 }

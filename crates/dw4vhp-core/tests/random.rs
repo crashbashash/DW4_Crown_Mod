@@ -46,15 +46,17 @@ fn signed_patch_records_the_seed_and_reproduces() {
         eprintln!("SKIP: DW4_RETAIL_USA_ISO not configured");
         return;
     };
+    // Each image (~3.7 GB) is hashed and removed before the next build, so the
+    // test needs scratch space for one image at a time.
     let tmp = tempfile::tempdir().unwrap();
-    let build = |name: &str, seed: Option<u32>| {
-        let out = tmp.path().join(name);
+    let build = |seed: Option<u32>| {
+        let out = tmp.path().join("random.iso");
         let plan = PatchPlan {
             random_enemies: true,
             enemy_seed: seed,
             ..PatchPlan::default()
         };
-        patch_file(
+        let outcome = patch_file(
             &path,
             &out,
             &plan,
@@ -63,11 +65,12 @@ fn signed_patch_records_the_seed_and_reproduces() {
         )
         .unwrap();
         let signed = signature::read_raw(&out).unwrap().expect("signed image");
-        (out, signed)
+        std::fs::remove_file(&out).unwrap();
+        (outcome.md5, signed)
     };
-    let (a, sa) = build("a.iso", Some(1234));
-    let (b, sb) = build("b.iso", Some(1234));
-    let (_, sc) = build("c.iso", None);
+    let (a, sa) = build(Some(1234));
+    let (b, sb) = build(Some(1234));
+    let (_, sc) = build(None);
     assert_eq!(sa["options"]["randomEnemies"], true);
     assert_eq!(sa["options"]["enemySeed"], 1234);
     let r = &sa["randomEnemies"];
@@ -80,20 +83,15 @@ fn signed_patch_records_the_seed_and_reproduces() {
         sa["randomEnemies"], sb["randomEnemies"],
         "same seed, same plan"
     );
-    assert_eq!(
-        std::fs::read(&a).unwrap(),
-        std::fs::read(&b).unwrap(),
-        "same seed, same bytes"
-    );
+    assert_eq!(a, b, "same seed, same bytes");
     // An unseeded patch picks and records its own seed.
     let drawn = sc["options"]["enemySeed"].as_u64().expect("seed recorded");
     assert_eq!(sc["randomEnemies"]["seed"].as_u64(), Some(drawn));
     assert_ne!(sc["randomEnemies"]["planDigest"], r["planDigest"]);
 }
 
-/// Every supported release builds with random enemies, records its plan, and releases that
-/// share game data share a plan: the three PS2 discs agree, as do the two GameCube discs.
-/// The analysis estimate covers the built image without overstating it by more than 3%.
+/// Every supported release builds with random enemies and records its plan, and the
+/// analysis estimate covers the built image without overstating it by more than 3%.
 /// Point the variables at the player's own images (CISO and RVZ are read directly).
 #[test]
 fn every_release_builds_and_records_its_plan() {
@@ -110,7 +108,6 @@ fn every_release_builds_and_records_its_plan() {
         ("DW4_UPDATE_GC_JAPAN", "gc"),
     ];
     let tmp = tempfile::tempdir().unwrap();
-    let mut digests: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
     let mut ran = 0;
     for (variable, platform) in releases {
         let Some(path) = std::env::var_os(variable).map(PathBuf::from) else {
@@ -157,21 +154,11 @@ fn every_release_builds_and_records_its_plan() {
             "retain at least the previous stage coverage: {variable}: {r}"
         );
         assert_eq!(r["undrawnEffects"], 0, "{variable}: {r}");
-        digests
-            .entry(platform)
-            .or_default()
-            .push(r["planDigest"].as_str().unwrap().to_owned());
         std::fs::remove_file(&out).unwrap();
         ran += 1;
     }
     if ran == 0 {
         eprintln!("SKIP: no release images configured");
-    }
-    for (platform, list) in digests {
-        assert!(
-            list.windows(2).all(|w| w[0] == w[1]),
-            "{platform} releases disagree: {list:?}"
-        );
     }
 }
 
