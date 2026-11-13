@@ -241,9 +241,7 @@ mod tests {
             para: vec![2; 649],
             rarity: vec![5; 649],
         };
-        for row in 370..=378 {
-            table.rarity[row] = 0;
-        }
+        table.rarity[370..=378].fill(0);
         let before = table.clone();
         mark_rows(&mut table);
         assert_eq!(table.hp, before.hp);
@@ -442,9 +440,7 @@ mod tests {
         for row in [0, 60, 644, 645] {
             assert_eq!(table.rarity[row], RANDOM_MARKER);
         }
-        for row in 370..=378 {
-            assert_eq!(table.rarity[row], 0);
-        }
+        assert!(table.rarity[370..=378].iter().all(|&rarity| rarity == 0));
         assert_eq!(table.rarity[66], 0, "unfilled table slots are not enemies");
     }
 }

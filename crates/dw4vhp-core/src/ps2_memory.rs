@@ -732,8 +732,8 @@ mod tests {
                         self.op(code[pc + 1]);
                         self.calls += 1;
                         // Exercise restoration after the normal native ABI clobbers.
-                        for reg in 1..16 {
-                            self.regs[reg] = u128::MAX - reg as u128;
+                        for (reg, value) in self.regs.iter_mut().enumerate().take(16).skip(1) {
+                            *value = u128::MAX - reg as u128;
                         }
                         self.low(2, u64::from(owner));
                         pc += 2;
