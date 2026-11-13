@@ -84,13 +84,6 @@ describe("App layout", () => {
     expect(screen.getByRole("heading", { name: "DW4 Crown Mod" })).toBeTruthy();
   });
 
-  test("footer link opens the Ko-fi page", async () => {
-    const open = vi.spyOn(MockBackend.prototype, "openSupportPage");
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: /Support on Ko-fi/ }));
-    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
-  });
-
   test("wide layout uses two columns", () => {
     mockMatchMedia("(min-width: 900px)", true);
     renderCrownModApp();

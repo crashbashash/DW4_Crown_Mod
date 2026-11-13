@@ -36,7 +36,7 @@ describe("OutputPanel", () => {
 
   test("free-space note uses the expanded output size", () => {
     setup({ status: { kind: "ok", text: "", size: 1448902656, outputSize: 2179143680, copies: [1, 1, 1] } });
-    expect(screen.getByText(/2.18 GB of free space/)).toBeTruthy();
+    expect(screen.getByText(/2.03 GB of free space/)).toBeTruthy();
   });
 
 });

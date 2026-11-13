@@ -6,10 +6,18 @@ export interface OutputPanelProps {
   canPatch: boolean;
   status: DiscStatus | null;
   refreshing?: boolean;
+  /** Bytes an in-place update of a modded image will produce, once estimated. */
+  updateSize?: number | null;
+  /** The image's container, so a compressed update says its size is before compression. */
+  extension?: string;
   onPatch: () => void;
   onChooseOutput: () => void;
   onSetOutput: (path: string) => void;
 }
+
+/** Binary gigabytes, as Windows and most file managers report sizes, under the familiar "GB" label. */
+const gigabytes = (bytes: number) => (bytes / 1024 ** 3).toFixed(2);
+const compressed = (extension: string) => extension === "rvz" || extension === "ciso";
 
 /** Output selection and the patch action; progress lives in its own dialog. */
 export function OutputPanel({
@@ -18,6 +26,8 @@ export function OutputPanel({
   canPatch,
   status,
   refreshing = false,
+  updateSize = null,
+  extension = "iso",
   onPatch,
   onChooseOutput,
   onSetOutput,
@@ -39,9 +49,13 @@ export function OutputPanel({
           Save as…
         </button>
       </div>}
-      {refreshing && !modded ? <p className="hint" role="status">Updating output size…</p> : status?.kind === "ok" && (
+      {refreshing ? <p className="hint" role="status">Updating output size…</p> : modded ? updateSize !== null && (
         <p className="hint">
-          The output copy needs {(status.outputSize / 1_000_000_000).toFixed(2)} GB of free space.
+          The updated image will be {gigabytes(updateSize)} GB{compressed(extension) ? " before compression" : ""}.
+        </p>
+      ) : status?.kind === "ok" && (
+        <p className="hint">
+          The output copy needs {gigabytes(status.outputSize)} GB of free space.
         </p>
       )}
       <div className="row patch-actions">

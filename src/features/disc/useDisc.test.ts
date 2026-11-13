@@ -87,3 +87,19 @@ test("an old inspection cannot replace the current spawn-option verdict", async 
    expect(analyze).toHaveBeenLastCalledWith("/mock/game.iso", { ...DEFAULT_PATCH_SELECTION, crownDrops: true });
    expect(result.current.outputPath).toBe("/chosen/out.iso");
  });
+
+test("a modded image re-estimates its update size when the options change", async () => {
+  const backend = new MockBackend();
+  backend.nextAnalyzeError = "this disc is already modded";
+  const estimate = vi.spyOn(backend, "estimateUpdate").mockImplementation(async (_path, selection) => selection.randomEnemies ? 3_700_000_000 : 2_200_000_000);
+  const { result, rerender } = renderHook(({ random }) => useDisc(backend, { ...DEFAULT_PATCH_SELECTION, crownMod: true, randomEnemies: random }), { initialProps: { random: false } });
+  await act(() => result.current.setInputPath("/mock/modded.iso"));
+  await waitFor(() => expect(result.current.updateSize).toBe(2_200_000_000));
+  expect(result.current.refreshing).toBe(false);
+  rerender({ random: true });
+  expect(result.current.updateSize).toBeNull();
+  expect(result.current.refreshing).toBe(true);
+  await waitFor(() => expect(result.current.updateSize).toBe(3_700_000_000));
+  expect(estimate).toHaveBeenLastCalledWith("/mock/modded.iso", { ...DEFAULT_PATCH_SELECTION, crownMod: true, randomEnemies: true });
+  expect(result.current.status?.reason).toBe("already-modded");
+});

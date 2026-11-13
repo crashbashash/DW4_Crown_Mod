@@ -1,6 +1,7 @@
 //! Embedded original bytes allow rebuilding from a clean base without stacking patches.
 use crate::{
     container::{self, Format},
+    disc::DiscReport,
     error::{Error, Result},
     patch::{patch_file, PatchOptions, PatchOutcome},
     plan::PatchPlan,
@@ -216,6 +217,58 @@ pub(crate) fn restore(
     Ok(())
 }
 
+/// Restore the clean original of the plain modded image `raw` to `baseline`,
+/// returning its release and embedded mod metadata.
+fn restore_selected(
+    raw: &Path,
+    baseline: &Path,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<(crate::release::Release, Value)> {
+    let file = File::open(raw)?;
+    // Safety: selected image is opened read-only.
+    let iso = unsafe { Mmap::map(&file)? };
+    let metadata = crate::signature::from_image(&iso)?;
+    let Some(metadata) = metadata.filter(|m| updatable(Some(m))) else {
+        return Err(bad(NOT_UPDATABLE));
+    };
+    let release = crate::release::detect(&iso)?;
+    if metadata["release"] != release.serial()
+        || metadata["platform"] != if release.is_gamecube() { "gc" } else { "ps2" }
+    {
+        return Err(bad("signature release does not match disc"));
+    }
+    restore(&iso, &metadata, baseline, progress)?;
+    let file = File::open(baseline)?;
+    // Safety: the private base is complete and read-only during detection.
+    let image = unsafe { Mmap::map(&file)? };
+    if crate::release::detect(&image)? != release {
+        return Err(bad("restored release mismatch"));
+    }
+    Ok((release, metadata))
+}
+
+/// Inspect the clean original inside an updatable modded image with `plan`,
+/// so the GUI can show the size an update will produce. The original is
+/// restored into a private folder beside the image and removed afterwards.
+pub fn inspect_update_for_plan(path: &Path, plan: &PatchPlan) -> Result<DiscReport> {
+    let target = fs::canonicalize(path)?;
+    let work = tempfile::Builder::new()
+        .prefix(".dw4-update-")
+        .tempdir_in(target.parent().unwrap())?;
+    let baseline = work.path().join("original.iso");
+    match container::detect(&target)? {
+        Format::Raw => restore_selected(&target, &baseline, &mut |_, _| {})?,
+        format => {
+            let raw = work.path().join("selected.iso");
+            container::unpack(format, &target, &raw, &mut |_, _| {})?;
+            let restored = restore_selected(&raw, &baseline, &mut |_, _| {})?;
+            fs::remove_file(raw)?;
+            restored
+        }
+    };
+    crate::disc::inspect_retail_for_plan(&baseline, plan)
+}
+
 /// Verify a private rebuild, then replace the selected image at the same path.
 pub fn update_image(
     path: &Path,
@@ -251,37 +304,13 @@ pub fn update_image(
         raw
     };
     progress(scaled(Phase::Restoring, 0, 1, unpacked, restored));
-    let previous = (|raw: &Path| {
-        let file = File::open(raw)?;
-        // Safety: selected image is opened read-only.
-        let iso = unsafe { Mmap::map(&file)? };
-        let metadata = crate::signature::from_image(&iso)?;
-        let Some(metadata) = metadata.filter(|m| updatable(Some(m))) else {
-            return Err(bad(NOT_UPDATABLE));
-        };
-        let release = crate::release::detect(&iso)?;
-        if metadata["release"] != release.serial()
-            || metadata["platform"] != if release.is_gamecube() { "gc" } else { "ps2" }
-        {
-            return Err(bad("signature release does not match disc"));
-        }
-        restore(&iso, &metadata, &baseline, &mut |d, t| {
-            progress(scaled(Phase::Restoring, d, t, unpacked, restored))
-        })?;
-        Ok((release, metadata))
-    })(&raw_selected)?;
+    let previous = restore_selected(&raw_selected, &baseline, &mut |d, t| {
+        progress(scaled(Phase::Restoring, d, t, unpacked, restored))
+    })?;
     if format != Format::Raw {
         fs::remove_file(raw_selected)?;
     }
     progress(scaled(Phase::Restoring, 1, 1, unpacked, restored));
-    {
-        let file = File::open(&baseline)?;
-        // Safety: the private base is complete and read-only during detection.
-        let image = unsafe { Mmap::map(&file)? };
-        if crate::release::detect(&image)? != previous.0 {
-            return Err(bad("restored release mismatch"));
-        }
-    }
     let mut plan = plan.clone();
     if plan.random_crown_colours && plan.crown_colour_seed.is_none() {
         plan.crown_colour_seed = previous.1["options"]["crownColourSeed"]

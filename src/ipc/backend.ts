@@ -11,13 +11,13 @@ import type { DiscStatus, PatchOutcome, PlanSummary, ProgressEvent } from "../bi
 export interface Backend {
   checkUpdates(): Promise<UpdateCheck>;
   acceptUpdate(version: string): Promise<"browser" | "installer">;
-  /** Opens the project's Ko-fi page in the browser. */
-  openSupportPage(): Promise<void>;
   importSettings(): Promise<PatchSelection | null>;
   exportSettings(selection: PatchSelection): Promise<boolean>;
   chooseIso(): Promise<string | null>;
   chooseOutput(defaultName: string): Promise<string | null>;
   analyze(path: string, selection?: PatchSelection): Promise<DiscStatus>;
+  /** The size, in bytes, an in-place update of the modded image at `path` will produce. */
+  estimateUpdate(path: string, selection: PatchSelection): Promise<number>;
   defaultOutput(input: string): Promise<string>;
   outputExists(output: string): Promise<boolean>;
   planSummary(): Promise<PlanSummary | null>;

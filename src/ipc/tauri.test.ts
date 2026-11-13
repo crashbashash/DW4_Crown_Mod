@@ -30,6 +30,8 @@ describe("typed native requests", () => {
     const options = selection(overrides);
     await backend.analyze("clean.iso", options);
     expect(invoke).toHaveBeenLastCalledWith("analyze", { path: "clean.iso", selection: options });
+    await backend.estimateUpdate("modded.iso", options);
+    expect(invoke).toHaveBeenLastCalledWith("estimate_update", { path: "modded.iso", selection: options });
     await backend.startPatch("out.iso", false, options);
     expect(invoke).toHaveBeenLastCalledWith("start_patch", { output: "out.iso", overwrite: false, selection: options });
     await backend.updateMod(options);
@@ -43,8 +45,6 @@ test("update acceptance names only the offered version, never a webview-supplied
   expect(invoke).toHaveBeenLastCalledWith("check_updates");
   await backend.acceptUpdate("0.10.0");
   expect(invoke).toHaveBeenLastCalledWith("accept_update", { version: "0.10.0" });
-  await backend.openSupportPage();
-  expect(invoke).toHaveBeenLastCalledWith("open_support_page");
 });
 
 test("settings transport sends only the selection and treats cancellation as a normal result", async () => {

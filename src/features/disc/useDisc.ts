@@ -5,10 +5,15 @@ import type { Backend } from "../../ipc/backend";
 import { outputExtension } from "../output/outputName";
 
 type Selection = { path: string; epoch: number };
-type Analysis = { crownMod: boolean; selection: Selection; fourPlayerSpawns: boolean; crownDrops: boolean; soloButtons: boolean; randomEnemies: boolean; randomBosses: boolean; fixDeathSoftlock: boolean; status: DiscStatus };
-
 /** Reinspect when the disc or resource options change, preserving a chosen output. */
 export type ResourceSelection = Pick<PatchSelection, "crownMod" | "fourPlayerSpawns" | "crownDrops" | "soloButtons" | "randomEnemies" | "randomBosses" | "fixDeathSoftlock">;
+type Analysis = { selection: Selection; options: ResourceSelection; status: DiscStatus };
+/** A modded image's update size for one selection; `null` when it could not be estimated. */
+type UpdateEstimate = { selection: Selection; options: ResourceSelection; size: number | null };
+
+const sameOptions = (a: ResourceSelection, b: ResourceSelection) =>
+  a.crownMod === b.crownMod && a.fourPlayerSpawns === b.fourPlayerSpawns && a.crownDrops === b.crownDrops && a.soloButtons === b.soloButtons
+  && a.randomEnemies === b.randomEnemies && a.randomBosses === b.randomBosses && a.fixDeathSoftlock === b.fixDeathSoftlock;
 
 export function useDisc(backend: Backend, selectionOptions: ResourceSelection = DEFAULT_PATCH_SELECTION, onIdentified?: (status: DiscStatus, epoch: number) => void) {
   const { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock } = selectionOptions;
@@ -16,6 +21,7 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [extension, setExtension] = useState("iso");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [estimate, setEstimate] = useState<UpdateEstimate | null>(null);
   const pathEpoch = useRef(0);
   const selectionRef = useRef(selection);
   useEffect(() => {
@@ -23,31 +29,48 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
   }, [selection]);
   const inputPath = selection?.path ?? null;
   const moddedSelection = analysis?.selection === selection && analysis?.status.reason === "already-modded";
-  const current = moddedSelection || (analysis?.selection === selection && analysis?.fourPlayerSpawns === fourPlayerSpawns && analysis?.crownDrops === crownDrops && analysis?.crownMod === crownMod && analysis?.soloButtons === soloButtons && analysis?.randomEnemies === randomEnemies && analysis?.randomBosses === randomBosses && analysis?.fixDeathSoftlock === fixDeathSoftlock);
+  const options: ResourceSelection = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+  const current = moddedSelection || (analysis?.selection === selection && sameOptions(analysis.options, options));
   const status = current ? analysis?.status ?? null : null;
   const checking = selection !== null && !current;
   // A new disc needs the blocking analysis dialog. Option changes only refresh
   // the output estimate, so the settings remain usable while that check runs.
   const analyzing = checking && analysis?.selection !== selection;
-  const refreshing = checking && !analyzing;
+  // A modded image keeps its verdict; option changes refresh only its update size.
+  const estimated = estimate?.selection === selection && sameOptions(estimate.options, options);
+  const updateSize = moddedSelection && estimated ? estimate.size : null;
+  const refreshing = (checking && !analyzing) || (moddedSelection && !estimated);
 
   useEffect(() => {
     if (selection === null || moddedSelection) return;
     let cancelled = false;
-    void backend.analyze(selection.path, { ...DEFAULT_PATCH_SELECTION, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock })
+    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+    void backend.analyze(selection.path, { ...DEFAULT_PATCH_SELECTION, ...options })
       .then((status) => {
         if (!cancelled) {
-          setAnalysis({ selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, status });
+          setAnalysis({ selection, options, status });
           onIdentified?.(status, selection.epoch);
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) setAnalysis({ selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, status: {
+        if (!cancelled) setAnalysis({ selection, options, status: {
           kind: "unknown", text: String(error), size: 0, outputSize: 0, copies: null,
         } });
       });
     return () => { cancelled = true; };
   }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, moddedSelection, onIdentified]);
+
+  useEffect(() => {
+    if (selection === null || !moddedSelection) return;
+    let cancelled = false;
+    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+    void backend.estimateUpdate(selection.path, { ...DEFAULT_PATCH_SELECTION, ...options })
+      .catch(() => null)
+      .then((size) => {
+        if (!cancelled) setEstimate({ selection, options, size });
+      });
+    return () => { cancelled = true; };
+  }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, moddedSelection]);
 
   const setInputPath = useCallback(async (path: string) => {
     const epoch = ++pathEpoch.current;
@@ -76,8 +99,9 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
     selectionRef.current = renamed;
     setSelection(renamed);
     setAnalysis(previous => previous?.selection === current ? { ...previous, selection: renamed } : previous);
+    setEstimate(previous => previous?.selection === current ? { ...previous, selection: renamed } : previous);
   }, []);
 
   const identifiedStatus = analysis?.selection === selection ? analysis?.status ?? null : null;
-  return { replaceStatus, identifiedStatus, inputPath, outputPath, extension, status, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath, renameInput };
+  return { replaceStatus, identifiedStatus, inputPath, outputPath, extension, status, updateSize, analyzing, refreshing, checking, pickDisc, setInputPath, setOutputPath, renameInput };
 }

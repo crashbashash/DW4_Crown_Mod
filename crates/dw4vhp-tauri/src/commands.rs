@@ -366,6 +366,22 @@ pub async fn analyze(
     Ok(payload)
 }
 
+/// The size an in-place update of the modded image at `path` will produce with
+/// `selection`, inspected from the clean original the image carries.
+#[tauri::command]
+pub async fn estimate_update(path: String, selection: PatchSelection) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        dw4vhp_core::update::inspect_update_for_plan(
+            std::path::Path::new(&path),
+            &selection.analysis_plan(),
+        )
+        .map(|report| selection.estimated_output_size(&report))
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("estimate worker failed: {e}"))?
+}
+
 /// The base-mode summary, using the disc table stored by [`analyze`].
 #[tauri::command]
 pub async fn plan_summary(app: AppHandle) -> Result<PlanSummaryPayload, String> {

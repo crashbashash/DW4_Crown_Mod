@@ -183,18 +183,6 @@ fn fetch(current: &Version, msi: bool) -> Result<Option<Prepared>, String> {
     Ok(prepare(releases, current, msi))
 }
 
-/// The project's Ko-fi page. Fixed here so the UI cannot open arbitrary URLs.
-const SUPPORT_PAGE: &str = "https://ko-fi.com/crashbashash";
-
-#[tauri::command]
-pub fn open_support_page(app: AppHandle) -> Result<(), String> {
-    app.opener()
-        .open_url(SUPPORT_PAGE, None::<&str>)
-        .map_err(|_| {
-            format!("Couldn't open your browser. Visit {SUPPORT_PAGE} to support the project.")
-        })
-}
-
 #[tauri::command]
 pub async fn check_updates(app: AppHandle) -> Result<UpdateCheck, String> {
     let current = app.package_info().version.clone();

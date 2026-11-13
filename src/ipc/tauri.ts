@@ -16,9 +16,6 @@ export class TauriBackend implements Backend {
     return invoke("accept_update", { version });
   }
 
-  async openSupportPage(): Promise<void> {
-    return invoke("open_support_page");
-  }
   async importSettings(): Promise<PatchSelection | null> {
     return invoke("import_settings");
   }
@@ -37,6 +34,10 @@ export class TauriBackend implements Backend {
 
   async analyze(path: string, selection: PatchSelection = DEFAULT_PATCH_SELECTION): Promise<DiscStatus> {
     return invoke<DiscStatus>("analyze", { path, selection });
+  }
+
+  async estimateUpdate(path: string, selection: PatchSelection): Promise<number> {
+    return invoke<number>("estimate_update", { path, selection });
   }
 
   async defaultOutput(input: string): Promise<string> {

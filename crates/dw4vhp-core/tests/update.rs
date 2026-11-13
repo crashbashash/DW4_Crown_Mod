@@ -1,8 +1,10 @@
 //! Opt-in retail checks compare updates against fresh builds byte for byte.
 use dw4vhp_core::{
+    disc::inspect_retail_for_plan,
+    options::PatchSelection,
     patch::{patch_file, PatchOptions},
     plan::PatchPlan,
-    update::{metadata, update_image},
+    update::{inspect_update_for_plan, metadata, update_image},
 };
 use std::{fs, path::Path};
 fn hash(path: &Path) -> String {
@@ -190,4 +192,132 @@ fn compressed_image_is_replaced_in_its_original_format() {
     assert_eq!(dw4vhp_core::container::detect(&selected).unwrap(), format);
     assert_eq!(hash(&selected), hash(&expected));
     eprintln!("PASS: compressed {format:?} update matches fresh build, retains format, monotonic progress");
+}
+
+/// The GUI's size estimates for a clean disc and for updating a modded image,
+/// compared with the images patching and updating actually write. Enemy
+/// randomisation is estimated as an upper bound; everything else is exact.
+fn check_size_estimates(key: &str) {
+    let Some(original) = std::env::var_os(key) else {
+        eprintln!("SKIP: {key} not configured");
+        return;
+    };
+    let original = Path::new(&original);
+    let work = tempfile::tempdir().unwrap();
+    let target = work.path().join("selected.iso");
+    let crown = PatchSelection {
+        crown_mod: true,
+        ..PatchSelection::default()
+    };
+    patch_file(
+        original,
+        &target,
+        &crown.into_plan().unwrap(),
+        &PatchOptions { overwrite: false },
+        &mut |_| {},
+    )
+    .unwrap();
+    let everything = PatchSelection {
+        four_player_spawns: true,
+        crown_drops: true,
+        random_crown_colours: true,
+        solo_buttons: true,
+        fix_death_softlock: true,
+        ..crown
+    };
+    let random = PatchSelection {
+        random_enemies: true,
+        random_bosses: true,
+        enemy_seed: Some(1520),
+        ..everything
+    };
+    for selection in [everything, crown, random] {
+        let plan = selection.analysis_plan();
+        let clean =
+            selection.estimated_output_size(&inspect_retail_for_plan(original, &plan).unwrap());
+        let update =
+            selection.estimated_output_size(&inspect_update_for_plan(&target, &plan).unwrap());
+        assert_eq!(update, clean, "{key}: update and clean estimates differ");
+        update_image(&target, &selection.into_plan().unwrap(), &mut |_| {}).unwrap();
+        let actual = fs::metadata(&target).unwrap().len();
+        if selection.random_enemies {
+            assert!(
+                update >= actual,
+                "{key}: random estimate {update} is below the {actual}-byte image"
+            );
+        } else {
+            assert_eq!(
+                update, actual,
+                "{key}: estimate differs from the updated image"
+            );
+        }
+        eprintln!(
+            "{key}: random={} estimate={update} actual={actual} margin={}",
+            selection.random_enemies,
+            update as i64 - actual as i64
+        );
+    }
+    assert!(
+        fs::read_dir(work.path()).unwrap().count() == 1,
+        "estimates leave no restored copies behind"
+    );
+}
+
+#[test]
+fn ps2_usa_size_estimates_match_images() {
+    check_size_estimates("DW4_UPDATE_PS2");
+}
+
+#[test]
+fn ps2_europe_size_estimates_match_images() {
+    check_size_estimates("DW4_UPDATE_PS2_EUROPE");
+}
+
+#[test]
+fn ps2_japan_size_estimates_match_images() {
+    check_size_estimates("DW4_UPDATE_PS2_JAPAN");
+}
+
+#[test]
+fn gamecube_usa_size_estimates_match_images() {
+    check_size_estimates("DW4_UPDATE_GC");
+}
+
+#[test]
+fn gamecube_japan_size_estimates_match_images() {
+    check_size_estimates("DW4_UPDATE_GC_JAPAN");
+}
+
+#[test]
+fn compressed_image_estimates_its_uncompressed_update() {
+    let Some(original) = std::env::var_os("DW4_UPDATE_COMPRESSED") else {
+        return;
+    };
+    let original = Path::new(&original);
+    let format = dw4vhp_core::container::detect(original).unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let selected = work.path().join(format!("selected.{}", format.extension()));
+    let selection = PatchSelection {
+        crown_mod: true,
+        four_player_spawns: true,
+        ..PatchSelection::default()
+    };
+    patch_file(
+        original,
+        &selected,
+        &PatchPlan::default(),
+        &PatchOptions { overwrite: false },
+        &mut |_| {},
+    )
+    .unwrap();
+    let plan = selection.analysis_plan();
+    assert_eq!(
+        inspect_update_for_plan(&selected, &plan)
+            .unwrap()
+            .output_size,
+        inspect_retail_for_plan(original, &plan)
+            .unwrap()
+            .output_size,
+    );
+    eprintln!("PASS: compressed {format:?} update estimate matches the clean disc's");
 }

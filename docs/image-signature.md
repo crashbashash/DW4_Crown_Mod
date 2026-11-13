@@ -175,6 +175,14 @@ The update matrix also verifies monotonic progress, including incremental
 recovery preparation before copying. The full configured run passed all six
 cases (five regional images and the compressed pipeline).
 
+The same variables run the size-estimate checks. For each release, the update
+size the desktop app shows (`update::inspect_update_for_plan`) must equal the
+clean-disc estimate. Without random enemies it must also equal the updated
+image's size. With random enemies and bosses it must be at least that size.
+The compressed case checks that an RVZ/CISO image is estimated from its
+uncompressed original. On 2026-11-13 all six passed. The random estimate was
+about 31 MB above the real image on PS2 USA and Japan.
+
 The native desktop check also loaded recorded feature selections, cancelled an
 update without changing the file, applied selected features in place, and
 compared that image with a fresh build through the same UI. The files matched
