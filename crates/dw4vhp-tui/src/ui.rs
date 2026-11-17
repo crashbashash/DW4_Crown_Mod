@@ -53,6 +53,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Screen::Done => done_screen(frame, app, body),
         Screen::Failed => failed_screen(frame, app, body),
     }
+    // Writing the bottom-right cell makes the legacy Windows console wrap and
+    // scroll the whole screen up a line, so the footer stops one column short.
+    let footer = Rect {
+        width: footer.width.saturating_sub(1),
+        ..footer
+    };
     frame.render_widget(
         Paragraph::new(keys(app)).style(Style::default().fg(MUTED)),
         footer,
