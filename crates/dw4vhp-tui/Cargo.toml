@@ -1,0 +1,17 @@
+[package]
+name = "dw4vhp-tui"
+version = "0.20.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Terminal front end for the Digimon World 4 Crown Mod ISO patcher"
+
+[[bin]]
+name = "dw4-crown-mod-tui"
+path = "src/main.rs"
+
+[dependencies]
+dw4vhp-core = { path = "../dw4vhp-core" }
+getrandom = "0.4"
+# The legacy Windows console (Windows 7) has no ANSI support; crossterm falls back
+# to the console API there, which cannot set underline colours.
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }

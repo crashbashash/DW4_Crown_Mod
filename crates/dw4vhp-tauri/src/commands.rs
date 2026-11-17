@@ -19,9 +19,6 @@ use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// The marker a patched image's name carries (old `form::OUTPUT_SUFFIX`).
-const OUTPUT_MARKER: &str = " [CrownMod]";
-
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscStatusPayload {
@@ -200,31 +197,12 @@ pub async fn choose_output(window: tauri::Window, default_name: String) -> Optio
     .flatten()
 }
 
-/// The output name an input suggests: same directory, stem plus the marker
-/// (old `form::default_output_path`), so the default never targets the input.
+/// The output name an input suggests; see [`dw4vhp_core::naming::default_output`].
 #[tauri::command]
 pub fn default_output(input: String) -> String {
-    let input = std::path::Path::new(&input);
-    let mut name = input
-        .file_stem()
-        .map(|s| s.to_os_string())
-        .unwrap_or_default();
-    name.push(OUTPUT_MARKER);
-    // Compressed containers keep their format; plain GameCube .gcm keeps its suffix too.
-    let format =
-        dw4vhp_core::container::detect(input).unwrap_or(dw4vhp_core::container::Format::Raw);
-    let extension = match format {
-        dw4vhp_core::container::Format::Raw
-            if input
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("gcm")) =>
-        {
-            "gcm"
-        }
-        _ => format.extension(),
-    };
-    name.push(format!(".{extension}"));
-    input.with_file_name(name).display().to_string()
+    dw4vhp_core::naming::default_output(std::path::Path::new(&input), None)
+        .display()
+        .to_string()
 }
 
 /// Checks whether patching needs the user's overwrite confirmation.
@@ -266,13 +244,7 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 _ => "unknown",
             },
             reason: matches!(error, Error::AlreadyModded { .. } | Error::AlreadyCrownMod { .. }).then_some("already-modded"),
-            text: match error {
-                Error::AlreadyModded { .. } => "This disc is already modded. Choose a clean, original disc image.".into(),
-                Error::AlreadyCrownMod { version } => format!("This disc is already Crown Mod v{version}. Choose a clean, original disc image."),
-                Error::NotThisDisc | Error::FileNotFound { .. } | Error::ElfNotFound => "This file is not a supported disc image, or it is incomplete. Choose a clean Digimon World 4 or Digimon World X disc from a supported release.".into(),
-                Error::WrongRevision { .. } | Error::CrownData(_) => "This disc image is not a supported original revision. Choose a clean, original copy of a supported release.".into(),
-                _ => error.to_string(),
-            },
+            text: error.disc_notice(),
             mod_metadata: None,
             disc_info: None,
             size: 0,
@@ -561,33 +533,6 @@ fn phase_name(phase: dw4vhp_core::writer::Phase) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn suggested_output_preserves_the_source_container_and_plain_gcm_suffix() {
-        let dir = tempfile::tempdir().unwrap();
-        for (name, magic, suffix) in [
-            ("game.iso", b"raw!", "iso"),
-            ("game.gcm", b"raw!", "gcm"),
-            ("game.GCM", b"raw!", "gcm"),
-            ("game.ciso", b"CISO", "ciso"),
-            ("game.rvz", b"RVZ\x01", "rvz"),
-            // The output suffix follows the bytes when an input is misnamed.
-            ("compressed.iso", b"RVZ\x01", "rvz"),
-        ] {
-            let input = dir.path().join(name);
-            std::fs::write(&input, magic).unwrap();
-            let output = std::path::PathBuf::from(default_output(input.display().to_string()));
-            assert_eq!(output.parent(), Some(dir.path()));
-            assert_eq!(output.extension().unwrap(), suffix);
-            assert!(output
-                .file_stem()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .ends_with(OUTPUT_MARKER));
-            assert_ne!(output, input);
-        }
-    }
-
     #[test]
     fn an_updated_image_name_follows_its_new_seed() {
         use std::path::{Path, PathBuf};

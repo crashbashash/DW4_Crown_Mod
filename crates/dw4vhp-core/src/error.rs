@@ -90,3 +90,16 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// The player-facing notice when a chosen disc image is refused.
+    pub fn disc_notice(&self) -> String {
+        match self {
+            Error::AlreadyModded { .. } => "This disc is already modded. Choose a clean, original disc image.".into(),
+            Error::AlreadyCrownMod { version } => format!("This disc is already Crown Mod v{version}. Choose a clean, original disc image."),
+            Error::NotThisDisc | Error::FileNotFound { .. } | Error::ElfNotFound => "This file is not a supported disc image, or it is incomplete. Choose a clean Digimon World 4 or Digimon World X disc from a supported release.".into(),
+            Error::WrongRevision { .. } | Error::CrownData(_) => "This disc image is not a supported original revision. Choose a clean, original copy of a supported release.".into(),
+            _ => self.to_string(),
+        }
+    }
+}
