@@ -818,10 +818,12 @@ impl Randomiser {
                     arena.entry,
                     arena.generators.join(",")
                 ));
-                eprintln!(
-                    "BOSS IMAGE tier {difficulty} {}: {} -> {to}",
-                    arena.entry, arena.model
-                );
+                if std::env::var_os("DW4_RANDOM_LOG").is_some() {
+                    eprintln!(
+                        "BOSS IMAGE tier {difficulty} {}: {} -> {to}",
+                        arena.entry, arena.model
+                    );
+                }
                 bosses.push(json!({"stage": arena.entry, "area": arena.name, "generators": arena.generators,
                     "original": arena.model, "boss": to, "changed": changed, "patrols": slot.patrols, "patrolFloors": arena.floors}));
                 tick();
