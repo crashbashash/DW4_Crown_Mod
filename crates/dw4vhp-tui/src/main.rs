@@ -64,9 +64,9 @@ fn perform(action: Action, tx: &Sender<Msg>) {
                 let result = inspect_retail_for_plan(&path, &plan)
                     .map_err(|error| error.disc_notice())
                     .and_then(|report| {
-                        let release = report.release.ok_or_else(|| {
-                            dw4vhp_core::error::Error::NotThisDisc.disc_notice()
-                        })?;
+                        let release = report
+                            .release
+                            .ok_or_else(|| dw4vhp_core::error::Error::NotThisDisc.disc_notice())?;
                         Ok(format!("{} - {}", release.label(), release.serial()))
                     });
                 let _ = tx.send(Msg::Checked(result));

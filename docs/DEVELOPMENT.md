@@ -10,6 +10,8 @@ See [CONTRIBUTING](../CONTRIBUTING.md) for the contributor checklist and the
 
 - `crates/dw4vhp-core`: the engine that edits the disc. It can be tested on its own.
 - `crates/dw4vhp-tauri`: the desktop window. A Tauri shell plus the React app in `src/`.
+- `crates/dw4vhp-tui`: the terminal version for Windows 7, where the desktop app's
+  WebView2 and Rust's Windows 10 baseline rule out the desktop window.
 
 ## Building from source
 
@@ -69,11 +71,25 @@ verification fingerprints. The "before" values always come from the player's own
 
 ## Releases
 
-Release builds (Windows zip/MSI, Linux AppImage/deb/tarball) are produced by CI for
-tagged releases. The release workflow waits for both platform builds, uploads all
-assets to a draft, and publishes only after upload completes. Release workflows
-compile and package both platforms; they do not launch the packaged GUI.
+Release builds (Windows zip/MSI, Windows 7 terminal zip, Linux AppImage/deb/tarball)
+are produced by CI for tagged releases. The release workflow waits for every platform
+build, uploads all assets to a draft, and publishes only after upload completes.
+Release workflows compile and package every platform; they do not launch the packaged GUI.
 Live desktop and emulator checks are separate. Release assets are unsigned.
+
+### Windows 7 terminal version
+
+`npm run build:win7` builds `crates/dw4vhp-tui` for the tier-3
+`x86_64-win7-windows-msvc` target with the nightly pinned in `tools/win7.mjs` (and
+the CI and release workflows), rebuilding std from source with the static CRT. It
+then fails if the executable imports any function Windows 7 lacks, and writes the
+release zip to `dist/win7`. Install the pinned nightly with the `rust-src` and
+`llvm-tools` components through rustup. Windows hosts build natively; other hosts
+cross-build with `cargo-xwin`, which downloads the MSVC CRT and SDK and accepts
+Microsoft's licence on your behalf.
+
+`npm run check:win7` (Windows hosts) runs the core and terminal tests built for the
+same target. CI Windows 7 runs both on every push and pull request.
 
 ## Image identification
 
@@ -87,6 +103,7 @@ options. Detection checks it first and retains the game-data scan for older imag
 - `npm run check:core`: engine checks without GTK/WebKit or a game image.
 - `npm run check:frontend`: browser-side checks using the mock backend.
 - `npm run check:desktop`: builds the frontend and checks the native shell.
+- `npm run check:win7`: core and terminal tests built for the Windows 7 target (Windows hosts).
 - Real-disc audits: configure the inputs below explicitly. Unconfigured native
   cases skip, so a green ordinary test run does not establish real-disc coverage.
 - Live validation: cold-boot the rebuilt image or exercise the packaged desktop

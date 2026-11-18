@@ -35,8 +35,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .title_style(Style::default().fg(ACCENT));
     let inner = block.inner(main);
     frame.render_widget(block, main);
-    let [header, body] =
-        Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
+    let [header, body] = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
     let disc = match &app.disc {
         Some((_, label)) => Line::from(vec![
             Span::styled(" Disc: ", Style::default().fg(MUTED)),
@@ -90,7 +89,9 @@ fn field(frame: &mut Frame, area: Rect, value: &str) {
     let width = area.width.saturating_sub(4) as usize;
     let chars: Vec<char> = value.chars().collect();
     let shown: String = if chars.len() > width {
-        let tail: String = chars[chars.len() - width.saturating_sub(3)..].iter().collect();
+        let tail: String = chars[chars.len() - width.saturating_sub(3)..]
+            .iter()
+            .collect();
         format!("...{tail}")
     } else {
         value.to_string()
@@ -180,8 +181,7 @@ fn options_screen(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn prompt_field(frame: &mut Frame, area: Rect, label: &str, value: &str) {
-    let [top, line] =
-        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+    let [top, line] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
     frame.render_widget(Paragraph::new(label.to_string()), top);
     field(frame, line, value);
 }

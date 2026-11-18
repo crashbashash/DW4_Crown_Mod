@@ -1,0 +1,38 @@
+name: CI Windows 7
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-win7-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tui:
+    name: terminal version (win7 target tests, build, import check)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      # dtolnay/rust-toolchain; keep the toolchain in step with tools/win7.mjs.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: nightly-2026-11-17
+          components: rust-src, llvm-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@v4
+      - run: npm run check:win7
+      - run: npm run build:win7 -- --out .
+      - name: Upload Windows 7 build
+        # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows7-tui
+          path: dw4-crown-mod-*-windows7-x86_64.zip
+          if-no-files-found: error

@@ -229,7 +229,9 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
             ),
             reason: None,
             mod_metadata: None,
-            disc_info: report.release.map(|release| disc_info(release, false, None)),
+            disc_info: report
+                .release
+                .map(|release| disc_info(release, false, None)),
             size: report.size,
             output_size: report.output_size,
             copies: Some(report.copies),
@@ -243,7 +245,11 @@ fn verdict(result: &Result<DiscReport, Error>) -> DiscStatusPayload {
                 | Error::CrownData(_) => "refused",
                 _ => "unknown",
             },
-            reason: matches!(error, Error::AlreadyModded { .. } | Error::AlreadyCrownMod { .. }).then_some("already-modded"),
+            reason: matches!(
+                error,
+                Error::AlreadyModded { .. } | Error::AlreadyCrownMod { .. }
+            )
+            .then_some("already-modded"),
             text: error.disc_notice(),
             mod_metadata: None,
             disc_info: None,

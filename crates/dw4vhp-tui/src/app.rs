@@ -455,7 +455,10 @@ impl App {
                     enemy_seed: None,
                     ..selection
                 };
-                self.seed_text = selection.enemy_seed.map(|s| s.to_string()).unwrap_or_default();
+                self.seed_text = selection
+                    .enemy_seed
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
                 self.cursor = self.cursor.min(self.items().len() - 1);
                 self.notice = Some(("Settings loaded.".into(), false));
             }

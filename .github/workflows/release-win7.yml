@@ -1,0 +1,50 @@
+name: Release Windows 7
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+permissions:
+  # Build-only reusable workflow; the caller publishes every platform together.
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows 7 terminal version (zip)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      # dtolnay/rust-toolchain; keep the toolchain in step with tools/win7.mjs.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: nightly-2026-11-17
+          components: rust-src, llvm-tools
+      - uses: actions/setup-node@v4
+      - name: Prepare version-checked release notes
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: node tools/release-notes.mjs --tag "$env:RELEASE_TAG" --output release-notes.md
+      - name: Verify application source matches the release tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          git fetch --depth 1 origin "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Release tag was not found" }
+          git diff --exit-code FETCH_HEAD -- crates src public Cargo.toml Cargo.lock package.json package-lock.json
+          if ($LASTEXITCODE -ne 0) { throw "Application source differs from the release tag" }
+      - name: Build, check imports and package (zip)
+        run: npm run build:win7 -- --out .
+      - name: Upload Windows 7 assets
+        # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: win7-assets
+          path: dw4-crown-mod-*-windows7-x86_64.zip
+          if-no-files-found: error

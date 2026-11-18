@@ -26,9 +26,13 @@ jobs:
     uses: ./.github/workflows/release-linux.yml
     with:
       release_tag: ${{ inputs.tag || github.ref_name }}
+  win7:
+    uses: ./.github/workflows/release-win7.yml
+    with:
+      release_tag: ${{ inputs.tag || github.ref_name }}
   publish:
     name: Publish complete release
-    needs: [windows, linux]
+    needs: [windows, linux, win7]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -54,6 +58,7 @@ jobs:
           for file in \
             "dw4-crown-mod-${RELEASE_TAG}-windows-x86_64.zip" \
             "dw4-crown-mod-${version}-windows-x86_64.msi" \
+            "dw4-crown-mod-${RELEASE_TAG}-windows7-x86_64.zip" \
             "dw4-crown-mod-${RELEASE_TAG}-linux-x86_64.AppImage" \
             "dw4-crown-mod-${RELEASE_TAG}-linux-x86_64.deb" \
             "dw4-crown-mod-${RELEASE_TAG}-linux-x86_64.tar.gz"; do

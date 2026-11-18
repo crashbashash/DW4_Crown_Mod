@@ -1,10 +1,12 @@
 # Digimon World 4 Crown Mod & Enemy Randomiser
 
 DW4 Crown Mod is a mod patcher and seeded enemy randomiser for **Digimon World 4**
-on **PlayStation 2 (PS2)** and **GameCube**, available for **Windows and Linux**.
+on **PlayStation 2 (PS2)** and **GameCube**, available for **Windows and Linux**,
+with a terminal version for **Windows 7**.
 
 [![CI Linux](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-linux.yml?label=CI%20Linux&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-linux.yml)
 [![CI Windows](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-windows.yml?label=CI%20Windows&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-windows.yml)
+[![CI Windows 7](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/ci-win7.yml?label=CI%20Windows%207&branch=main)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/ci-win7.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/crashbashash/DW4_Crown_Mod/release.yml?label=Release)](https://github.com/crashbashash/DW4_Crown_Mod/actions/workflows/release.yml)
 
 <a href="https://ko-fi.com/crashbashash"><img src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" alt="Buy me a coffee at ko-fi.com" height="36"></a>
@@ -17,7 +19,7 @@ Open the app and choose your own copy of the game to create a new, modded copy.
 
 ## Quick start
 
-1. [Download the app](#download) for Windows or Linux.
+1. [Download the app](#download) for Windows or Linux. On Windows 7, use the [terminal version](#windows-7).
 2. Open it and choose your game disc image (`.iso`, or `.ciso` / `.rvz` for GameCube).
 3. Select at least one option in Settings (grouped into Gameplay, Balance, Cosmetics and Bugfixes tabs). Choose **Random enemies** alone for the original balance, or enable **Crown Mod** for stronger enemies and increased rewards. Under Random enemies, optionally enable **Random bosses** on any supported PS2 or GameCube disc; every boss except the four world bosses is shuffled.
 4. Click **Patch ISO**.
@@ -82,7 +84,8 @@ The same randomiser seed reproduces enemy choices within the same rules version.
 
   The app detects your release automatically. Existing Crown Mod images can be
   updated; unsupported or unrecognised images are refused.
-- Windows or Linux. Nothing else to install.
+- Windows 10 or later, or Linux, for the app; 64-bit Windows 7 SP1 or later for the
+  [terminal version](#windows-7). Nothing else to install.
 - About **2.2 GB** of free disk space for the new file (more for `.ciso` and `.rvz`, which are unpacked while patching). The app shows the exact amount.
 
 ## Download
@@ -90,9 +93,25 @@ The same randomiser seed reproduces enemy choices within the same rules version.
 Get the latest version from the **Releases** page of this project:
 
 - **Windows:** `.msi` installer or a plain `.zip`
+- **Windows 7:** `-windows7-x86_64.zip`, the [terminal version](#windows-7)
 - **Linux:** `.AppImage`, `.deb`, or a plain download
 
 The downloads are unsigned, so Windows may show a warning the first time you run it.
+
+### Windows 7
+
+The desktop app needs Windows 10 or later. The Windows 7 download is the same
+patcher in a console window, with every option and the same settings files.
+
+1. Unzip it, then double-click `dw4-crown-mod-tui.exe`, or drag your disc image onto it.
+2. Type or paste the path to your disc image and press **Enter**. You can also drag
+   the file onto the window, or right-click in it and choose **Paste**.
+3. Move with the arrow keys, turn options on or off with **Space**, and press
+   **Enter** to continue. **L** and **S** load and save a settings file.
+4. Check the output name and press **Enter** to patch.
+
+The terminal version patches clean discs only. To update an existing Crown Mod
+image, patch your original disc again.
 
 ## Updating the app
 

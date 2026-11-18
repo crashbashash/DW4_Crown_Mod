@@ -7,7 +7,7 @@ const directories = [];
 afterEach(() => { for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function fixture(changelog) {
   const root = mkdtempSync(join(tmpdir(), "crown-release-notes-")); directories.push(root);
-  for (const dir of ["crates/dw4vhp-core", "crates/dw4vhp-tauri"]) {
+  for (const dir of ["crates/dw4vhp-core", "crates/dw4vhp-tauri", "crates/dw4vhp-tui"]) {
     mkdirSync(join(root, dir), { recursive: true });
     writeFileSync(join(root, dir, "Cargo.toml"), '[package]\nversion = "1.2.3"\n');
   }

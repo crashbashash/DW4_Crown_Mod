@@ -7,7 +7,7 @@ export function releaseNotes(root, tag) {
   const read = (path) => readFileSync(resolve(root, path), "utf8");
   const version = JSON.parse(read("package.json")).version;
   if (tag !== `v${version}`) throw Error(`Tag ${tag} does not match app version v${version}. Update the package versions before releasing.`);
-  for (const path of ["crates/dw4vhp-core/Cargo.toml", "crates/dw4vhp-tauri/Cargo.toml"]) {
+  for (const path of ["crates/dw4vhp-core/Cargo.toml", "crates/dw4vhp-tauri/Cargo.toml", "crates/dw4vhp-tui/Cargo.toml"]) {
     if (read(path).match(/^version\s*=\s*"([^"]+)"/m)?.[1] !== version) throw Error(`${path} version does not match ${version}`);
   }
   if (JSON.parse(read("crates/dw4vhp-tauri/tauri.conf.json")).version !== version) throw Error("Tauri version does not match package.json");

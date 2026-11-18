@@ -14,6 +14,8 @@
     "check:core": "node tools/check.mjs core",
     "check:frontend": "node tools/check.mjs frontend",
     "check:desktop": "node tools/check.mjs desktop",
+    "check:win7": "node tools/win7.mjs test",
+    "build:win7": "node tools/win7.mjs",
     "bindings": "node tools/bindings.mjs",
     "bindings:check": "node tools/bindings.mjs --check",
     "docs:rules": "node tools/rules-docs.mjs",
