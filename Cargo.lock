@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "dw4vhp-core"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "fs4",
  "getrandom",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "dw4vhp-tui"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "dw4vhp-core",
  "getrandom",

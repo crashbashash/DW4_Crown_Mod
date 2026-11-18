@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.21.0
+
+- Added a terminal version for **Windows 7 and later** (`dw4-crown-mod-v0.21.0-windows7-x86_64.zip`): the same patcher in a console window, for PCs that can't run the desktop app. Unzip it, then double-click `dw4-crown-mod-tui.exe` or drag your disc image onto it. It has every option, and it can load and save the same settings files as the desktop app.
+
 ## v0.20.0
 
 - Random bosses now also shuffles the repeat boss fights (Blossomon in Abyss of Grief, SkullGreymon in Grief Wasteland, ShogunGekomon in Mangrove Forest) and the Quest 1, 4, 7 and 8 bosses. Only the four world bosses stay fixed.
