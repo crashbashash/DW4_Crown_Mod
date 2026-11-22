@@ -87,6 +87,8 @@ pub struct PatchPlan {
     /// Deaths in stages without the first-death tutorial window use the
     /// ordinary game-over path instead of waiting for the window.
     pub fix_death_softlock: bool,
+    /// Weapon descriptions that name Bash for a Blunt weapon say Blunt.
+    pub fix_weapon_skill_text: bool,
     pub serial: Option<String>,
 }
 
@@ -117,6 +119,7 @@ impl Default for PatchPlan {
             enemy_seed: None,
             solo_buttons: false,
             fix_death_softlock: false,
+            fix_weapon_skill_text: false,
             serial: None,
         }
     }

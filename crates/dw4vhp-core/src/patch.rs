@@ -99,6 +99,10 @@ pub fn plan_regions(
         )?);
     }
 
+    if plan.fix_weapon_skill_text {
+        regions.extend(crate::crown::weapon_text::regions(iso)?);
+    }
+
     let gamecube = report.release.is_some_and(|release| release.is_gamecube());
     if (plan.force_very_hard || plan.serial.is_some()) && gamecube {
         return Err(Error::UnsupportedDifficulty);
@@ -275,7 +279,8 @@ fn patch_file_internal(
             || plan.random_crown_colours
             || plan.random_enemies
             || plan.solo_buttons
-            || plan.fix_death_softlock)
+            || plan.fix_death_softlock
+            || plan.fix_weapon_skill_text)
     {
         return Err(Error::CrownData(
             "optional enemy resources require complete retail archives".into(),

@@ -6,17 +6,18 @@ import { outputExtension } from "../output/outputName";
 
 type Selection = { path: string; epoch: number };
 /** Reinspect when the disc or resource options change, preserving a chosen output. */
-export type ResourceSelection = Pick<PatchSelection, "crownMod" | "fourPlayerSpawns" | "crownDrops" | "soloButtons" | "randomEnemies" | "randomBosses" | "fixDeathSoftlock">;
+export type ResourceSelection = Pick<PatchSelection, "crownMod" | "fourPlayerSpawns" | "crownDrops" | "soloButtons" | "randomEnemies" | "randomBosses" | "fixDeathSoftlock" | "fixWeaponSkillText">;
 type Analysis = { selection: Selection; options: ResourceSelection; status: DiscStatus };
 /** A modded image's update size for one selection; `null` when it could not be estimated. */
 type UpdateEstimate = { selection: Selection; options: ResourceSelection; size: number | null };
 
 const sameOptions = (a: ResourceSelection, b: ResourceSelection) =>
   a.crownMod === b.crownMod && a.fourPlayerSpawns === b.fourPlayerSpawns && a.crownDrops === b.crownDrops && a.soloButtons === b.soloButtons
-  && a.randomEnemies === b.randomEnemies && a.randomBosses === b.randomBosses && a.fixDeathSoftlock === b.fixDeathSoftlock;
+  && a.randomEnemies === b.randomEnemies && a.randomBosses === b.randomBosses && a.fixDeathSoftlock === b.fixDeathSoftlock
+  && a.fixWeaponSkillText === b.fixWeaponSkillText;
 
 export function useDisc(backend: Backend, selectionOptions: ResourceSelection = DEFAULT_PATCH_SELECTION, onIdentified?: (status: DiscStatus, epoch: number) => void) {
-  const { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock } = selectionOptions;
+  const { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText } = selectionOptions;
   const [selection, setSelection] = useState<Selection | null>(null);
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [extension, setExtension] = useState("iso");
@@ -29,7 +30,7 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
   }, [selection]);
   const inputPath = selection?.path ?? null;
   const moddedSelection = analysis?.selection === selection && analysis?.status.reason === "already-modded";
-  const options: ResourceSelection = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+  const options: ResourceSelection = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText };
   const current = moddedSelection || (analysis?.selection === selection && sameOptions(analysis.options, options));
   const status = current ? analysis?.status ?? null : null;
   const checking = selection !== null && !current;
@@ -44,7 +45,7 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
   useEffect(() => {
     if (selection === null || moddedSelection) return;
     let cancelled = false;
-    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText };
     void backend.analyze(selection.path, { ...DEFAULT_PATCH_SELECTION, ...options })
       .then((status) => {
         if (!cancelled) {
@@ -58,19 +59,19 @@ export function useDisc(backend: Backend, selectionOptions: ResourceSelection = 
         } });
       });
     return () => { cancelled = true; };
-  }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, moddedSelection, onIdentified]);
+  }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText, moddedSelection, onIdentified]);
 
   useEffect(() => {
     if (selection === null || !moddedSelection) return;
     let cancelled = false;
-    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock };
+    const options = { crownMod, fourPlayerSpawns, crownDrops, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText };
     void backend.estimateUpdate(selection.path, { ...DEFAULT_PATCH_SELECTION, ...options })
       .catch(() => null)
       .then((size) => {
         if (!cancelled) setEstimate({ selection, options, size });
       });
     return () => { cancelled = true; };
-  }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, moddedSelection]);
+  }, [backend, selection, fourPlayerSpawns, crownDrops, crownMod, soloButtons, randomEnemies, randomBosses, fixDeathSoftlock, fixWeaponSkillText, moddedSelection]);
 
   const setInputPath = useCallback(async (path: string) => {
     const epoch = ++pathEpoch.current;

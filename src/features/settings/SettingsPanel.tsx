@@ -31,7 +31,7 @@ function Setting({ id, title, description, selected, onChange, disabled, badge }
 }
 
 /** Optional patches start disabled. */
-export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, randomBosses, onRandomBossesChange, enemySeed, onEnemySeedChange, soloButtons, onSoloButtonsChange, fixDeathSoftlock, onFixDeathSoftlockChange, busy, fileActions }: {
+export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, onFourPlayerSpawnsChange, crownDrops, onCrownDropsChange, randomCrownColours, onRandomCrownColoursChange, randomEnemies, onRandomEnemiesChange, randomBosses, onRandomBossesChange, enemySeed, onEnemySeedChange, soloButtons, onSoloButtonsChange, fixDeathSoftlock, onFixDeathSoftlockChange, fixWeaponSkillText, onFixWeaponSkillTextChange, busy, fileActions }: {
   fileActions?: ReactNode;
   crownMod: boolean;
   onCrownModChange: (selected: boolean) => void;
@@ -52,6 +52,8 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
   onSoloButtonsChange: (selected: boolean) => void;
   fixDeathSoftlock: boolean;
   onFixDeathSoftlockChange: (selected: boolean) => void;
+  fixWeaponSkillText: boolean;
+  onFixWeaponSkillTextChange: (selected: boolean) => void;
   busy: boolean;
 }) {
   const id = useId();
@@ -131,6 +133,9 @@ export function SettingsPanel({ crownMod, onCrownModChange, fourPlayerSpawns, on
           <Setting id={`${id}-fix-death-softlock`} title="Fix death softlock" selected={fixDeathSoftlock}
             onChange={onFixDeathSoftlockChange} disabled={busy}
             description="Dying before your first death tutorial has played (for example after entering Goblin Fortress early) no longer freezes the game." />
+          <Setting id={`${id}-fix-weapon-skill-text`} title="Fix Blunt weapon skill text" selected={fixWeaponSkillText}
+            onChange={onFixWeaponSkillTextChange} disabled={busy}
+            description="Blunt weapons that say Bash Skill now say Blunt Skill." />
         </TabPanel>
       </Tabs>
     </section>

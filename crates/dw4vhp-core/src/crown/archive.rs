@@ -710,6 +710,18 @@ pub(crate) fn rebuild_afs(
     })
 }
 
+/// A rebuilt AREA archive replaces the original's packs, so it needs the
+/// weapon text writes the original receives.
+fn fixed_area(area: Option<Vec<u8>>, weapon_text: bool) -> Result<Option<Vec<u8>>> {
+    let Some(mut area) = area else {
+        return Ok(None);
+    };
+    if weapon_text {
+        super::weapon_text::fix_archive(&mut area)?;
+    }
+    Ok(Some(area))
+}
+
 /// Keep the original AREA bytes for recovery and original-table verification.
 /// Its rebuilt localized packs load through the unchanged virtual filesystem.
 fn append_area(
@@ -886,6 +898,7 @@ impl CrownPlan {
             final_table,
             false,
             false,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -903,6 +916,7 @@ impl CrownPlan {
         final_table: Option<&crate::table::EnemyTable>,
         solo_buttons: bool,
         death_softlock: bool,
+        weapon_text: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -936,6 +950,7 @@ impl CrownPlan {
             death_softlock,
             progress,
         )?;
+        let area = fixed_area(area, weapon_text)?;
         let sectors = u32at(iso, 16 * 2048 + 80)? as usize;
         let append_offset = sectors * 2048;
         need(append_offset == iso.len(), "unexpected trailing ISO data")?;
@@ -1056,6 +1071,7 @@ impl CrownPlan {
             final_table,
             false,
             false,
+            false,
             &mut |_, _, _| {},
         )
     }
@@ -1072,6 +1088,7 @@ impl CrownPlan {
         final_table: Option<&crate::table::EnemyTable>,
         solo_buttons: bool,
         death_softlock: bool,
+        weapon_text: bool,
         progress: &mut dyn FnMut(Phase, u64, u64),
     ) -> Result<Self> {
         need(
@@ -1104,6 +1121,7 @@ impl CrownPlan {
             death_softlock,
             progress,
         )?;
+        let area = fixed_area(area, weapon_text)?;
         let append_offset = disc.len();
         need(
             append_offset.is_multiple_of(4),

@@ -21,6 +21,8 @@ pub struct PatchSelection {
     pub solo_buttons: bool,
     /// Skip the first-death tutorial in stages without its window.
     pub fix_death_softlock: bool,
+    /// Name the Blunt skill in five Blunt weapons' English descriptions.
+    pub fix_weapon_skill_text: bool,
 }
 
 impl PatchSelection {
@@ -31,6 +33,7 @@ impl PatchSelection {
             || self.random_enemies
             || self.solo_buttons
             || self.fix_death_softlock
+            || self.fix_weapon_skill_text
     }
 
     /// Build the same balance plan as the desktop selection, rejecting empty
@@ -55,6 +58,7 @@ impl PatchSelection {
             enemy_seed: self.enemy_seed.filter(|_| self.random_enemies),
             solo_buttons: self.solo_buttons,
             fix_death_softlock: self.fix_death_softlock,
+            fix_weapon_skill_text: self.fix_weapon_skill_text,
             ..PatchPlan::default()
         })
     }
@@ -68,6 +72,8 @@ impl PatchSelection {
             crown_drops: self.crown_drops,
             solo_buttons: self.solo_buttons,
             fix_death_softlock: self.fix_death_softlock,
+            // Updates keep the original text, which adds to the image size.
+            fix_weapon_skill_text: self.fix_weapon_skill_text,
             ..PatchPlan::default()
         }
     }
@@ -110,7 +116,7 @@ mod tests {
                 "crownMod": false, "fourPlayerSpawns": false, "crownDrops": false,
                 "randomCrownColours": false, "randomEnemies": false,
                 "randomBosses": false, "enemySeed": null, "soloButtons": false,
-                "fixDeathSoftlock": false
+                "fixDeathSoftlock": false, "fixWeaponSkillText": false
             })
         );
     }

@@ -24,6 +24,8 @@ export interface DiscStatus {
       /** Present on images built since solo co-op buttons were added. */
       soloButtons?: boolean;
       fixDeathSoftlock?: boolean;
+      /** Present on images built since the weapon skill text fix was added. */
+      fixWeaponSkillText?: boolean;
     };
     /** What the enemy randomiser did, when the image has random enemies. */
     randomEnemies?: {

@@ -45,6 +45,8 @@ interface and empty defaults. `npm run check` rejects generated-file drift.
 - Difficulty-specific model/sound files and manifest selectors: `crown/difficulty.rs`.
   Guarded PS2/GameCube filename dispatch lives in `difficulty_io.rs`; allocator
   and dispatch hooks are included in the archive plan's verified/recoverable writes.
+- Weapon description text fix: `crown/weapon_text.rs` writes the original AREA
+  packs in place and repeats the writes on a rebuilt AREA archive.
 - Imported model/effect graphs: `crown/graft.rs`, `sound.rs` and `height.rs`.
 - EXP preservation: `crown/rewards.rs`; floating numbers: `crown/exp.rs`.
 - Disc/container formats: `iso9660.rs`, `gcm.rs`, `elf.rs` and `container.rs`.

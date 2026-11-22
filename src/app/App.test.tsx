@@ -7,7 +7,7 @@ import { App } from "./App";
 
 // The app starts with bug fixes on; everything else starts off.
 function patchSelection(overrides: Partial<PatchSelection> = {}): PatchSelection {
-  return { ...DEFAULT_PATCH_SELECTION, fixDeathSoftlock: true, ...overrides };
+  return { ...DEFAULT_PATCH_SELECTION, fixDeathSoftlock: true, fixWeaponSkillText: true, ...overrides };
 }
 
 // Each setting lives on one Settings tab; open it before reaching the switch.
@@ -20,6 +20,7 @@ const SETTING_TABS: Record<string, string> = {
   "Match drops to crowns": "Balance",
   "Random crown colours": "Cosmetics",
   "Fix death softlock": "Bugfixes",
+  "Fix Blunt weapon skill text": "Bugfixes",
 };
 
 function openSettingTab(name: string) {
@@ -645,16 +646,20 @@ test("a failed background size refresh still opens the disc-error popup", async 
    expect(screen.queryByRole("dialog", { name: "Patching your game" })).toBeNull();
  });
 
-test("only the bug fix starts on; without it a clean disc needs an explicit option, and Crown Drops follows Crown Mod", async () => {
+test("only the bug fixes start on; without them a clean disc needs an explicit option, and Crown Drops follows Crown Mod", async () => {
   render(<App />);
   const user = (await import("@testing-library/user-event")).default;
-  expect(checkedSettings().map((s) => s.closest("label")?.textContent)).toEqual([expect.stringContaining("Fix death softlock")]);
+  expect(checkedSettings().map((s) => s.closest("label")?.textContent)).toEqual([
+    expect.stringContaining("Fix death softlock"), expect.stringContaining("Fix Blunt weapon skill text"),
+  ]);
   expect(querySetting("Match drops to crowns")).toBeNull();
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "Analyzing disc" })).toBeNull());
   await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
   await user.click(setting("Fix death softlock"));
+  expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false);
+  await user.click(setting("Fix Blunt weapon skill text"));
   expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(true);
   await user.click(setting("Crown Mod"));
   expect(screen.getByRole("group", { name: "Crown Mod options" })).toBeTruthy();
@@ -674,6 +679,7 @@ test("randomizer-only patching sends Crown Mod off and becomes disabled when des
   await user.type(screen.getByLabelText("disc path"), "/mock/game.iso");
   await user.tab();
   await user.click(setting("Fix death softlock"));
+  await user.click(setting("Fix Blunt weapon skill text"));
   await user.click(setting("Random enemies"));
   const seed = Number((screen.getByLabelText("Enemy seed") as HTMLInputElement).value);
   await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
@@ -682,7 +688,7 @@ test("randomizer-only patching sends Crown Mod off and becomes disabled when des
   await user.click(setting("Random enemies"));
   await waitFor(() => expect(screen.getByRole("button", { name: "Patch ISO" }).hasAttribute("disabled")).toBe(false));
   await user.click(screen.getByRole("button", { name: "Patch ISO" }));
-  expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, patchSelection({ randomEnemies: true, enemySeed: seed, fixDeathSoftlock: false }));
+  expect(patch).toHaveBeenCalledWith(`/mock/game [CrownMod] [Seed ${seed}].iso`, false, patchSelection({ randomEnemies: true, enemySeed: seed, fixDeathSoftlock: false, fixWeaponSkillText: false }));
 });
 
 test("a modern randomizer-only image restores Crown Mod off", async () => {

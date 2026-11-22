@@ -55,6 +55,7 @@ pub enum Opt {
     CrownDrops,
     RandomCrownColours,
     FixDeathSoftlock,
+    FixWeaponSkillText,
 }
 
 impl Opt {
@@ -69,6 +70,7 @@ impl Opt {
             Opt::CrownDrops => "Match drops to crowns",
             Opt::RandomCrownColours => "Random crown colours",
             Opt::FixDeathSoftlock => "Fix death softlock",
+            Opt::FixWeaponSkillText => "Fix Blunt weapon skill text",
         }
     }
 
@@ -83,6 +85,7 @@ impl Opt {
             Opt::CrownDrops => "Improve enemy drops for the increased difficulty.",
             Opt::RandomCrownColours => "Give every enemy and boss a random crown colour.",
             Opt::FixDeathSoftlock => "Dying before your first death tutorial has played (for example after entering Goblin Fortress early) no longer freezes the game.",
+            Opt::FixWeaponSkillText => "Blunt weapons that say Bash Skill now say Blunt Skill.",
         }
     }
 
@@ -170,6 +173,7 @@ impl App {
             Row::Item(Opt::RandomCrownColours),
             Row::Header("Bugfixes"),
             Row::Item(Opt::FixDeathSoftlock),
+            Row::Item(Opt::FixWeaponSkillText),
         ]);
         rows
     }
@@ -201,6 +205,7 @@ impl App {
             Opt::CrownDrops => s.crown_drops,
             Opt::RandomCrownColours => s.random_crown_colours,
             Opt::FixDeathSoftlock => s.fix_death_softlock,
+            Opt::FixWeaponSkillText => s.fix_weapon_skill_text,
         }
     }
 
@@ -228,6 +233,7 @@ impl App {
             Opt::CrownDrops => s.crown_drops ^= true,
             Opt::RandomCrownColours => s.random_crown_colours ^= true,
             Opt::FixDeathSoftlock => s.fix_death_softlock ^= true,
+            Opt::FixWeaponSkillText => s.fix_weapon_skill_text ^= true,
         }
         self.cursor = self.cursor.min(self.items().len() - 1);
     }

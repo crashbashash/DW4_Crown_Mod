@@ -259,6 +259,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             Some(&final_table),
             plan.solo_buttons,
             plan.fix_death_softlock,
+            plan.fix_weapon_skill_text,
             &mut rebuild,
         )?
     } else {
@@ -274,6 +275,7 @@ pub(crate) fn inspect_retail_planned_for_plan_with_progress(
             Some(&final_table),
             plan.solo_buttons,
             plan.fix_death_softlock,
+            plan.fix_weapon_skill_text,
             &mut rebuild,
         )?
     };

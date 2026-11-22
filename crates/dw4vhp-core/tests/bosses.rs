@@ -22,6 +22,7 @@ fn build_optional_boss_image_through_app_selection() {
         enemy_seed: Some(1520),
         solo_buttons: selected("DW4_APP_TEST_SOLO_BUTTONS"),
         fix_death_softlock: !selected("DW4_APP_TEST_DEATH_FIX_OFF"),
+        fix_weapon_skill_text: !selected("DW4_APP_TEST_WEAPON_TEXT_FIX_OFF"),
     };
     let mut plan = selection.into_plan().unwrap();
     if plan.random_crown_colours {

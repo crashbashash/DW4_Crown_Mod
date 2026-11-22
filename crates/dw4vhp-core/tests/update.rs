@@ -223,6 +223,7 @@ fn check_size_estimates(key: &str) {
         random_crown_colours: true,
         solo_buttons: true,
         fix_death_softlock: true,
+        fix_weapon_skill_text: true,
         ..crown
     };
     let random = PatchSelection {

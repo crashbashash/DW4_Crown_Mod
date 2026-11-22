@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added **Fix Blunt weapon skill text** (Bugfixes, on by default): Dbl Axe, Rage Hammer, Hekatoncheir, Fang Smasher and Meteor Force now say they need Blunt Skill, the skill the game actually checks, instead of Bash Skill. Only the English text had this error; the European English text was already correct.
+
 ## v0.21.0
 
 - Added a terminal version for **Windows 7 and later** (`dw4-crown-mod-v0.21.0-windows7-x86_64.zip`): the same patcher in a console window, for PCs that can't run the desktop app. Unzip it, then double-click `dw4-crown-mod-tui.exe` or drag your disc image onto it. It has every option, and it can load and save the same settings files as the desktop app.

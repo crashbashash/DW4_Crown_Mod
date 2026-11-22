@@ -31,6 +31,7 @@ mod river_mix;
 mod script_hp;
 mod sound;
 mod split_models;
+pub(crate) mod weapon_text;
 pub use random::Options as RandomOptions;
 pub use random::{DONORS as RANDOM_DONORS, RULES_VERSION as RANDOM_RULES_VERSION};
 #[cfg(test)]
