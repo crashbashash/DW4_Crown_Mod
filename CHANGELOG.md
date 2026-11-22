@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.22.0
 
-- Added **Fix Blunt weapon skill text** (Bugfixes, on by default): Dbl Axe, Rage Hammer, Hekatoncheir, Fang Smasher and Meteor Force now say they need Blunt Skill, the skill the game actually checks, instead of Bash Skill. Only the English text had this error; the European English text was already correct.
+- Added **Fix Blunt weapon skill text** (Bugfixes, on by default): Dbl Axe, Rage Hammer, Hekatoncheir, Fang Smasher and Meteor Force now say they need Blunt Skill, the skill the game actually checks, instead of Bash Skill. This fixes an error in the original English text; the European English text was already correct.
 
 ## v0.21.0
 
